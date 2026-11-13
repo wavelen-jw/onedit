@@ -1,0 +1,5 @@
+node_modules/
+.tools/
+output/
+development/core/
+*.tgz

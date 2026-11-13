@@ -1,0 +1,40 @@
+{
+  "name": "onedit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-development.mjs",
+    "typecheck": "node scripts/build-development.mjs --typecheck",
+    "build:development": "node scripts/build-development.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1",
+    "prettier": "3.6.2",
+    "typescript": "6.0.3",
+    "@xmldom/xmldom": "0.9.12"
+  },
+  "engines": {
+    "node": "22.23.1",
+    "npm": "10.9.8"
+  },
+  "packageManager": "npm@10.9.8",
+  "license": "MIT",
+  "description": "Onedit editor source. Fonts and other third-party assets retain separate terms.",
+  "files": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md",
+    "development-runtime.json",
+    "package-lock.json",
+    "build-tools",
+    "index.html",
+    "style.css",
+    "workspace-ui.css",
+    "public",
+    "src",
+    "scripts",
+    "server/report-collector/interfaces.d.ts",
+    "tsconfig.json"
+  ]
+}

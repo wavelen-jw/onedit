@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "scope": "Onedit source snapshot; exact verified Core provisioned separately",
+  "source": "development/core",
+  "files": {
+    "rhwp.d.ts": "4b4399046c937a31109e842d4fbe130f7e3e92b5814221440cde215fbd2b3648",
+    "rhwp.js": "cd0e8fea1b0664b5c672261550ace655cbc5bca58ac9651f64b41a37ef747ac5",
+    "rhwp_bg.wasm": "80bcaac1698aa586b29819c4853355dd2936748c0e564cd09c85f5ca375a84bd",
+    "rhwp_bg.wasm.d.ts": "05b5b11966b0bd2a357730033c014a64324bcc5f0dde69b581267e5abdb650d3"
+  },
+  "rev10FormatSnapshot": {
+    "sha256": "80bcaac1698aa586b29819c4853355dd2936748c0e564cd09c85f5ca375a84bd",
+    "matched4": {
+      "rhwp.d.ts": "4b4399046c937a31109e842d4fbe130f7e3e92b5814221440cde215fbd2b3648",
+      "rhwp.js": "cd0e8fea1b0664b5c672261550ace655cbc5bca58ac9651f64b41a37ef747ac5",
+      "rhwp_bg.wasm": "80bcaac1698aa586b29819c4853355dd2936748c0e564cd09c85f5ca375a84bd",
+      "rhwp_bg.wasm.d.ts": "05b5b11966b0bd2a357730033c014a64324bcc5f0dde69b581267e5abdb650d3"
+    }
+  }
+}

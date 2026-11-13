@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ko" data-workspace-startup="loading">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>온편집</title>
+    <style>
+      /* Keep bootstrap-only source controls out of the first paint, without
+         removing their layout while the current workspace is constructed. */
+      html[data-workspace-startup] body > :not(#workspace-startup),
+      html[data-workspace-startup] body > :not(#workspace-startup) * { visibility: hidden !important; }
+      html[data-workspace-startup] { overflow: hidden; }
+      html[data-workspace-startup] body { overflow: clip; }
+      #workspace-startup { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box; margin: 0; padding: 28px; background: radial-gradient(ellipse at 50% 42%, #fff, #f5f7fa 75%); color: #111827; text-align: center; font: 13px/1.6 "Malgun Gothic", "맑은 고딕", system-ui, sans-serif; }
+      #workspace-startup h1, #workspace-startup p { margin: 0; }
+      #workspace-startup h1 { font-size: 44px; font-weight: 600; line-height: 1.25; letter-spacing: -2.5px; }
+      #workspace-startup .startup-on { color: #185795; font-weight: 800; }
+      #workspace-startup .startup-caption { margin-top: 8px; color: #65758b; font-size: 12px; letter-spacing: .2px; }
+      #workspace-startup .startup-progress { width: 120px; height: 2px; margin: 30px 0 16px; overflow: hidden; border-radius: 2px; background: #e3e9f0; }
+      #workspace-startup .startup-progress span { display: block; width: 32%; height: 100%; border-radius: inherit; background: #185795; animation: startup-sweep 1.6s cubic-bezier(.4, 0, .2, 1) infinite; }
+      #workspace-startup-status { max-width: 28em; color: #65758b; overflow-wrap: anywhere; }
+      #workspace-startup a { display: none; align-items: center; justify-content: center; min-height: 40px; margin-top: 18px; padding: 0 18px; border: 1px solid #d5dfeb; border-radius: 8px; color: #185795; background: #fff; font-weight: 600; text-decoration: none; }
+      #workspace-startup a:hover { background: #f0f5fa; border-color: #aebfd3; }
+      #workspace-startup a:focus-visible { outline: 2px solid #185795; outline-offset: 4px; }
+      html[data-workspace-startup="failed"] #workspace-startup .startup-progress { display: none; }
+      html[data-workspace-startup="failed"] #workspace-startup-status { margin-top: 26px; }
+      html[data-workspace-startup="failed"] #workspace-startup a { display: inline-flex; }
+      #workspace-startup noscript p { max-width: 28em; margin-top: 24px; color: #65758b; }
+      #workspace-startup[hidden] { display: none; }
+      @keyframes startup-sweep { from { transform: translateX(-130%); } to { transform: translateX(420%); } }
+      @media (prefers-reduced-motion: reduce) { #workspace-startup .startup-progress span { width: 100%; animation: none; opacity: .45; } }
+    </style>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="workspace-ui.css" />
+    <link rel="modulepreload" href="src/ui.js" />
+  </head>
+  <body>
+    <section id="workspace-startup" aria-label="편집기 준비">
+      <h1><span class="startup-on">온</span>편집</h1>
+      <p class="startup-caption">한글 문서 편집기</p>
+      <div class="startup-progress" aria-hidden="true"><span></span></div>
+      <p id="workspace-startup-status" role="status" aria-live="polite">문서를 준비하고 있어요</p>
+      <a href="">다시 불러오기</a>
+      <noscript><style>#workspace-startup .startup-progress, #workspace-startup-status { display: none; } #workspace-startup a { display: inline-flex; }</style><p>편집기를 사용하려면 JavaScript를 허용해 주세요.</p></noscript>
+    </section>
+    <header>
+      <div>
+        <strong class="product-brand" aria-label="온편집"><span class="product-name-on">온</span><span class="product-name-edit">편집</span></strong><small>한글 문서 편집기</small>
+      </div>
+      <nav aria-label="문서">
+        <button id="new">새 문서</button
+        ><label class="file"
+          >문서 열기<input id="open" type="file" accept=".hwpx,.hwp" /></label
+        ><button id="save" class="primary">HWPX 저장</button>
+        <button id="save-as" title="다른 이름 저장 (Ctrl+Shift+S)" aria-keyshortcuts="Control+Shift+S Meta+Shift+S">다른 이름 저장</button>
+        <button id="close-document" title="현재 문서를 닫고 빈 작업공간 열기">문서 닫기</button>
+      </nav>
+    </header>
+    <section id="toolbar" aria-label="편집 도구">
+      <button id="undo" title="Ctrl+Z">실행 취소</button
+      ><button id="redo" title="Ctrl+Y">다시 실행</button><i></i
+      ><button id="bold" title="Ctrl+B"><b>B</b></button
+      ><button id="italic" aria-label="기울임"><em>I</em></button
+      ><button id="underline" aria-label="밑줄"><u>U</u></button
+      ><button id="character">글자 모양 <kbd>Alt+L</kbd></button
+      ><button id="paragraph">문단 모양 <kbd>Alt+T</kbd></button><i></i
+      ><button id="inline-table">인라인 표 삽입</button
+      ><button id="table">표 삽입</button
+      ><button data-table="merge">셀 병합</button
+      ><button data-table="split">셀 분할</button
+      ><button data-table="row-add">행 추가</button
+      ><button data-table="row-delete">행 삭제</button
+      ><button data-table="col-add">열 추가</button
+      ><button data-table="col-delete">열 삭제</button
+      ><button id="cell-format">표/셀 속성</button
+      ><button id="table-object">표 객체 선택</button
+      ><button data-resize="0,300">높이 +</button
+      ><button data-resize="0,-300">높이 −</button
+      ><button data-resize="300,0">너비 +</button
+      ><button data-resize="-300,0">너비 −</button>
+    </section>
+    <div class="layout">
+      <aside>
+        <h2>문서 편집</h2>
+        <p>실제 RHWP Core가 문서를 조판하고 저장합니다.</p>
+        <dl>
+          <dt>텍스트 선택</dt>
+          <dd>Shift+방향키 · F3(본문: 2회 낱말 / 3회 문단 / 4회 전체) · 드래그</dd>
+          <dt>셀 블록</dt>
+          <dd>F5 → F5 또는 F3 → 방향키<br />셀 블록에서 F8: 줄 전체 선택<br />F5 세 번: 표 전체 셀</dd>
+          <dt>셀 이동</dt>
+          <dd>Tab / Shift+Tab</dd>
+          <dt>텍스트 커서 이동</dt>
+          <dd>Ctrl+←/→: 본문·셀 텍스트 단어 이동(현재 문단)<br />Ctrl+↑/↓: 같은 본문·셀 안 앞·다음 문단 시작<br />Alt+Home / Alt+End: 현재 문단 처음·끝<br />Alt+Home은 편집 초점에서만 처리하며 Chrome 홈 이동과 겹칩니다(실키 환경 별도 확인).<br />Alt+PageUp / Alt+PageDown: 앞·다음 쪽 처음</dd>
+          <dt>서식</dt>
+          <dd>Ctrl+B · Alt+L · Alt+T</dd>
+        </dl>
+        <p class="note">
+          시험 문서를 사용하세요.<br />Work 및 Windows 한컴 비교는 별도 검증
+          대상입니다.
+        </p>
+      </aside>
+      <main id="viewport" tabindex="-1">
+        <div id="pages" aria-label="문서 페이지"></div>
+        <textarea
+          id="input"
+          aria-label="문서 입력"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+        ></textarea>
+      </main>
+    </div>
+    <footer>
+      <span id="status" role="status">Core 준비 중…</span
+      ><span id="clipboard-status" role="status" aria-live="polite"></span
+      ><span id="table-operation-status" role="status" aria-live="polite" aria-atomic="true"></span
+      ><span id="selection" role="status" aria-live="polite" aria-atomic="true"></span>
+      <span id="font-notice" role="status" aria-live="polite" hidden></span>
+    </footer>
+    <div id="file-notice" aria-label="파일 저장 안내" hidden>
+      <span id="file-status" role="status" aria-live="polite"></span>
+      <button
+        id="download-confirm"
+        hidden
+        title="이번 요청으로 저장한 HWPX 파일을 선택해 이름과 내용을 확인합니다"
+      >
+        저장된 파일 선택·확인
+      </button>
+    </div>
+    <div id="error" role="alert" hidden></div>
+    <dialog id="format" aria-labelledby="format-title" aria-describedby="format-note">
+      <form id="format-form">
+        <h2 id="format-title"></h2>
+        <p id="format-note">
+          변경한 속성만 적용합니다. 혼합 값과 빈 항목은 유지하며, 음영 없음과
+          흰색은 구분됩니다.
+        </p>
+        <div id="fields"></div>
+        <menu>
+          <button type="submit" class="primary">설정</button><button type="button" id="cancel">취소</button>
+        </menu>
+      </form>
+    </dialog>
+    <script type="module" src="src/workspace-startup.js"></script>
+  </body>
+</html>
