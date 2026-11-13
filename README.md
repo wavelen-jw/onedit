@@ -10,6 +10,9 @@
 
 온편집은 **HWP/HWPX 문서를 브라우저에서 열고 편집**할 수 있는 웹 편집기입니다. 독립형으로 실행하거나, 별도 제공되는 **Host SDK**를 통해 문서 초안 생성과 선택 영역 수정·검토·적용을 외부 애플리케이션에 연결할 수 있습니다.
 
+> [!NOTE]
+> **Built on [RHWP](https://github.com/edwardkim/rhwp).** 온편집의 문서 처리 Core는 **Edward Kim 님과 RHWP 기여자들이 공개한 프로젝트**를 기반으로 합니다. 이 중요한 오픈소스 기반을 만들어 공유해 주신 모든 분들께 진심으로 감사드립니다.
+
 > [!IMPORTANT]
 > 현재 공개 버전은 **[v1.0.0-rc2 (Pre-release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)**입니다. HWP/HWPX의 모든 문서·서식 호환성을 보장하지 않으며, 운영 환경의 인증·권한 서비스 또는 TLS 서버는 제공하지 않습니다. 지원 범위는 [SDK 지원표](sdk/SUPPORT_MATRIX.md)를 확인하세요.
 
@@ -121,6 +124,18 @@ npm --prefix sdk test
 | `SHA256SUMS` | 배포 구성요소 체크섬 |
 
 다운로드한 파일의 해시는 [릴리스 안내](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)와 문서 아카이브의 체크섬 정보를 기준으로 확인하세요.
+
+## RHWP 프로젝트에 대한 감사 (Acknowledgements)
+
+온편집은 **[RHWP (edwardkim/rhwp)](https://github.com/edwardkim/rhwp)**를 기반으로 개발되었습니다. HWP/HWPX 문서 형식을 처리하는 기반 기술을 오픈소스로 구현하고 공개한 RHWP의 기여는 온편집의 출발점이자 핵심 토대입니다.
+
+**RHWP의 원 개발자 [Edward Kim](https://github.com/edwardkim) 님과 모든 기여자분들께 깊이 감사드립니다.** 복잡한 문서 처리 기술을 공개하고 발전시켜 주신 덕분에 온편집은 그 위에서 브라우저 편집 환경과 Host SDK 등 새로운 기능을 구현할 수 있었습니다.
+
+온편집에 포함된 Core는 RHWP 원본을 그대로 배포한 것이 아니라, **RHWP를 기반으로 수정한 다운스트림 WebAssembly 빌드**입니다. 원 프로젝트와 온편집의 개발 범위는 구분하며, RHWP의 저작권 및 MIT 라이선스 고지를 존중하고 유지합니다.
+
+- **Upstream:** [edwardkim/rhwp](https://github.com/edwardkim/rhwp)
+- **Core 저작권·라이선스:** [THIRD_PARTY_CORE_NOTICE.md](THIRD_PARTY_CORE_NOTICE.md)
+- **빌드 출처 및 변경된 Core의 관계:** [CORE-BUILD-PROVENANCE.md](CORE-BUILD-PROVENANCE.md)
 
 ## 라이선스
 
