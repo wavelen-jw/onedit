@@ -1,0 +1,14 @@
+{
+  "ai-host-v1/client.d.ts": "7823a4866545c6a78d0c409b36d0525f9a24bc7d060c13f35df52edabbfd2083",
+  "ai-host-v1/client.js": "6740808d5cecf2be363f287f3b4a74062c0b5202be6461af0dd781a33cf8c289",
+  "ai-host-v1/open.d.ts": "df88e5d0dcadc904307bcd0faca7f17d8d7ffe2bf159146b0032b78f21a93654",
+  "ai-host-v1/open.js": "d65dd13ad31cea895b1881ebc1ef2e9a43db83ed13d1fda1f7767b273986dfc0",
+  "ai-host-v1/wire.d.ts": "39558101aa1e5d093f85c579a9e5f03993152a63bcb91e996e3b5d12df29f4cb",
+  "ai-host-v1/wire.js": "49c1683bd829a27df177fff6aea3fba737a75b1e1dadff1aa7ed26533e6a0e07",
+  "ai-integration/contract.d.ts": "915c4068ad8e408a7cb6164676e41abdf239fbe9cd668ab0b1a9fa6eaf4bece5",
+  "ai-integration/contract.js": "edc4588523af7872123bf31194cd8e5ff43398cb020365337bf3ea2cf1c71f3a",
+  "ai-integration/document-spec.d.ts": "db8e4923e2286cf3c05ef867f99c244040f6f460064230018ea5c94596f8a23d",
+  "ai-merged-grid.d.ts": "d4f0dd7844e2ed15820201684b2a05d1df8c80d502b28229c2364a261b44d5a0",
+  "index.d.ts": "3005558708319c869b5ac9f0be6f3f730ade28b4072365a2e28767f43eaa512d",
+  "index.js": "e3442e53ed25c5dae0339aeeff0ebd4b22c86921c1b7f12986c9061eb690f9d4"
+}

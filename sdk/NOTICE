@@ -1,0 +1,10 @@
+Onedit Host SDK RC2
+
+LICENSE is the MIT license copied verbatim from the RHWP Studio Next repository
+(Copyright (c) 2026 RHWP Studio Next contributors). The SDK modules, examples
+and schemas are first-party. No npm dependency code, editor/WebAssembly,
+font, vendor parser or product artwork is redistributed in this archive.
+The fixture pair contains only synthetic contract-test text and table data.
+TypeScript is a build tool; Playwright/Chromium are separately supplied test
+tools. They are not distributed here. A separately supplied editor retains
+its own licensing and asset requirements.

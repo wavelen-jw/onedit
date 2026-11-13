@@ -1,0 +1,47 @@
+{
+  "description": "MIT source workspace for the Onedit Host SDK",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./schema/request.schema.json": "./schema/request.schema.json",
+    "./schema/response.schema.json": "./schema/response.schema.json",
+    "./schema/surface.json": "./schema/surface.json"
+  },
+  "license": "MIT",
+  "name": "onedit-ai-host-sdk",
+  "private": true,
+  "scripts": {
+    "build": "node ../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "test": "node --test tests/contract.test.mjs",
+    "verify:release": "node verify-release-dist.mjs"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "version": "1.0.0-rc2",
+  "files": [
+    "src",
+    "dist",
+    "schema",
+    "tests",
+    "README.md",
+    "API_REFERENCE.md",
+    "SECURITY_NOTES.md",
+    "SUPPORT_MATRIX.md",
+    "QUICKSTART.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE",
+    "sample",
+    "fixtures",
+    "tsconfig.json",
+    "verify-release-dist.mjs",
+    "SDK-DIST-SHA256.json"
+  ]
+}

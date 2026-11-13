@@ -20,4 +20,4 @@ The top-level MIT license applies to Onedit-owned application source. It does no
 
 The full Google Fonts Noto Serif KR copyright and SIL OFL 1.1 text is included at [NotoSerifKR-OFL.txt](public/fonts/NotoSerifKR-OFL.txt). This does not identify the conversion history of the two bundled WOFF2 files.
 
-The separate Host SDK RC2 archive includes its own MIT LICENSE and NOTICE. Its historical package metadata is retained byte-for-byte. The standalone runtime archive includes its own Core, Marked, dependency and font notices. The GitHub source license does not replace any of those terms.
+The separate Host SDK RC2 archive includes its own MIT LICENSE and NOTICE. Its sample manifest is bound to the matching Onedit runtime. The standalone runtime archive includes its own Core, Marked, dependency and font notices. The GitHub source license does not replace any of those terms.

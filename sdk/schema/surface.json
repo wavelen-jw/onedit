@@ -1,0 +1,163 @@
+{
+  "identity": {
+    "source": "bc6b855f2c8d34cb9394f4890168ad184e343a19b0b8fbb050e36cae75ae7ddf",
+    "protocol": "onedit-host",
+    "transportVersion": 2,
+    "apiVersion": "1.0",
+    "contractVersion": "onedit-ai/1.0"
+  },
+  "methods": {
+    "getCapabilities": {
+      "scope": "read",
+      "binding": false,
+      "operationId": false
+    },
+    "getState": {
+      "scope": "read",
+      "binding": false,
+      "operationId": false
+    },
+    "openDocument": {
+      "scope": "lifecycle",
+      "binding": true,
+      "operationId": true
+    },
+    "getLayoutReport": {
+      "scope": "read",
+      "binding": true,
+      "operationId": false
+    },
+    "listTemplates": {
+      "scope": "read",
+      "binding": false,
+      "operationId": false
+    },
+    "getStyleCatalog": {
+      "scope": "read",
+      "binding": false,
+      "operationId": false
+    },
+    "prepareDocument": {
+      "scope": "lifecycle",
+      "binding": true,
+      "operationId": false
+    },
+    "commitPreparedDocument": {
+      "scope": "lifecycle",
+      "binding": true,
+      "operationId": true
+    },
+    "captureSelection": {
+      "scope": "read",
+      "binding": true,
+      "operationId": false
+    },
+    "readSelection": {
+      "scope": "read",
+      "binding": true,
+      "operationId": false
+    },
+    "previewEdits": {
+      "scope": "edit",
+      "binding": true,
+      "operationId": false
+    },
+    "applyProposal": {
+      "scope": "edit",
+      "binding": true,
+      "operationId": true
+    },
+    "discardProposal": {
+      "scope": "edit",
+      "binding": true,
+      "operationId": false
+    },
+    "releaseSnapshot": {
+      "scope": "read",
+      "binding": true,
+      "operationId": false
+    },
+    "getOperation": {
+      "scope": "read",
+      "binding": false,
+      "operationId": false
+    },
+    "cancelOperation": {
+      "scope": "edit",
+      "binding": false,
+      "operationId": false
+    },
+    "undo": {
+      "scope": "edit",
+      "binding": true,
+      "operationId": false
+    },
+    "redo": {
+      "scope": "edit",
+      "binding": true,
+      "operationId": false
+    },
+    "exportDocument": {
+      "scope": "save",
+      "binding": true,
+      "operationId": false
+    },
+    "acknowledgeSave": {
+      "scope": "save",
+      "binding": true,
+      "operationId": false
+    }
+  },
+  "limits": {
+    "jsonBytes": 2097152,
+    "fileBytes": 31457280,
+    "characters": 20000,
+    "blocks": 200,
+    "tables": 20,
+    "cells": 1000,
+    "columns": 12,
+    "selection": 4000,
+    "context": 500,
+    "snapshotMs": 300000,
+    "proposalMs": 180000,
+    "draftMs": 600000,
+    "writers": 1,
+    "queue": 3,
+    "receipts": 128
+  },
+  "errorCodes": [
+    "UNSUPPORTED_CONTRACT",
+    "UNSUPPORTED_CAPABILITY",
+    "ORIGIN_NOT_ALLOWED",
+    "PERMISSION_DENIED",
+    "NO_SELECTION",
+    "COMPOSITION_IN_PROGRESS",
+    "UNSUPPORTED_SELECTION",
+    "MIXED_FORMAT_UNSUPPORTED",
+    "CONTENT_LIMIT_EXCEEDED",
+    "INVALID_SPEC",
+    "STALE_DOCUMENT",
+    "SOURCE_MISMATCH",
+    "PREVIEW_EXPIRED",
+    "APPROVAL_REQUIRED",
+    "INVALID_APPROVAL",
+    "IDEMPOTENCY_CONFLICT",
+    "UNSAVED_CHANGES",
+    "TRANSACTION_ROLLED_BACK",
+    "RECOVERY_REQUIRED",
+    "SAVE_CONFLICT",
+    "UNSUPPORTED_EXPORT_FORMAT",
+    "UNDO_NOT_LATEST",
+    "ALREADY_COMMITTED",
+    "OPERATION_NOT_FOUND",
+    "BUSY",
+    "INVALID_REQUEST",
+    "SESSION_CLOSED",
+    "OPERATION_CANCELLED",
+    "TIMEOUT",
+    "UNSUPPORTED_UNSAFE_FILE",
+    "FORMAT_MISMATCH",
+    "DUPLICATE_DOCUMENT",
+    "OUTCOME_UNKNOWN"
+  ]
+}
