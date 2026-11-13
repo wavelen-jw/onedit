@@ -12,6 +12,8 @@
 
 > [!NOTE]
 > **Built on [RHWP](https://github.com/edwardkim/rhwp).** 온편집의 문서 처리 Core는 **Edward Kim 님과 RHWP 기여자들이 공개한 프로젝트**를 기반으로 합니다. 이 중요한 오픈소스 기반을 만들어 공유해 주신 모든 분들께 진심으로 감사드립니다.
+>
+> **RHWP 원본 GitHub:** <https://github.com/edwardkim/rhwp>
 
 > [!IMPORTANT]
 > 현재 공개 버전은 **[v1.0.0-rc2 (Pre-release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)**입니다. HWP/HWPX의 모든 문서·서식 호환성을 보장하지 않으며, 운영 환경의 인증·권한 서비스 또는 TLS 서버는 제공하지 않습니다. 지원 범위는 [SDK 지원표](sdk/SUPPORT_MATRIX.md)를 확인하세요.
@@ -133,7 +135,7 @@ npm --prefix sdk test
 
 온편집에 포함된 Core는 RHWP 원본을 그대로 배포한 것이 아니라, **RHWP를 기반으로 수정한 다운스트림 WebAssembly 빌드**입니다. 원 프로젝트와 온편집의 개발 범위는 구분하며, RHWP의 저작권 및 MIT 라이선스 고지를 존중하고 유지합니다.
 
-- **Upstream:** [edwardkim/rhwp](https://github.com/edwardkim/rhwp)
+- **RHWP 원본 프로젝트:** <https://github.com/edwardkim/rhwp>
 - **Core 저작권·라이선스:** [THIRD_PARTY_CORE_NOTICE.md](THIRD_PARTY_CORE_NOTICE.md)
 - **빌드 출처 및 변경된 Core의 관계:** [CORE-BUILD-PROVENANCE.md](CORE-BUILD-PROVENANCE.md)
 
