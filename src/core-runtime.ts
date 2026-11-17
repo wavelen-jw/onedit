@@ -9,7 +9,7 @@ import { verifiedAssetBytes } from './verified-asset-cache.js';
 import {startupNow,startupStage} from './startup-timing.js';
 
 import { isB338OwnerTrialDigest } from "./b338-focused-owner-trial.js";
-import { checkedOpenCoreSha256 } from "./ai-checked-open-binding.js";
+import { hasReviewedCheckedOpenCore } from "./ai-checked-open-binding.js";
 import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
 export const coreRuntimeSha256 = rootEditorCoreSha256;
 type Identity = Readonly<{ sha256: string }>;
@@ -195,7 +195,7 @@ export async function loadCoreRuntime() {
   const enrollFence = window.parent === window
     ? installCursorMemoFence(api.HwpDocument.prototype, 'observe', observeTableTrackCaret) : undefined;
   const ctor = api.HwpDocument;
-  const openExternal = sha256 === checkedOpenCoreSha256 && typeof ctor.openExternalDocument === 'function'
+  const openExternal = hasReviewedCheckedOpenCore(sha256) && typeof ctor.openExternalDocument === 'function'
     ? ctor.openExternalDocument.bind(ctor) : undefined;
   const bind = (doc: HwpDocument) => {
     try {

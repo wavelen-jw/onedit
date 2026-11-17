@@ -6,7 +6,7 @@
 
 ```sh
 npm init -y
-npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc3.tgz
+npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc4.tgz
 SDK=node_modules/onedit-ai-host-sdk
 node "$SDK/tests/contract.test.mjs"
 node "$SDK/sample/stage-editor.mjs" /path/to/authorized-onedit-runtime ./editor

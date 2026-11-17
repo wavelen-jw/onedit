@@ -287,7 +287,7 @@ export class AIService {
    const open=this.openFormats();
    return {contractVersion,methods:Object.keys(methods).filter(k=>(k!=='openDocument'||open.length>0)&&this.permissions.includes(methods[k as Method])),
     formats:{open,export:this.openFeature&&this.openedSource()?.scope==='readonly'?[]:['hwpx']},
-    ...(this.openFeature?{openPolicy:{availability:open.length?'guarded':'unavailable',scopes:open.length?(this.permissions.includes('edit')?['edit','readonly']:['readonly']):[],editRequiresCheckedExport:true,hwpOverwrite:false}}:{}),selection:'one uniform text range in body or unmerged top-level table cell',limits,
+    ...(this.openFeature?{openPolicy:{availability:open.length?'guarded':'unavailable',scopes:open.length?(this.permissions.includes('edit')?['edit','readonly']:['readonly']):[],editRequiresCheckedExport:true,hwpOverwrite:false}}:{}),selection:'continuous text in one body or top-level cell (including merged cells); uniform selected character style; preserve paragraph count with LF',limits,
     notes:['HWP original write and SWP unavailable','Exact local-font registration and native Hancom roundtrip not certified']};
   }
   need(isBinding(e.binding),'INVALID_REQUEST','문서 바인딩이 필요합니다.');

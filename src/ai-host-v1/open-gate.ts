@@ -5,7 +5,10 @@ import type {HostOpenGate} from './open.js';
 // No origin can opt into native admission without an actually loaded,
 // source-reviewed, hash-bound B gate. There is no ordinary parser fallback.
 export function configuredHostOpenGate(source:HwpDocument):HostOpenGate|undefined{
- if(!['127.0.0.1','localhost','[::1]'].includes(location.hostname)||!hasCheckedExternalOpen(source))return;
+ const loopback=['127.0.0.1','localhost','[::1]'].includes(location.hostname);
+ const optIn=document.querySelector<HTMLMetaElement>('meta[name="onedit-host-checked-open"]');
+ const sameOriginHttps=location.protocol==='https:'&&optIn?.content===location.origin;
+ if((!loopback&&!sameOriginHttps)||!hasCheckedExternalOpen(source))return;
  return {
   formats:['hwp','hwpx'],
   async inspect(current,bytes,format){return {format,document:checkedExternalSibling(current,new Uint8Array(bytes),format)}},

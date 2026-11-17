@@ -3,16 +3,16 @@
 **브라우저 기반 HWP/HWPX 문서 편집기 · JavaScript/TypeScript Host SDK**  
 *Browser-based Korean document editor with an embeddable Host SDK.*
 
-[![Release](https://img.shields.io/github/v/release/wavelen-jw/onedit?include_prereleases&label=release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)
+[![Release](https://img.shields.io/github/v/release/wavelen-jw/onedit?include_prereleases&label=release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc4)
 [![License: MIT](https://img.shields.io/badge/source%20license-MIT-blue)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](BUILDING-PUBLIC.md)
 
 온편집은 웹브라우저에서 **HWP5/HWPX 문서를 열고, 편집한 결과를 HWPX로 저장**할 수 있는 프로젝트입니다. 독립 실행형 편집기와 외부 서비스에 연결할 수 있는 Host SDK를 제공합니다.
 
-**[온라인 편집기](https://edit.govpress.cloud/) · [AI 연동 데모](https://edit.govpress.cloud/ai) · [v1.0.0-rc3 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3) · [SDK 문서](sdk/QUICKSTART.md)**
+**[온라인 편집기](https://edit.govpress.cloud/) · [AI 연동 데모](https://edit.govpress.cloud/ai) · [v1.0.0-rc4 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc4) · [SDK 문서](sdk/QUICKSTART.md)**
 
 > [!IMPORTANT]
-> **v1.0.0-rc3은 Pre-release입니다.** 일부 HWP/HWPX 구조에 대한 편집·변환을 지원하며, 모든 문서의 서식·조판 동일성을 보장하지 않습니다. 공개 배포본에는 **운영용 AI 모델 API, 인증 서버, 비밀키 또는 TLS 서비스**가 포함되지 않습니다.
+> **v1.0.0-rc4는 Pre-release입니다.** 일부 HWP/HWPX 구조에 대한 편집·변환을 지원하며, 모든 문서의 서식·조판 동일성을 보장하지 않습니다. 공개 배포본에는 **운영용 AI 모델 API, 인증 서버, 비밀키 또는 TLS 서비스**가 포함되지 않습니다.
 
 ## 주요 기능
 
@@ -31,11 +31,11 @@
 
 **요구 환경:** Node.js 22 이상(릴리스 검증 환경: Node.js 22.23.1), Chromium 계열 브라우저 권장.
 
-[GitHub Releases](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)에서 독립 실행 패키지를 내려받습니다.
+[GitHub Releases](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc4)에서 독립 실행 패키지를 내려받습니다.
 
 ```bash
-curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc3/onedit-browser-runtime.tar.gz
-curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc3/SHA256SUMS
+curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc4/onedit-browser-runtime.tar.gz
+curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc4/SHA256SUMS
 
 # 다운로드한 파일의 체크섬 확인 (GNU coreutils)
 sha256sum --check --ignore-missing SHA256SUMS
@@ -55,8 +55,8 @@ node start-ai-editor.mjs 4173
 Host SDK는 별도 npm 레지스트리가 아닌 **이 저장소의 릴리스 설치 파일**로 배포합니다.
 
 ```bash
-curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc3/onedit-ai-host-sdk-1.0.0-rc3.tgz
-npm install --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc3.tgz
+curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc4/onedit-ai-host-sdk-1.0.0-rc4.tgz
+npm install --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc4.tgz
 ```
 
 ```ts
@@ -73,7 +73,7 @@ const capabilities = await client.request("getCapabilities", {});
 console.log(capabilities.methods);
 ```
 
-SDK의 문서 생성 흐름은 **`prepareDocument` → 미리보기·사용자 승인 → `commitPreparedDocument` → `exportDocument`** 입니다. 선택 영역 수정은 `captureSelection`·`readSelection`, 수정안 미리보기 및 `applyProposal`을 사용합니다.
+SDK의 문서 생성 흐름은 **`prepareDocument` → 미리보기·사용자 승인 → `commitPreparedDocument` → `exportDocument`** 입니다. 선택 영역 수정은 `captureSelection`·`readSelection`, 수정안 미리보기 및 `applyProposal`을 사용합니다. 연속 본문 문단이나 하나의 일반·병합 셀 안의 연속 문단을 수정할 수 있으며, 선택 범위의 글자 서식과 문단 수를 유지해야 합니다.
 
 SDK는 편집기 iframe이나 사용자를 자동으로 인증하지 않습니다. 실제 서비스에서 연결하려면 정확한 **부모 origin, CSP, session proof 및 권한 정책**을 구성해야 합니다.
 
@@ -90,7 +90,7 @@ SDK는 편집기 iframe이나 사용자를 자동으로 인증하지 않습니�
 
 1. **내용 작성:** 사용자의 목적·목차·분량·표 조건을 반영하여 1차 원고 생성
 2. **서식 정리:** 별도 AI 단계에서 공공보고서 형식의 GFM 원고로 정리
-3. **내용 보존 확인:** 수치·핵심 의미 변경 위험이 확인되면 완료로 처리하지 않고 1차 원고를 보존
+3. **결과 확인:** 두 번째 응답을 미리보기에서 검토. 서식 정리 단계가 실패하면 1차 원고가 문서에 자동 적용되지는 않음
 4. **문서 적용:** SDK 미리보기 → 사용자 명시적 승인 → 편집 → HWPX 저장
 
 선택 문장을 AI로 다시 작성하는 흐름은 보고서 전체 생성과 구분되며, **선택 영역만 미리보기·승인 후 수정**합니다.
@@ -127,7 +127,7 @@ SDK는 편집기 iframe이나 사용자를 자동으로 인증하지 않습니�
 | --- | --- |
 | HWP5·HWPX 입력 | 검증된 본문·일반 표 등 **일부 구조** |
 | HWPX 출력 | 지원 구조의 새 HWPX 파일 생성 |
-| 선택 영역 수정 | 지원되는 단일 문단·일반 셀의 일부 등 제한된 범위 |
+| 선택 영역 수정 | 연속 본문 문단, 일반·병합 셀 하나 안의 연속 문단. 선택 내 문자 서식과 문단 수 유지 조건 적용 |
 | 원본 HWP 재저장 | **미지원** — 원본 HWP를 덮어쓰지 않음 |
 | SWP 출력 | **미지원** |
 | 복잡 문서 | 병합·중첩 구조, 암호·DRM, 개체와 복잡 조판의 완전 호환성 미보장 |
@@ -152,19 +152,19 @@ npm --prefix sdk test
 
 자세한 내용: [빌드 가이드](BUILDING-PUBLIC.md) · [Core 바이너리 출처](CORE-BUILD-PROVENANCE.md)
 
-## 배포 파일 — v1.0.0-rc3
+## 배포 파일 — v1.0.0-rc4
 
 | 파일 | 용도 |
 | --- | --- |
 | `onedit-browser-runtime.tar.gz` | 실행형 편집기·Core WASM·브라우저 자산 |
 | `onedit-app-source.tar.gz` | 공개 App 소스 |
-| `onedit-ai-host-sdk-1.0.0-rc3.tgz` | Host SDK 설치 패키지 |
+| `onedit-ai-host-sdk-1.0.0-rc4.tgz` | Host SDK 설치 패키지 |
 | `onedit-core-binary.tar.gz` | Core 바이너리·바인딩 및 고지 |
 | `onedit-release-documentation.tar.gz` | 빌드·출처·라이선스 문서 |
 | `RELEASE-NOTES.md` | 버전 변경 사항 |
 | `SHA256SUMS` | 배포 파일 체크섬 |
 
-**[v1.0.0-rc3 릴리스 및 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)**
+**[v1.0.0-rc4 릴리스 및 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc4)**
 
 ## RHWP에 대한 감사
 
@@ -192,4 +192,4 @@ RHWP의 공개 Core 덕분에 온편집은 웹 문서 편집 환경과 외부 �
 
 ---
 
-[릴리스](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3) · [SDK API](sdk/API_REFERENCE.md) · [빌드](BUILDING-PUBLIC.md) · [라이선스](LICENSE)
+[릴리스](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc4) · [SDK API](sdk/API_REFERENCE.md) · [빌드](BUILDING-PUBLIC.md) · [라이선스](LICENSE)

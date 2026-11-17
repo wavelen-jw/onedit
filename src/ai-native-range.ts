@@ -2,7 +2,10 @@ import { digest, limits } from "./ai-integration/contract.js";
 import { RhwpAdapter } from "./adapter.js";
 import { siblingDocument } from "./core-runtime.js";
 import { applyFontEnvironment } from "./font-provider.js";
-import { assertMarkdownSafety, existingHwpxLayoutProof } from "./markdown-compose.js";
+import {
+  assertMarkdownSafety,
+  existingHwpxLayoutProof,
+} from "./markdown-compose.js";
 import { assertSafeHwpxEntryNames } from "./hwpx-open-boundary.js";
 import { Interaction } from "./interaction.js";
 import {
@@ -10,6 +13,8 @@ import {
   nested,
   paraIndex,
   sameContainer,
+  ordered,
+  withPara,
   type Position,
   type Selection,
 } from "./model.js";
@@ -48,7 +53,8 @@ type Range = {
   nativeOwner: unknown;
   semanticControl: number | undefined;
 };
-type SealedRange = Range & {
+type CapturedRange = Range & { segments?: Range[] };
+type SealedRange = CapturedRange & {
   doc: RhwpAdapter["doc"];
   rangeId: string;
   sourceHash: string;
@@ -117,7 +123,8 @@ function rootTableControls(
     ),
   ].sort((x, y) => x - y);
 }
-function effectiveProperties(v: unknown) {
+function effectiveProperties(v: unknown): unknown {
+  if ((v as any).segments) return (v as any).segments.map(effectiveProperties);
   const strip = ({
     charShapeId,
     paraShapeId,
@@ -130,7 +137,7 @@ function effectiveProperties(v: unknown) {
   };
   return { character: strip(r.character), paragraph: strip(r.paragraph) };
 }
-function inspect(a: RhwpAdapter, selection: Selection): Range {
+function inspectParagraph(a: RhwpAdapter, selection: Selection): Range {
   editable(a);
   need(selection.kind !== "caret", "NO_SELECTION");
   need(selection.kind === "text", "UNSUPPORTED_RANGE", selection.kind);
@@ -179,12 +186,16 @@ function inspect(a: RhwpAdapter, selection: Selection): Range {
       start.cell,
     );
     need(
-      list.rowSpan === 1 &&
-        list.colSpan === 1 &&
-        info.rowSpan === 1 &&
-        info.colSpan === 1,
+      info.row === list.row &&
+        info.col === list.col &&
+        Number.isSafeInteger(info.rowSpan) &&
+        info.rowSpan >= 1 &&
+        Number.isSafeInteger(info.colSpan) &&
+        info.colSpan >= 1 &&
+        list.rowSpan === info.rowSpan &&
+        list.colSpan === info.colSpan,
       "UNSUPPORTED_RANGE",
-      "MERGED_CELL",
+      "CELL_SPAN_CONFLICT",
     );
     const own = a.cellProps(start);
     need(own.cellProtect === false, "READ_ONLY", "PROTECTED_CELL");
@@ -286,7 +297,7 @@ function inspect(a: RhwpAdapter, selection: Selection): Range {
           scalarStart,
           scalarEnd,
         );
-  need(runs.length === 1, "MIXED_FORMAT_UNSUPPORTED");
+  need(runs.length === 1, "UNSUPPORTED_RANGE", "MIXED_CHARACTER_STYLES");
   const run = runs[0];
   need(
     run.startOffset === scalarStart &&
@@ -311,6 +322,93 @@ function inspect(a: RhwpAdapter, selection: Selection): Range {
     nativeOwner,
     semanticControl,
   };
+}
+
+/** Continuous text in one native body/cell owner. Paragraph boundaries are
+ * immutable: each replacement line maps to one sealed paragraph. No text search,
+ * cross-cell addressing or implicit formatting reconstruction is permitted. */
+function inspect(a: RhwpAdapter, selection: Selection): CapturedRange {
+  editable(a);
+  need(selection.kind !== "caret", "NO_SELECTION");
+  need(selection.kind === "text", "UNSUPPORTED_RANGE");
+  need(
+    sameContainer(selection.anchor, selection.focus),
+    "UNSUPPORTED_RANGE",
+    "MULTIPLE_OWNERS",
+  );
+  const [start, end] = ordered(selection.anchor, selection.focus);
+  if (paraIndex(start) === paraIndex(end))
+    return inspectParagraph(a, selection);
+  need(paraIndex(end) - paraIndex(start) < 64, "CONTENT_LIMIT_EXCEEDED");
+  const segments: Range[] = [];
+  for (let n = paraIndex(start); n <= paraIndex(end); n++) {
+    const at = withPara(start, n);
+    const from = { ...at, offset: n === paraIndex(start) ? start.offset : 0 };
+    const to = {
+      ...at,
+      offset: n === paraIndex(end) ? end.offset : a.length(at),
+    };
+    // Empty boundary paragraphs require a separate native format proof.
+    need(
+      from.offset !== to.offset,
+      "UNSUPPORTED_RANGE",
+      "EMPTY_PARAGRAPH_SEGMENT",
+    );
+    segments.push(
+      inspectParagraph(a, { kind: "text", anchor: from, focus: to }),
+    );
+  }
+  const first = segments[0],
+    last = segments.at(-1)!;
+  const text = segments.map((p) => p.text).join("\n");
+  const paragraph = segments.map((p) => p.paragraph).join("\n");
+  need(
+    [...text].length <= limits.selection && paragraph.length <= 200_000,
+    "CONTENT_LIMIT_EXCEEDED",
+  );
+  need(
+    segments.every((p) =>
+      equal(
+        (effectiveProperties(p.properties) as any).character,
+        (effectiveProperties(first.properties) as any).character,
+      ),
+    ),
+    "UNSUPPORTED_RANGE",
+    "MIXED_CHARACTER_STYLES",
+  );
+  return {
+    ...first,
+    end: copy(end),
+    text,
+    paragraph,
+    scalarEnd:
+      [...paragraph].length - ([...last.paragraph].length - last.scalarEnd),
+    properties: {
+      ...(first.properties as object),
+      segments: segments.map((p) => p.properties),
+    },
+    segments,
+  };
+}
+function replacementParts(r: CapturedRange, replacement: string) {
+  need(
+    typeof replacement === "string" &&
+      !forbidden.test(replacement.replaceAll("\n", "")),
+    "INVALID_REPLACEMENT",
+  );
+  need([...replacement].length <= limits.selection, "CONTENT_LIMIT_EXCEEDED");
+  const ranges = r.segments ?? [r],
+    parts = replacement.split("\n");
+  need(
+    parts.length === ranges.length,
+    "UNSUPPORTED_RANGE",
+    "PARAGRAPH_COUNT_CHANGE",
+  );
+  return ranges.map((range, n) => ({
+    range,
+    replacement: parts[n],
+    expected: replaced(range, parts[n]),
+  }));
 }
 
 function replaced(r: Range, replacement: string) {
@@ -523,6 +621,12 @@ export class AiNativeRange {
     // For supported text, resolve the Interaction-owned native selection
     // reference before sealing the range. No focus/DOM dependence thereafter.
     const s = this.editor.selection;
+    if (s.kind === "text")
+      need(
+        sameContainer(s.anchor, s.focus),
+        "UNSUPPORTED_RANGE",
+        "MULTIPLE_OWNERS",
+      );
     const selection =
       s.kind === "text" && !nested(s.focus) && !nested(s.anchor)
         ? this.editor.capture().selection
@@ -557,11 +661,14 @@ export class AiNativeRange {
       formatDigest,
       targetId,
       format: range.properties,
+      paragraph: range.paragraph,
+      start: range.scalarStart,
+      end: range.scalarEnd,
     });
   }
   preview(rangeId: string, replacement: string) {
     const r = this.#get(rangeId);
-    replaced(r, replacement);
+    replacementParts(r, replacement);
     const preview = Object.freeze({
       rangeId,
       replacement,
@@ -580,8 +687,10 @@ export class AiNativeRange {
   previewDetached(rangeId: string, replacement: string, existingHwpx = false) {
     const r = this.#get(rangeId),
       live = this.editor.adapter;
-    replaced(r, replacement);
-    const existingLayout = existingHwpx ? existingHwpxLayoutProof(live) : undefined;
+    replacementParts(r, replacement);
+    const existingLayout = existingHwpx
+      ? existingHwpxLayoutProof(live)
+      : undefined;
     const bytes = live.exportChecked().bytes;
     const doc = siblingDocument(live.doc, bytes);
     let editor: Interaction | undefined;
@@ -595,7 +704,8 @@ export class AiNativeRange {
         "PRESERVATION_FAILED",
         "DETACHED_SOURCE_LAYOUT",
       );
-      if (existingLayout !== undefined) verifyExistingHwpxLayout(a, existingLayout);
+      if (existingLayout !== undefined)
+        verifyExistingHwpxLayout(a, existingLayout);
       let start = r.start,
         end = r.end;
       if (start.kind === "cell") {
@@ -648,7 +758,8 @@ export class AiNativeRange {
         layout,
       });
       this.#intents.add(preview);
-      if (existingLayout !== undefined) this.#existingLayouts.set(preview, existingLayout);
+      if (existingLayout !== undefined)
+        this.#existingLayouts.set(preview, existingLayout);
       return preview;
     } finally {
       try {
@@ -673,8 +784,7 @@ export class AiNativeRange {
       ...baseline
     } = r;
     need(equal(current, baseline), "TARGET_CONFLICT");
-    const expected = replaced(r, intent.replacement),
-      size = Array.from(intent.replacement).length;
+    const parts = replacementParts(r, intent.replacement);
     const receipt = (committed: boolean, end: Position): Receipt => ({
       committed,
       before: r.version,
@@ -690,7 +800,8 @@ export class AiNativeRange {
     documentWriters.add(doc);
     try {
       const existingLayout = this.#existingLayouts.get(intent);
-      if (existingLayout !== undefined) verifyExistingHwpxLayout(a, existingLayout);
+      if (existingLayout !== undefined)
+        verifyExistingHwpxLayout(a, existingLayout);
       const pre = a.exportChecked(),
         original = members(pre.bytes, r.start.sec),
         before = a.semantic();
@@ -711,71 +822,79 @@ export class AiNativeRange {
           selection,
           () => {
             attempted = true;
-            a.remove(r.start, r.end);
-            const end = size ? a.insert(r.start, intent.replacement) : r.start;
-            need(
-              end.offset === r.start.offset + size,
-              "PRESERVATION_FAILED",
-              "ENDPOINT",
-            );
-            if (size) {
-              const p = r.start;
-              if (p.kind === "body")
-                a.call(
-                  "setCharShapeId",
-                  p.sec,
-                  p.para,
-                  r.scalarStart,
-                  r.scalarStart + size,
-                  r.charShapeId,
-                );
-              else
-                a.call(
-                  "setCharShapeIdInCell",
-                  p.sec,
-                  p.para,
-                  p.control,
-                  p.cell,
-                  p.cellPara,
-                  r.scalarStart,
-                  r.scalarStart + size,
-                  r.charShapeId,
-                );
-              const formatted: any[] =
-                p.kind === "body"
-                  ? a.call(
-                      "getCharShapeRuns",
-                      p.sec,
-                      p.para,
-                      r.scalarStart,
-                      r.scalarStart + size,
-                    )
-                  : a.call(
-                      "getCharShapeRunsInCellByPath",
-                      p.sec,
-                      p.para,
-                      a.path(p),
-                      r.scalarStart,
-                      r.scalarStart + size,
-                    );
+            let end = r.end;
+            for (const { range: segment, replacement, expected } of parts) {
+              const r = segment,
+                size = [...replacement].length;
+              const beforeStep = a.semantic();
+              a.remove(r.start, r.end);
+              end = size ? a.insert(r.start, replacement) : r.start;
               need(
-                formatted.length === 1 &&
-                  formatted[0].startOffset === r.scalarStart &&
-                  formatted[0].endOffset === r.scalarStart + size &&
-                  formatted[0].charShapeId === r.charShapeId,
+                end.offset === r.start.offset + size,
                 "PRESERVATION_FAILED",
-                "TARGET_FORMAT",
+                "ENDPOINT",
               );
+              if (size) {
+                const p = r.start;
+                if (p.kind === "body")
+                  a.call(
+                    "setCharShapeId",
+                    p.sec,
+                    p.para,
+                    r.scalarStart,
+                    r.scalarStart + size,
+                    r.charShapeId,
+                  );
+                else
+                  a.call(
+                    "setCharShapeIdInCell",
+                    p.sec,
+                    p.para,
+                    p.control,
+                    p.cell,
+                    p.cellPara,
+                    r.scalarStart,
+                    r.scalarStart + size,
+                    r.charShapeId,
+                  );
+                const formatted: any[] =
+                  p.kind === "body"
+                    ? a.call(
+                        "getCharShapeRuns",
+                        p.sec,
+                        p.para,
+                        r.scalarStart,
+                        r.scalarStart + size,
+                      )
+                    : a.call(
+                        "getCharShapeRunsInCellByPath",
+                        p.sec,
+                        p.para,
+                        a.path(p),
+                        r.scalarStart,
+                        r.scalarStart + size,
+                      );
+                need(
+                  formatted.length === 1 &&
+                    formatted[0].startOffset === r.scalarStart &&
+                    formatted[0].endOffset === r.scalarStart + size &&
+                    formatted[0].charShapeId === r.charShapeId,
+                  "PRESERVATION_FAILED",
+                  "TARGET_FORMAT",
+                );
+              }
+              compareMutation(beforeStep, a.semantic(), r, expected, size);
             }
-            compareMutation(before, a.semantic(), r, expected, size);
             if (r.start.kind === "cell")
               need(
                 equal(originalCellFrames, a.cells(r.start)),
                 "PRESERVATION_FAILED",
                 "CELL_FRAMES",
               );
-            verifyLayout(a, r.start, expected);
-            if (existingLayout !== undefined) verifyExistingHwpxLayout(a, existingLayout);
+            for (const part of parts)
+              verifyLayout(a, part.range.start, part.expected);
+            if (existingLayout !== undefined)
+              verifyExistingHwpxLayout(a, existingLayout);
             preserveMembers(
               original,
               members(a.exportChecked().bytes, r.start.sec),
@@ -833,7 +952,11 @@ export class AiNativeRange {
 }
 
 function verifyExistingHwpxLayout(a: RhwpAdapter, proof: string) {
-  need(existingHwpxLayoutProof(a) === proof, "PRESERVATION_FAILED", "DECORATION_LAYOUT");
+  need(
+    existingHwpxLayoutProof(a) === proof,
+    "PRESERVATION_FAILED",
+    "DECORATION_LAYOUT",
+  );
 }
 
 // Native layout is allowed to repaginate. Check actual run ownership/coverage
