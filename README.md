@@ -14,6 +14,14 @@
 > [!IMPORTANT]
 > **v1.0.0-rc4는 Pre-release입니다.** 일부 HWP/HWPX 구조에 대한 편집·변환을 지원하며, 모든 문서의 서식·조판 동일성을 보장하지 않습니다. 공개 배포본에는 **운영용 AI 모델 API, 인증 서버, 비밀키 또는 TLS 서비스**가 포함되지 않습니다.
 
+## RC4에서 달라진 점
+
+- SDK로 HWPX 파일을 열어 편집하고, 새 HWPX로 내보낸 뒤 다시 열 수 있습니다. 형식이나 내부 구조 검사에서 거절된 파일은 현재 문서를 바꾸지 않습니다.
+- 연속된 본문 문단 또는 하나의 일반·병합 셀 안에 있는 연속 문단을 선택해 수정할 수 있습니다. 선택 안의 글자 서식은 같아야 하고, 수정 전후 문단 수는 같아야 합니다. 미리보기 단계에서는 원본이 유지되며 적용 한 번은 한 번의 Undo/Redo 단위입니다.
+- 공개 SDK의 20개 메서드·8개 이벤트와 `onedit-host` 전송 2 / API 1.0 계약은 유지했습니다.
+
+[공개 RC4 실행 패키지](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc4), [온라인 편집기](https://edit.govpress.cloud/), [호스팅 AI 데모](https://edit.govpress.cloud/ai/)는 별도로 제공됩니다. 위 SDK 기능은 검증된 실행 패키지와 허용된 iframe 통합에서 사용할 수 있습니다.
+
 ## 주요 기능
 
 | 영역 | 제공 기능 |
@@ -22,7 +30,7 @@
 | 문서 편집 | 본문·일반 표/셀 편집, 선택·서식 조정, 실행 취소/다시 실행 |
 | 문서 생성 | Markdown(GFM의 지원 구조)·DocumentSpec 기반 초안 생성 및 검토 |
 | 문서 내보내기 | **HWPX**로 다운로드, 파일 무결성 및 재열기 확인 |
-| Host SDK | 문서 준비·미리보기·명시적 적용, 선택 영역 수정, HWPX 내보내기 |
+| Host SDK | 검사를 거친 문서 열기, 초안 생성, 선택 수정안 미리보기·승인·적용, HWPX 내보내기 |
 | 독립 실행 | 브라우저 자산과 Core WebAssembly를 포함하는 로컬 실행 패키지 |
 
 공개 SDK는 **20개 메서드·8개 이벤트**의 v1 인터페이스를 제공합니다. 문서 생성·선택 수정의 상세 지원 조건은 [API Reference](sdk/API_REFERENCE.md)와 [지원 범위](sdk/SUPPORT_MATRIX.md)를 확인하세요.
@@ -73,9 +81,15 @@ const capabilities = await client.request("getCapabilities", {});
 console.log(capabilities.methods);
 ```
 
-SDK의 문서 생성 흐름은 **`prepareDocument` → 미리보기·사용자 승인 → `commitPreparedDocument` → `exportDocument`** 입니다. 선택 영역 수정은 `captureSelection`·`readSelection`, 수정안 미리보기 및 `applyProposal`을 사용합니다. 연속 본문 문단이나 하나의 일반·병합 셀 안의 연속 문단을 수정할 수 있으며, 선택 범위의 글자 서식과 문단 수를 유지해야 합니다.
+| 작업 | SDK 흐름 |
+| --- | --- |
+| 기존 파일 편집 | `openDocument` → 브라우저 편집 → `exportDocument({ format: "hwpx" })` |
+| Markdown·DocumentSpec으로 새 문서 작성 | `prepareDocument` → 미리보기·승인 → `commitPreparedDocument` |
+| 선택 영역 수정 | `captureSelection` → `readSelection` → `previewEdits` → 승인 후 `applyProposal` |
 
-SDK는 편집기 iframe이나 사용자를 자동으로 인증하지 않습니다. 실제 서비스에서 연결하려면 정확한 **부모 origin, CSP, session proof 및 권한 정책**을 구성해야 합니다.
+외부 HWPX 열기를 연결하기 전에 `getCapabilities()`에서 `formats.open`에 `hwpx`가 있는지, `openPolicy.availability`가 `guarded`인지 확인하세요. 파일 열기에는 Host가 승인한 파일 메타데이터와 작업본 정보가 필요합니다.
+
+SDK는 편집기 iframe이나 사용자를 자동으로 인증하지 않습니다. 로컬 예제는 루프백에서 실행됩니다. HTTPS 서비스에서 파일 열기를 허용하려면 Host와 편집기를 같은 HTTPS origin에 두고, 편집기와 SDK 양쪽의 `checkedOpen`, CSP, session proof 및 권한 정책을 구성하세요. 실행 패키지의 `AI-BROWSER-CHANNEL.md`에 설정 방식이 나와 있습니다.
 
 - [SDK 빠른 시작과 로컬 예제](sdk/QUICKSTART.md)
 - [API Reference](sdk/API_REFERENCE.md)
@@ -84,14 +98,14 @@ SDK는 편집기 iframe이나 사용자를 자동으로 인증하지 않습니�
 
 ## AI 연동 데모
 
-[온편집 AI 테스트 웹](https://edit.govpress.cloud/ai)은 **별도 운영 서버가 AI를 호출하고, 온편집 SDK가 문서에 반영하는 과정**을 보여주는 데모입니다. 공개 설치 패키지에 포함되는 로컬 AI 모델이나 무인증 GPT 서비스가 아닙니다.
+[온편집 AI 테스트 웹](https://edit.govpress.cloud/ai/)은 초대 코드로 접속하는 호스팅 데모입니다. 선택한 HWPX는 열기 승인 후 브라우저 안의 편집기에 열립니다. 보고서 작성과 선택 영역 재작성은 별도 운영 서버의 AI를 사용합니다. 공개 설치 패키지에 AI 서버나 인증 정보는 포함되지 않습니다.
 
 보고서 작성 흐름은 다음과 같습니다.
 
-1. **내용 작성:** 사용자의 목적·목차·분량·표 조건을 반영하여 1차 원고 생성
-2. **서식 정리:** 별도 AI 단계에서 공공보고서 형식의 GFM 원고로 정리
-3. **결과 확인:** 두 번째 응답을 미리보기에서 검토. 서식 정리 단계가 실패하면 1차 원고가 문서에 자동 적용되지는 않음
-4. **문서 적용:** SDK 미리보기 → 사용자 명시적 승인 → 편집 → HWPX 저장
+1. **내용 작성:** 자연어 요청에 따라 1차 원고를 작성합니다. 정해진 목차 양식은 요구하지 않습니다.
+2. **서식 정리:** 별도 AI 호출로 2차 GFM을 만듭니다. 각 단계와 SDK 호출은 왼쪽 **처리 과정 및 호출 API** 목록에 나타납니다.
+3. **미리보기·적용:** 2차 GFM을 일반 Markdown 가져오기와 같은 조판 경로로 미리 보고, 승인 후 문서에 적용합니다. 2차 작성이 실패하면 1차 원고를 문서에 자동 적용하지 않습니다.
+4. **저장:** 편집한 결과를 HWPX로 내려받습니다.
 
 선택 문장을 AI로 다시 작성하는 흐름은 보고서 전체 생성과 구분되며, **선택 영역만 미리보기·승인 후 수정**합니다.
 
@@ -130,14 +144,15 @@ SDK는 편집기 iframe이나 사용자를 자동으로 인증하지 않습니�
 | 선택 영역 수정 | 연속 본문 문단, 일반·병합 셀 하나 안의 연속 문단. 선택 내 문자 서식과 문단 수 유지 조건 적용 |
 | 원본 HWP 재저장 | **미지원** — 원본 HWP를 덮어쓰지 않음 |
 | SWP 출력 | **미지원** |
-| 복잡 문서 | 병합·중첩 구조, 암호·DRM, 개체와 복잡 조판의 완전 호환성 미보장 |
+| 지원하지 않는 선택 | 여러 셀에 걸친 선택, 중첩표, 선택 내부의 혼합 글자 서식, 문단 수 변경 |
+| 복잡 문서 | 암호·DRM, 개체와 복잡 조판은 전수 검증되지 않음 |
 | 운영 통합 | 서비스 인증·TLS·모델 제공자 연결은 Host 측 구현 필요 |
 
-브라우저·운영체제·글꼴에 따라 페이지 배치가 달라질 수 있습니다. 일부 테스트에서의 성공이 설치형 한/글과의 완전한 조판 동등성을 의미하지는 않습니다.
+RC4에서 SDK 열기·편집·저장·재열기를 합성 HWPX로 검증했습니다. 실제 제3자 문서 전체의 호환성과 설치형 한/글에서의 조판 동등성은 미검증입니다.
 
 ## 소스 빌드
 
-이 저장소의 App·SDK 소스를 릴리스 실행 패키지와 함께 검증할 수 있습니다. 검증에 사용한 버전은 **Node.js 22.23.1 / npm 10.9.8**입니다.
+정확한 재현을 위해 [RC4 태그의 소스](https://github.com/wavelen-jw/onedit/tree/v1.0.0-rc4)와 같은 버전의 실행 패키지를 함께 사용하세요. 검증에 사용한 버전은 **Node.js 22.23.1 / npm 10.9.8**입니다.
 
 ```bash
 npm ci --ignore-scripts --no-audit --no-fund
