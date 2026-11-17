@@ -4,7 +4,7 @@
 
 *Browser-based HWP/HWPX editor with a JavaScript SDK for document workflows.*
 
-[![Release](https://img.shields.io/github/v/release/wavelen-jw/onedit?include_prereleases&label=release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)
+[![Release](https://img.shields.io/github/v/release/wavelen-jw/onedit?include_prereleases&label=release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)
 [![Source license: MIT](https://img.shields.io/badge/source%20license-MIT-blue.svg)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](BUILDING-PUBLIC.md)
 
@@ -16,7 +16,7 @@
 > **RHWP 원본 GitHub:** <https://github.com/edwardkim/rhwp>
 
 > [!IMPORTANT]
-> 현재 공개 버전은 **[v1.0.0-rc2 (Pre-release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)**입니다. HWP/HWPX의 모든 문서·서식 호환성을 보장하지 않으며, 운영 환경의 인증·권한 서비스 또는 TLS 서버는 제공하지 않습니다. 지원 범위는 [SDK 지원표](sdk/SUPPORT_MATRIX.md)를 확인하세요.
+> 현재 공개 버전은 **[v1.0.0-rc3 (Pre-release)](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)**입니다. HWP/HWPX의 모든 문서·서식 호환성을 보장하지 않으며, 운영 환경의 인증·권한 서비스 또는 TLS 서버는 제공하지 않습니다. 지원 범위는 [SDK 지원표](sdk/SUPPORT_MATRIX.md)를 확인하세요.
 
 ## 주요 기능
 
@@ -27,6 +27,8 @@
 - **독립 실행:** Core WebAssembly(WASM)를 포함하는 실행 패키지로 로컬 실행 가능. 별도의 온라인 SDK 서버 불필요
 
 ## AI 문서 작성·수정 시나리오
+
+공개 편집기와 SDK는 문서 편집, 미리보기, 승인 및 HWPX 저장을 지원합니다. 모델을 호출하는 운영 AI API는 별도 인증된 서버에 의존합니다. 공개 저장소나 다운로드에 모델 키, 초대 설정, 운영 AI 서버는 포함되지 않습니다. 호스팅된 데모는 보고서 내용 작성과 서식 정리를 별도로 실행하며, 의미 보존을 확인하지 못하면 첫 원고를 유지합니다.
 
 온편집 SDK와 GPT를 연결한 [AI 테스트 웹](https://edit.govpress.cloud/ai)에서 **문서 초안 생성 → 사용자 편집 → 선택 문장 AI 재작성 → 최종 HWPX 저장**을 시연할 수 있습니다. AI는 문서 내용을 생성하고, 온편집 Host SDK는 미리보기·승인·부분 수정·내보내기를 수행합니다.
 
@@ -79,14 +81,14 @@ HWPX를 다운로드한 뒤 독립 편집기에서 다시 열어, AI가 작성�
 
 **준비물:** Node.js 22 이상, 최신 Chromium 계열 브라우저 권장
 
-[Releases](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)에서 `onedit-browser-runtime.tar.gz`를 받은 후 파일 무결성을 확인하고 실행합니다.
+[Releases](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)에서 `onedit-browser-runtime.tar.gz`를 받은 후 파일 무결성을 확인하고 실행합니다.
 
 ```bash
 # 1. 실행 패키지 다운로드
-curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc2/onedit-browser-runtime.tar.gz
+curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc3/onedit-browser-runtime.tar.gz
 
-# 2. v1.0.0-rc2 실행 패키지 SHA-256 검증
-echo "64fb76498f42607e5151febb341c74c0dd4be8a0e9a914a09dcca5db174a60bd  onedit-browser-runtime.tar.gz" | sha256sum -c -
+# 2. v1.0.0-rc3 실행 패키지 SHA-256 검증
+echo "06aaa666dcab5fbb191f7b67bf6d687e69a940d9a9bc4bfe7e7f3680b5fe1fbd  onedit-browser-runtime.tar.gz" | sha256sum -c -
 
 # 3. 압축 해제 및 로컬 실행
 mkdir -p onedit-runtime
@@ -104,8 +106,8 @@ node start-ai-editor.mjs 4173
 Host SDK는 **별도 npm 레지스트리에 게시하지 않고**, 동일한 릴리스의 설치 파일로 제공합니다.
 
 ```bash
-curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc2/onedit-ai-host-sdk-1.0.0-rc2.tgz
-npm install --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc2.tgz
+curl -fLO https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc3/onedit-ai-host-sdk-1.0.0-rc3.tgz
+npm install --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc3.tgz
 ```
 
 ```ts
@@ -131,7 +133,7 @@ SDK 연결은 자동으로 허용되지 않습니다. 편집기의 **정확한 �
 
 ## 지원 형식과 제한사항
 
-| 항목 | v1.0.0-rc2 범위 |
+| 항목 | v1.0.0-rc3 범위 |
 | --- | --- |
 | HWP5 열기 | 검증된 일부 본문 문서 및 지원 구조 |
 | HWPX 열기 | 검증된 일부 본문·일반 표/셀 문서 |
@@ -162,19 +164,19 @@ npm --prefix sdk test
 
 ## 배포 파일
 
-[**v1.0.0-rc2 다운로드**](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)
+[**v1.0.0-rc3 다운로드**](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)
 
 | 파일 | 내용 |
 | --- | --- |
 | `onedit-browser-runtime.tar.gz` | 독립 실행형 편집기, Core WASM, 브라우저 자산 |
 | `onedit-app-source.tar.gz` | 공개 앱 소스 |
-| `onedit-ai-host-sdk-1.0.0-rc2.tgz` | 설치 가능한 Host SDK |
+| `onedit-ai-host-sdk-1.0.0-rc3.tgz` | 설치 가능한 Host SDK |
 | `onedit-core-binary.tar.gz` | Core 바이너리·바인딩·라이선스·출처 자료 |
 | `onedit-release-documentation.tar.gz` | 빌드·라이선스·검증 문서 |
 | `RELEASE-NOTES.md` | 릴리스 변경·실행 안내 |
 | `SHA256SUMS` | 배포 구성요소 체크섬 |
 
-다운로드한 파일의 해시는 [릴리스 안내](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2)와 문서 아카이브의 체크섬 정보를 기준으로 확인하세요.
+다운로드한 파일의 해시는 [릴리스 안내](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3)와 문서 아카이브의 체크섬 정보를 기준으로 확인하세요.
 
 ## RHWP 프로젝트에 대한 감사 (Acknowledgements)
 
@@ -206,4 +208,4 @@ MIT에 따른 소스코드 상업적 이용과 HCR 글꼴의 재배포 권한은
 
 ---
 
-**Onedit** · [Release](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc2) · [SDK API](sdk/API_REFERENCE.md) · [License](LICENSE)
+**Onedit** · [Release](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc3) · [SDK API](sdk/API_REFERENCE.md) · [License](LICENSE)

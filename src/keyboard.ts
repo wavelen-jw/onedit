@@ -26,7 +26,7 @@ export type KeyRoute =
   | { kind: "save"; as?: true }
   | { kind: "print" }
   | { kind: "format-copy" }
-  | { kind: "existing-ui"; action: "table-autofill" | "local-left" | "local-right" | "local-up" | "local-down" | "object-group" | "textbox-edit" | "character-map" | "table-transpose" | "table-object-line" | "table-object-background" | "toolbox" | "page-goto" | "paste-choose" | "object-line" | "object-background" | "table-add" | "table-delete" | "cell-split" | "paper" | "font-next" | "font-previous" | "equal-width" | "equal-height" }
+  | { kind: "existing-ui"; action: "table-autofill" | "local-left" | "local-right" | "local-up" | "local-down" | "object-group" | "textbox-edit" | "character-map" | "table-transpose" | "table-object-line" | "table-object-background" | "toolbox" | "page-goto" | "paste-choose" | "object-line" | "object-background" | "table-add" | "table-delete" | "table-smart-delete" | "cell-split" | "paper" | "font-next" | "font-previous" | "equal-width" | "equal-height" }
   | {kind:"table-calculation";axis:"row"|"column";operation:"SUM"|"AVG"|"PRODUCT"}
   | { kind: "script-cycle" }
   | { kind: 'cell-block-format'; background: boolean }
@@ -70,9 +70,7 @@ export function routeKey(e: KeyInput, s: Selection, platform = shortcutPlatform(
   const web = hancomWebKey(e, s, platform);
   if (web) return web;
   if(e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.shiftKey&&(key==='e'||e.code==='KeyE')) {
-    // On a cell block, offer the existing structural draft. A shortcut must
-    // not silently erase cell contents or commit a row/column deletion.
-    if(s.kind==='cells') return {kind:'existing-ui',action:'table-delete'};
+    if(s.kind==='cells') return {kind:'existing-ui',action:'table-smart-delete'};
     if(s.kind==='text'||s.kind==='table') return command({type:'delete',backward:false});
     return {kind:'unsupported',message:'지울 내용의 블록을 선택하세요.'};
   }
@@ -155,6 +153,15 @@ export function routeKey(e: KeyInput, s: Selection, platform = shortcutPlatform(
   if (plain && e.key === "Tab" && s.focus.kind === "cell") return view("tab");
   if (plain && !e.shiftKey && e.key === "Tab" && s.focus.kind === "body" && ["caret", "text"].includes(s.kind))
     return command({ type: "insert", text: "\t" });
+  // Coarse split-row adjustment is opt-in per keypress. The table dispatcher
+  // checks the current physical closing fragment; no other resize may run.
+  if (e.ctrlKey && e.shiftKey && !e.metaKey &&
+      (e.key === "ArrowUp" || e.key === "ArrowDown") &&
+      s.kind === "cells" && s.phase === 2 && s.anchor.kind === "cell" &&
+      s.focus.kind === "cell" && !nested(s.focus) && s.anchor.cell === s.focus.cell)
+    return command({type:"resize", nativeTrackKeys:true, nativeTrackRequired:true,
+      splitRowKey:true, splitRangeKey:true, width:0,
+      height:(e.key==="ArrowUp"?-1:1)*(e.altKey?1500:1200)});
   const arrows = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
   if (
     !e.shiftKey &&
@@ -165,6 +172,11 @@ export function routeKey(e: KeyInput, s: Selection, platform = shortcutPlatform(
     return command({
       type: "resize",
       nativeTrackKeys: true,
+      ...(e.key === "ArrowDown" && !e.altKey ||
+        e.key === "ArrowUp" && e.ctrlKey && !e.metaKey && !e.altKey
+        ? {splitRowKey:true as const} : {}),
+      ...((e.key==="ArrowUp"||e.key==="ArrowDown")&&e.ctrlKey&&!e.metaKey&&!e.altKey
+        ? {splitRangeKey:true as const} : {}),
       ...(!e.altKey&&["ArrowLeft","ArrowRight"].includes(e.key)?{trackBoundary:true}:{}),
       ...(e.altKey?{redistribute:(["ArrowLeft","ArrowRight"].includes(e.key)?"x":"y") as "x"|"y",trackBoundary:true}:{}),
       width: e.key === "ArrowLeft" ? -300 : e.key === "ArrowRight" ? 300 : 0,

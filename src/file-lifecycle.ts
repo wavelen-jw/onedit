@@ -43,7 +43,9 @@ type UI = {
   prompt: (message: string, name: string) => string | null;
   pickSaveTarget?: (suggestedName: string) => Promise<NativeSaveTarget | null>;
   download: (bytes: Uint8Array, name: string, requestId: string) => void;
-  prepareDisplay?: (candidate: RhwpAdapter) => void;
+  prepareDisplay?: (candidate: RhwpAdapter, localOpen: boolean) => void;
+  loadOpenFonts?: (candidate: RhwpAdapter) => Promise<void>;
+  tableDragLayout: (page:HTMLElement) => string | undefined;
   clickTableScope?: (page:HTMLElement,run:()=>void)=>void;
   paintedCellFormats?: () => Readonly<Partial<Record<FormatKind, FormatState>>> | undefined;
   change: (replaced: boolean, changedCellClose?: () => void, committedCellApply?:boolean, dormantTableTools?:()=>boolean) => void;
@@ -211,14 +213,14 @@ export class FileLifecycle {
       return action();
     });
   }
-  private replacementCandidate(bytes: Uint8Array | undefined, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"]) {
+  private replacementCandidate(bytes: Uint8Array | undefined, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"], localOpen = false, probe = false) {
     const doc = prepared ?? siblingDocument(this.adapter.doc, bytes);
     try {
       const next = new RhwpAdapter(doc);
       if (bytes === undefined && !prepared) initializeBlankDocument(next);
       // Set the current display environment before preflight builds page trees.
       // The candidate is still isolated; failure frees it and preserves the old document.
-      this.ui.prepareDisplay?.(next);
+      if (!probe) this.ui.prepareDisplay?.(next, localOpen);
       // Preflight the projections used by the UI before retiring the old document.
       next.call("getDocumentInfo");
       next.documentLocked = next
@@ -238,7 +240,7 @@ export class FileLifecycle {
       }
       admit?.(next);
       next.rect(start());
-      for (let page = 0; page < next.pageCount; page++) {
+      for (let page = 0; !probe && page < next.pageCount; page++) {
         next.call("getPageInfo", page);
         next.doc.renderPageSvg(page);
       }
@@ -248,8 +250,8 @@ export class FileLifecycle {
       throw error;
     }
   }
-  private replace(bytes: Uint8Array | undefined, name: string, unsaved = false, prepareCommands?:()=>void, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"]) {
-    const next = this.replacementCandidate(bytes, admit, prepared);
+  private replace(bytes: Uint8Array | undefined, name: string, unsaved = false, prepareCommands?:()=>void, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"], localOpen = false) {
+    const next = this.replacementCandidate(bytes, admit, prepared, localOpen);
     let adopted = false;
     try {
       const state = this.captureReplacementState();
@@ -380,7 +382,7 @@ export class FileLifecycle {
     return this.transition(
       "현재 변경을 닫고 선택한 문서를 여시겠습니까?",
       () => {
-        this.replace(bytes, file.name);
+        this.replace(bytes, file.name, false, undefined, undefined, undefined, true);
         return true;
       },
       async () => {
@@ -396,8 +398,14 @@ export class FileLifecycle {
         if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
           throw Error("파일을 읽는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
         assertSafeHwpxEntryNames(bytes);
-        const candidate = this.replacementCandidate(bytes);
-        candidate.doc.free();
+        const candidate = this.replacementCandidate(bytes, undefined, undefined, false, true);
+        try {
+          await this.ui.loadOpenFonts?.(candidate);
+          if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
+            throw Error("글꼴을 준비하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
+        } finally {
+          candidate.doc.free();
+        }
       },
     );
   }

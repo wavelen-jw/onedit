@@ -1,6 +1,6 @@
 // Exact Core pair for the Rev14 web test and the opt-in local QA arm.
-import { checkedOpenCoreSha256 } from "./ai-checked-open-binding.js";
-export const formatSnapshotCoreSha256 = checkedOpenCoreSha256;
+import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
+export const formatSnapshotCoreSha256 = rootEditorCoreSha256;
 export function isRev14WebTestHost(win: Window | undefined): boolean {
   return !!win && win.parent === win && win.location.origin === "https://edit.govpress.cloud";
 }

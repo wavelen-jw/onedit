@@ -77,6 +77,7 @@ import {
 import { StructuredClipboard } from "./clipboard.js";
 import { RhwpAdapter, type BodyLine, type NavigationRect } from "./adapter.js";
 import { History } from "./history.js";
+import { prepareCharacterDelta } from "./character-count-delta.js";
 import { applyStyleAt, observeStyle, styleAt } from "./style-observation.js";
 import {
   type Selection,
@@ -101,6 +102,14 @@ import {
 type ExecutionCapture = NonNullable<Parameters<Interaction["execute"]>[1]>;
 export type WidthPreviewAdmission = (position: Position, resolved: ParagraphTarget|undefined, grid:readonly import("./model.js").CellBox[])=>WidthLookup|undefined;
 // Exact Core reviewed for survivor identity in flat floating 2×1 row delete.
+
+export class ClippedTextEdit extends Error {
+  constructor() {
+    super("쪽 밖으로 잘린 표 내용은 이 위치에서 편집할 수 없습니다. 쪽 안의 글자 위치를 선택하세요.");
+  }
+}
+
+export class StalePointerTarget extends Error {}
 
 export class Interaction {
   private viewFormats?: Map<string, FormatState>;
@@ -185,6 +194,9 @@ export class Interaction {
   private current: Selection = { kind: "caret", focus: start() };
   private reference?: SelectionReference;
   private selectionError?: unknown;
+  // A repeated header has one logical address but two physical hits. Limit
+  // the page witness to this selection and document revision.
+  private trackHit?: {doc:RhwpAdapter["doc"];revision:number;page:number;focus:Position};
   get selection(): Selection {
     return this.current;
   }
@@ -226,6 +238,7 @@ export class Interaction {
   set selection(value: Selection) { this.setSelection(value); }
   private setSelection(value: Selection, clickReference?:SelectionReference) {
     this.selectionGeneration++;
+    this.trackHit=undefined;
     this.resetBlockSequence();
     this.current = value;
     this.selectionCaretOrigin = undefined;
@@ -324,6 +337,14 @@ export class Interaction {
     if (object) return object;
     return this.currentVisualCaret()?.rect ?? this.adapter.rect(this.selection.focus);
   }
+  private wrappedSpaceBoundary(p: Position, offset: number, line: BodyLine) {
+    if (p.kind !== "body" || offset !== line.charEnd || line.charStart >= offset ||
+        line.lineIndex + 1 >= line.lineCount || Array.from(this.adapter.text(p))[offset - 1] !== " ") return;
+    const a = this.adapter;
+    const downstream = a.bodyLine({...p, offset: a.logical(p, offset)});
+    if (downstream.lineIndex !== line.lineIndex + 1 || downstream.charStart !== offset) return;
+    return downstream;
+  }
   private moveBodyLine(key: string, selecting: boolean): boolean {
     const a = this.adapter, p = this.selection.focus;
     if (p.kind !== "body" || !["Home", "End", "ArrowUp", "ArrowDown"].includes(key) || a.hasBodyLayoutObject(p))
@@ -339,6 +360,10 @@ export class Interaction {
     if (key === "Home" || key === "End") {
       line = v?.line ?? current;
       ({ position, rect } = a.bodyLineEdge(p, line, key === "End"));
+      if (key === "End" && this.wrappedSpaceBoundary(p, line.charEnd, line)) {
+        position = {...p, offset: a.logical(p, line.charEnd - 1)};
+        rect = a.navigationRect(a.rect(position));
+      }
     } else {
       const result = a.bodyVertical(p, key === "ArrowUp" ? -1 : 1, this.preferredX ?? v?.rect.x ?? -1);
       if (!result) return false;
@@ -490,7 +515,7 @@ export class Interaction {
       }
     }
     if (context.documentId !== a.documentId || context.revision !== a.revision ||
-        context.selection !== JSON.stringify(this.selection)) throw Error("클릭 대상이 변경되었습니다.");
+        context.selection !== JSON.stringify(this.selection)) throw new StalePointerTarget("클릭 대상이 변경되었습니다.");
     if(extend&&origin.kind==='cell'){
       let cell=p.kind==='cell'?p:undefined;
       if(cell&&!sameTable(origin,cell)){
@@ -550,7 +575,7 @@ export class Interaction {
       const read=prepareClickedTable(a,p,page,x,y,hit.tableWitness,scope.view,scope.note);
       if(scope.retired||scope.entry!==this.selectionGeneration||!scope.view()){
         scope.note("stale-before-install");
-        throw Error("클릭 대상이 변경되었습니다.");
+        throw new StalePointerTarget("클릭 대상이 변경되었습니다.");
       }
       if("target" in read&&read.target.current()){
         const target=read.target;
@@ -561,6 +586,8 @@ export class Interaction {
       }else scope.note("reason" in read?read.reason:"selection-changed");
     }
     if(!scoped)this.point(p, extend && !(cellDrag && samePosition(cellDrag.focus,p)));
+    if(start&&!extend&&hit.rootTableHitPage!==undefined&&samePosition(p,this.selection.focus))
+      this.trackHit={doc:a.doc,revision:a.revision,page:hit.rootTableHitPage,focus:copy(p)};
     this.pointerOrigin = extend ? drag && {...drag,selection:JSON.stringify(this.selection)}
       : {documentId:a.documentId,revision:a.revision,page,x,y,focus:copy(p),selection:JSON.stringify(this.selection)};
     if (!extend) this.block = false;
@@ -910,7 +937,7 @@ export class Interaction {
       .filter((t) => Object.keys(t.props).length);
   }
   f5(readEpoch?: () => F5Epoch | undefined) {
-    const s = this.selection;
+    const s = this.selection, trackHit=this.trackHit;
     if (s.focus.kind !== "cell") return;
     let fullGridLast: number | undefined;
     if (readEpoch && s.kind === "cells" && s.phase === 2 && !nested(s.anchor) && !nested(s.focus)) {
@@ -978,6 +1005,8 @@ export class Interaction {
         focus: { ...s.focus, cell: last.cellIdx, cellPara: 0, offset: 0 },
       };
     }
+    if(trackHit&&this.selection.kind==="cells"&&this.selection.phase!==3&&
+        samePosition(trackHit.focus,this.selection.focus))this.trackHit=trackHit;
     this.block = false;
   }
   extendCells() {
@@ -993,6 +1022,22 @@ export class Interaction {
     this.validateSelection(s);
     const candidate:Selection={kind:'cells',phase:2,anchor:copy(s.focus),focus:copy(s.focus)};
     this.validateSelection(candidate);this.resetBlockSequence();this.selection=candidate;this.block=false;this.preferredX=undefined;
+  }
+  selectedDeleteTracks(): {row?:number;col?:number} {
+    const s=this.selection;
+    if(s.kind!=='cells'||nested(s.focus))return {};
+    const chosen=this.cells(s), all=this.uniqueCells(this.adapter.cells(s.focus));
+    const dim=this.adapter.call('getTableDimensions',s.focus.sec,s.focus.para,s.focus.control);
+    const rows=dim.rowCount,cols=dim.colCount;
+    if(!Number.isSafeInteger(rows)||!Number.isSafeInteger(cols)||rows<1||cols<1||
+        all.length!==rows*cols||new Set(all.map(c=>c.row+':'+c.col)).size!==all.length||
+        all.some(c=>!Number.isInteger(c.row)||!Number.isInteger(c.col)||
+          c.row<0||c.row>=rows||c.col<0||c.col>=cols||c.rowSpan!==1||c.colSpan!==1))return {};
+    const row=new Set(chosen.map(c=>c.row)),col=new Set(chosen.map(c=>c.col));
+    return {
+      ...(col.size===cols&&chosen.length===row.size*cols&&row.size<rows&&row.size<=16?{row:row.size}:{}),
+      ...(row.size===rows&&chosen.length===col.size*rows&&col.size<cols&&col.size<=16?{col:col.size}:{}),
+    };
   }
   selectCellRows(columns=false) {
     const s = this.selection;
@@ -1336,6 +1381,19 @@ export class Interaction {
         next = { ...withPara(p, paraIndex(p) + 1), offset: 0 };
       } else next.offset = Math.max(0, Math.min(a.length(p), next.offset));
       this.preferredX = undefined;
+      if (delta > 0 && p.kind === "body" && next.kind === "body" &&
+          sameContainer(p, next) && p.para === next.para && next.offset > p.offset &&
+          Array.from(a.text(p))[a.textOffset(p)] === " " && !a.hasBodyLayoutObject(p)) {
+        const line = a.bodyLine(p);
+        const downstream = this.wrappedSpaceBoundary(p, a.textOffset(next), line);
+        if (downstream) {
+          const {rect} = a.bodyLineEdge(next, downstream, false);
+          this.point(next, selecting);
+          if (selectionOrigin) this.selectionCaretOrigin = {...selectionOrigin, selection: JSON.stringify(this.selection)};
+          this.visualCaret = {documentId:a.documentId, revision:a.revision, selection:JSON.stringify(this.selection), rect, line:downstream};
+          return;
+        }
+      }
     } else {
       const rect = this.cursorRect();
       const x = this.preferredX ?? rect.x;
@@ -2200,6 +2258,29 @@ export class Interaction {
       return String(e);
     }
   }
+  assertVisibleTextEdit(selection = this.selection) {
+    // The native pointer fence is authoritative for a clipped atomic inline
+    // table. A logical caret can reach its stored text via keyboard movement.
+    // Compare in paper units, independent of zoom, scroll and page mounting.
+    if (selection.kind !== "caret" && selection.kind !== "text") return;
+    const a = this.adapter;
+    const points = selection.kind === "text" && !samePosition(selection.anchor, selection.focus)
+      ? [selection.anchor, selection.focus] : [selection.focus];
+    for (const p of points) {
+      if (p.kind !== "cell") continue;
+      const {pageIndex, x, y} = a.rect(p);
+      if (y < a.call("getPageInfo", pageIndex).height) continue;
+      try {
+        a.call("hitTest", pageIndex, x, y);
+      } catch (error) {
+        // wasm-bindgen may throw a string for a native render error.
+        const message = error instanceof Error ? error.message : error;
+        if (typeof message === "string" && message.endsWith("Click is outside the physical page"))
+          throw new ClippedTextEdit();
+        throw error;
+      }
+    }
+  }
   execute(
     command: Command,
     captured?: {
@@ -2218,7 +2299,10 @@ export class Interaction {
       const doc=this.adapter.doc;
       return cursorModelMemoEnabled(doc) ? withFreshCursorModel(doc,()=>this.executeObserved(command,captured))
         : this.executeObserved(command,captured);
-    } catch(error) { freezeDiagnosticFor(error,'COMMAND_FAILED','interaction'); throw error; }
+    } catch (error) {
+      if (!(error instanceof ClippedTextEdit)) freezeDiagnosticFor(error, 'COMMAND_FAILED', 'interaction');
+      throw error;
+    }
   }
   private executeObserved(
     command: Command,
@@ -2245,6 +2329,8 @@ export class Interaction {
     }
     if (this.executePreparedTargetCommand(command, s, a, captured)) return;
     command = this.lowerExecutionAlias(command, s, a);
+    if (["insert", "delete", "break", "paste", "delete-word", "delete-current-line", "delete-line-end"].includes(command.type))
+      this.assertVisibleTextEdit(s);
     if (this.executePageObjectCommand(command, s, a, captured)) return;
     this.validateSelection(s);
     if (this.executeWholeBodyDeletionCommand(command, s, a, captured)) return;
@@ -2255,7 +2341,9 @@ export class Interaction {
     if (this.executeCopiedStyleCommand(command, s, a, captured)) return;
     if(command.type==='resize'){
       const generation=this.currentSelectionGeneration,live=copy(this.selection);
-      const plan=prepareNativeTrackResize(a,s,command,()=>this.cellBoxes(s));
+      const hit=this.trackHit;
+      const hitPage=hit?.doc===a.doc&&hit.revision===a.revision&&samePosition(hit.focus,s.focus)?hit.page:undefined;
+      const plan=prepareNativeTrackResize(a,s,command,()=>this.cellBoxes(s),hitPage);
       if(plan){
         if(plan.unchanged)return;
         const reference=a.captureSelection(live);
@@ -2642,35 +2730,44 @@ export class Interaction {
           s.focus.cellPara === 0 && s.focus.offset === 0
           ? { kind: "caret", focus: copy(s.focus) } : undefined;
       if (sample.snapshot) {
-        // This snapshot contract applies to one exact paragraph, never the
-        // first element of a mixed/multiple paragraph selection.
-        const t = charTargets[0] ?? paraTargets[0];
-        if (!t || charTargets.length > 1 || paraTargets.length > 1 ||
-            character && (!charTargets[0] || t.end <= t.p.offset) ||
-            paragraph && !paraTargets[0] ||
-            character && paragraph && (!sameContainer(t.p, paraTargets[0].p) ||
-              paraIndex(t.p) !== paraIndex(paraTargets[0].p)))
-          throw Error("복사한 모양을 적용할 한 문단 범위를 선택하세요.");
-        const live = this.selection, generation = this.currentSelectionGeneration;
-        const id = a.documentId, revision = a.revision;
-        const owner = a.clipboardTarget(t.p);
-        const reference = a.captureSelection(s);
-        const request = JSON.stringify({ target: {
-          section: owner.sectionIndex, paragraph: owner.parentParaIndex,
-          path: owner.path, expectedTargetId: owner.expectedTargetId,
-        }, start: t.p.kind === "body" ? a.textOffset(t.p) : t.p.offset,
-          end: t.p.kind === "body" ? a.textOffset(t.p, t.end) : t.end });
+        const requests = new Map<string, {p: Position; text?: {start:number;end:number}; paragraph?:boolean}>();
+        const item = (p: Position) => {
+          const key = JSON.stringify({...p,offset:0});
+          let entry = requests.get(key);
+          if (!entry) { entry = {p}; requests.set(key,entry); }
+          return entry;
+        };
+        for (const t of charTargets) {
+          const start = a.textOffset(t.p), end = a.textOffset(t.p,t.end);
+          if (start < end) item(t.p).text = {start,end};
+        }
+        for (const t of paraTargets) item(t.p).paragraph = true;
+        if (!requests.size) return true;
         const native = sample.snapshot;
-        let unchanged = false;
+        const plans = [...requests.values()].map(t => {
+          const owner = a.clipboardTarget(t.p);
+          const snapshot = t.paragraph && !t.text && sample.mode === "both" ? native.paragraphOnly : native.value;
+          if (!snapshot || t.text && !t.paragraph && sample.mode === "both")
+            throw Error("선택 범위의 글자·문단 모양 적용 대상을 확인할 수 없습니다.");
+          return { snapshot, request: JSON.stringify({ target: {
+            section: owner.sectionIndex, paragraph: owner.parentParaIndex,
+            path: owner.path, expectedTargetId: owner.expectedTargetId,
+          }, ...(t.text ?? {start:0,end:0}) }) };
+        });
+        const live = this.selection, generation = this.currentSelectionGeneration;
+        const id = a.documentId, revision = a.revision, reference = a.captureSelection(s);
+        let unchanged = true;
         const next = this.history.transact("format-copy", s, () => {
           if (this.adapter !== a || a.doc !== native.native || a.documentId !== id ||
               a.revision !== revision || this.selection !== live ||
               this.currentSelectionGeneration !== generation || a.transientEdit)
             throw Error("모양 적용 문서 또는 선택이 변경되었습니다.");
-          const reply = a.call<{status:string;reason?:string}>("oneditPrivateApplyFormatSnapshotV1", native.value, request);
-          if (reply.status !== "applied" && reply.status !== "unchanged")
-            throw Error(`복사한 모양을 적용할 수 없습니다 (${reply.reason ?? "unknown"}).`);
-          unchanged = reply.status === "unchanged";
+          for (const plan of plans) {
+            const reply = a.call<{status:string;reason?:string}>("oneditPrivateApplyFormatSnapshotV1", plan.snapshot, plan.request);
+            if (reply.status !== "applied" && reply.status !== "unchanged")
+              throw Error(`복사한 모양을 적용할 수 없습니다 (${reply.reason ?? "unknown"}).`);
+            unchanged &&= reply.status === "unchanged";
+          }
           return unchanged ? s : a.resolveSelection(reference);
         }, () => unchanged, redoSelection, true);
         if (!unchanged) {
@@ -3139,8 +3236,11 @@ export class Interaction {
       this.selection = this.history.transact(kind, s, () => {
         for (const t of plan) {
           if (kind === "char") a.format(t.p, t.end, t.props);
-          else if (kind === "paragraph")
-            a.paragraph(t.p, t.props, t.paragraphTarget);
+          else if (kind === "paragraph") {
+            const props = plan.length === 1 && t.p.kind === "body" && t.props.spacingBefore === 0
+              ? { ...t.props, _oneditSingleParagraphBeforeSpace: true } : t.props;
+            a.paragraph(t.p, props, t.paragraphTarget);
+          }
           else a.cellFormat(t.p, t.props);
           if (kind === "cell") {
             const observed = a.cellProps(t.p);
@@ -3261,6 +3361,9 @@ export class Interaction {
       throw new UnsupportedTableOperation('resize-multirow-frame','여러 행의 표시·저장 높이가 달라 동시 높이 조절을 보류합니다.');
     const wholeWidthBefore=command.type==='resize'&&command.trackBoundary&&!command.redistribute&&s.focus.kind==='cell'
       ? a.call('getTableProperties',s.focus.sec,s.focus.para,s.focus.control).tableWidth as number:undefined;
+    // Statistics are advisory; a failed observation must never stop a valid edit.
+    let countDelta: ReturnType<typeof prepareCharacterDelta>;
+    try { if (!a.transientEdit) countDelta = prepareCharacterDelta(a, command, s); } catch { /* Recount on the idle path. */ }
     this.selection = this.history.transact(command.type, captured?.resizeSelectionBefore ?? s, () =>
       this.apply(command, s),
       resizeBefore ? () => {
@@ -3356,6 +3459,7 @@ export class Interaction {
       captured?.resizeSelectionBefore?.kind === "caret"
         ? captured.resizeSelectionBefore : undefined,
     );
+    try { countDelta?.(this.selection); } catch { /* Recount on the idle path. */ }
     this.preferredX = undefined;
     if (this.selection.kind === "caret") this.block = false;
   }

@@ -1,6 +1,6 @@
 # 온편집 외부 Host API 1.0 — 비공개 RC2
 
-패키지 버전은 `1.0.0-rc2`이며 wire 버전은 `onedit-host / 2 / 1.0`입니다. [METADATA.json](METADATA.json)에 정확한 온편집·WASM과 빌드 지문이 있습니다.
+패키지 버전은 `1.0.0-rc3`이며 wire 버전은 `onedit-host / 2 / 1.0`입니다. 설치 패키지의 METADATA.json에 정확한 온편집·WASM과 빌드 지문이 있습니다.
 
 - ESM: `import { OneditHostClient, openApprovalDigest } from 'onedit-ai-host-sdk'`. [공개 선언](dist/index.d.ts)에서 `Input`, `Output`, `Binding`, `Snapshot`, `Prepared`, `Proposal` 등을 제공합니다. `createFromChat`과 `revisePinnedSelection`은 SDK 편의 함수입니다.
 - JSON Schema 2020-12: [요청](schema/request.schema.json), [응답·이벤트](schema/response.schema.json), [scope·오류·한도](schema/surface.json). `x-transferable`은 구조화 복제의 `ArrayBuffer`를 뜻합니다. 파일 길이·SHA·네이티브 검사와 승인은 스키마 외에 실제 코드에서 확인합니다.

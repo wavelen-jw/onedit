@@ -4,7 +4,7 @@ import type { Interaction } from './interaction.js';
 import type { CellBox, Position, Selection } from './model.js';
 import { sameFormatTarget } from './integration/a-format-input-guard.js';
 import {coreRuntimeTableTrackDragEpoch} from './core-runtime.js';
-import { pickNativeTrackEdge,type NativeResizeEdge } from './table-track-resize.js';
+import { assertSplitTrackEditable,hasSplitTableFrames,pickNativeTrackEdge,splitTableResizeRefusal,type NativeResizeEdge } from './table-track-resize.js';
 type Cell = Extract<Position,{kind:'cell'}>;
 type Edge = {p:Cell;axis:'x'|'y';line:number;start:number;end:number;cells:CellBox[];adjacent:CellBox[];selection:Selection;nativeEdge?:NativeResizeEdge};
 // Read only Core-serialized data. No input XML mutation or inferred noAdjust default.
@@ -126,12 +126,31 @@ export function boundaryBlockReason(editor:Interaction,page:number,x:number,y:nu
   if(!boundaryAt(editor,page,x,y,tolerance))return '왼쪽·위 외곽선 및 교차점 조절은 미지원입니다. 오른쪽·아래 경계선을 사용하세요.';
   return '';
 }
-export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:{busy:()=>boolean;changed:()=>void;focus:()=>void;error:(e:unknown)=>void}){
+export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:{busy:()=>boolean;layout:(page:HTMLElement)=>string|undefined;changed:()=>void;focus:()=>void;error:(e:unknown)=>void}){
   type Drag={id:number;page:HTMLElement;edge:Edge;target:ReturnType<Interaction['capture']>;
     start:{x:number;y:number};delta:number;released?:boolean;preview:HTMLElement;scale:number;units:number;
-    adapter:Interaction['adapter'];native:Interaction['adapter']['doc'];selectionGeneration:number;
+    layout:string;svg:Element;adapter:Interaction['adapter'];native:Interaction['adapter']['doc'];selectionGeneration:number;
     mutationEpoch:ReturnType<Interaction['adapter']['nativeMutationGeneration']>};
   let drag:Drag|undefined,hover:HTMLElement|undefined;
+  // A press on a verified right/bottom edge is only a resize attempt once
+  // it moves. Consume the press to retain editor focus and selection.
+  let splitPress:{id:number;x:number;y:number;owner:Cell;grid:CellBox[];cell:CellBox;axis:'row'|'column';generation:number;adapter:Interaction['adapter'];revision:number;shown:boolean}|undefined;
+  const splitPressAt=(e:PointerEvent)=>{
+    const page=e.target instanceof Element?e.target.closest<HTMLElement>('.page'):null;
+    const owner=editor.selection.focus;
+    if(owner.kind!=='cell'||owner.ancestors?.length||!page||!pages.contains(page)||actions.busy()||actions.layout(page)===undefined)return;
+    const current=frame(page);if(!current)return;
+    const grid=editor.adapter.cells(owner);if(!hasSplitTableFrames(owner,grid))return;
+    const {x,y}=current.point(e),tol=3/current.scale;
+    const hits=grid.filter(c=>c.pageIndex===Number(page.dataset.page)).flatMap(cell=>{
+      const found:{cell:CellBox;axis:'row'|'column'}[]=[];
+      if(x>cell.x+tol&&x<cell.x+cell.w-tol&&Math.abs(y-cell.y-cell.h)<=tol)found.push({cell,axis:'row'});
+      if(y>cell.y+tol&&y<cell.y+cell.h-tol&&Math.abs(x-cell.x-cell.w)<=tol)found.push({cell,axis:'column'});
+      return found;
+    });
+    if(hits.length===1)return {id:e.pointerId,x:e.clientX,y:e.clientY,owner,grid,...hits[0],
+      generation:editor.currentSelectionGeneration,adapter:editor.adapter,revision:editor.adapter.revision,shown:false};
+  };
   const unhover=()=>{if(hover){hover.style.removeProperty('cursor');hover.removeAttribute('title');hover=undefined;}};
   const stop=()=>{const d=drag;drag=undefined;d?.preview.remove();unhover();};
   const frame=(page:HTMLElement)=>{
@@ -140,6 +159,7 @@ export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:
     return {scale,point:(e:PointerEvent)=>({x:(e.clientX-rect.left)/scale,y:(e.clientY-rect.top)/scale})};
   };
   const units=()=>7200/editor.adapter.doc.getDpi();
+  const unstable=()=>new UnsupportedTableOperation('resize-drag-layout-pending','글꼴과 페이지 표시가 끝난 뒤 표 경계를 다시 끌어 주세요.');
   const cancelled=()=>new UnsupportedTableOperation('resize-drag-stale','표나 화면이 바뀌었습니다. 다시 끌어 주세요.');
   const refuseDrag=(d:Drag,stage:'move'|'release',reason:string,observed?:unknown):never=>{
     if(d.edge.nativeEdge){
@@ -152,6 +172,8 @@ export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:
     const a=editor.adapter;
     if(actions.busy())refuseDrag(d,stage,'busy');
     if(!pages.contains(d.page))refuseDrag(d,stage,'unmountedPage');
+    if(actions.layout(d.page)!==d.layout || d.page.querySelector(':scope > svg')!==d.svg)
+      refuseDrag(d,stage,'layoutChanged');
     if(a!==d.adapter||a.doc!==d.native)refuseDrag(d,stage,'differentDocument');
     if(editor.currentSelectionGeneration!==d.selectionGeneration)refuseDrag(d,stage,'selectionGeneration',
       {from:d.selectionGeneration,to:editor.currentSelectionGeneration});
@@ -193,9 +215,22 @@ export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:
     d.preview.style[axis==='x'?'left':'top']=d.edge.line+delta/d.units+'px';
   };
   window.addEventListener('pointermove',e=>{
+    if(splitPress?.id===e.pointerId){
+      e.preventDefault();e.stopImmediatePropagation();
+      const p=splitPress;
+      if(!p.shown&&(p.axis==='row'?Math.abs(e.clientY-p.y):Math.abs(e.clientX-p.x))>=4){
+        p.shown=true;
+        if(!actions.busy()&&p.adapter===editor.adapter&&p.revision===p.adapter.revision&&
+            p.generation===editor.currentSelectionGeneration){
+          try{assertSplitTrackEditable(p.adapter,p.owner,p.grid,p.cell,p.axis);actions.error(splitTableResizeRefusal());}
+          catch(error){actions.error(error);}
+        }
+      }
+      return;
+    }
     if(!drag){
       unhover();if(e.buttons)return;const h=hit(e);
-      if(h){hover=h.page;hover.style.cursor=h.reason?'not-allowed':h.edge.axis==='x'?'col-resize':'row-resize';hover.title=h.reason?'이 표의 경계는 끌어서 조절할 수 없습니다.':'선택한 표의 열 너비·행 높이 조절 · Esc 취소';}
+      if(h){hover=h.page;hover.style.cursor=h.reason||actions.layout(h.page)===undefined?'not-allowed':h.edge.axis==='x'?'col-resize':'row-resize';hover.title=h.reason?'이 표의 경계는 끌어서 조절할 수 없습니다.':actions.layout(h.page)===undefined?'글꼴과 페이지 표시가 끝난 뒤 다시 끌어 주세요.':'선택한 표의 열 너비·행 높이 조절 · Esc 취소';}
       return;
     }
     const d=drag;if(e.pointerId!==d.id||d.released)return;
@@ -204,10 +239,17 @@ export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:
     try{move(d,e);}catch(error){stop();actions.error(error);}
   },true);
   window.addEventListener('pointerdown',e=>{
-    if(e.button!==0||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||drag)return;const h=hit(e);if(!h)return;
+    if(e.button!==0||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||drag||splitPress)return;const h=hit(e);
+    if(!h){
+      splitPress=splitPressAt(e);
+      if(splitPress){e.preventDefault();e.stopImmediatePropagation();}
+      return;
+    }
     e.preventDefault();e.stopImmediatePropagation();
     if(h.reason){actions.error(new UnsupportedTableOperation('resize-drag-edge',h.reason));return;}
     try{
+      const layout=actions.layout(h.page), svg=h.page.querySelector(':scope > svg');
+      if(layout===undefined||!svg)throw unstable();
       const scaleUnits=units();if(!Number.isFinite(scaleUnits)||scaleUnits<=0)throw cancelled();
       for(const c of h.edge.nativeEdge?[]:[...h.edge.cells,...h.edge.adjacent]){
         const p={...h.edge.p,cell:c.cellIdx,cellPara:0,offset:0};editor.adapter.assertEditable(p);
@@ -224,11 +266,12 @@ export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:
       const epoch=h.edge.nativeEdge?coreRuntimeTableTrackDragEpoch(adapter.doc):adapter.nativeMutationGeneration();
       if(h.edge.nativeEdge && epoch===undefined){preview.remove();throw cancelled();}
       drag={id:e.pointerId,page:h.page,edge:h.edge,target,start:h.pos,delta:0,preview,scale:h.scale,units:scaleUnits,
-        adapter,native:adapter.doc,selectionGeneration:editor.currentSelectionGeneration,
+        layout,svg,adapter,native:adapter.doc,selectionGeneration:editor.currentSelectionGeneration,
         mutationEpoch:epoch};
     }catch(error){stop();actions.error(error);}
   },true);
   window.addEventListener('pointerup',async e=>{
+    if(splitPress?.id===e.pointerId){splitPress=undefined;e.preventDefault();e.stopImmediatePropagation();return;}
     const d=drag;if(!d||e.pointerId!==d.id||d.released)return;
     e.preventDefault();e.stopImmediatePropagation();
     if(outside(e)){stop();return;}
@@ -251,7 +294,7 @@ export function mountTableBoundary(pages:HTMLElement,editor:Interaction,actions:
     }catch(error){if(drag===d){stop();actions.error(error);}}
   },true);
   window.addEventListener('keydown',e=>{if(!drag)return;e.preventDefault();e.stopImmediatePropagation();stop();},true);
-  window.addEventListener('pointercancel',e=>{if(drag?.id===e.pointerId)stop();},true);
-  window.addEventListener('blur',()=>{if(drag)stop();});
-  document.addEventListener('pointerout',e=>{if(!e.relatedTarget){if(drag)stop();else unhover();}},true);
+  window.addEventListener('pointercancel',e=>{if(splitPress?.id===e.pointerId)splitPress=undefined;if(drag?.id===e.pointerId)stop();},true);
+  window.addEventListener('blur',()=>{splitPress=undefined;if(drag)stop();});
+  document.addEventListener('pointerout',e=>{if(!e.relatedTarget){splitPress=undefined;if(drag)stop();else unhover();}},true);
 }

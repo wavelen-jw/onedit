@@ -3,7 +3,8 @@ import {fontFamilyValues} from './font-family-values.js';
 // changes document font references; availability and substitution never do.
 import type { RhwpAdapter } from './adapter.js';
 import { verifiedAssetBytes } from './verified-asset-cache.js';
-import {localFontNames,localFaceFor,localFaceBytes} from './local-font-access.js';
+import {localFontNames,localFaceFor,localFaceBytes,type LocalFace} from './local-font-access.js';
+import {readLocalGlyphWidths} from './local-font-widths.js';
 import {bundledWebFonts} from './bundled-web-fonts.js';
 export type FontSupply = { family:string; status:'loading'|'loaded'|'unavailable'|'unknown'; source:'web'|'local'|'document'; label:string; weights:string[] };
 const bundledHCR = [
@@ -35,6 +36,200 @@ const css=(n:string)=>JSON.stringify(n);
 const records=new Map<string,FontSupply>(),pending=new Map<string,Promise<void>>();
 type PrintFontSource = string | {bytes:Uint8Array<ArrayBuffer>;format:'woff'|'woff2'|'truetype'|'opentype'};
 const faces:{family:string;weight:string;src:PrintFontSource;face:FontFace}[]=[];
+const scopedFamilies=[
+  ['맑은 고딕','맑은고딕','Malgun Gothic'],
+  ['함초롬바탕','함초롬 바탕','HCR Batang','HCRBatang'],
+  ['함초롬돋움','함초롬 돋움','HCR Dotum','HCRDotum'],
+  ['바탕','Batang'],
+  ['HY헤드라인M','HYHeadLine-Medium','HYHeadLine M','HYHeadLine Medium'],
+];
+const exactNominal=new Map<string,Map<string,ReturnType<typeof readLocalGlyphWidths>>>();
+// W1c's existing internal environment shape requires a 64-hex field.
+// The zero value means unverified local metrics, not a font fingerprint.
+// Widths and source character styles drive fitting; no provenance check.
+const unverifiedLocalMetricTag='0'.repeat(64);
+type NominalMetrics={family:string;bold:boolean;italic:boolean;sourceSha256:string;unitsPerEm:number;advances:Record<number,number>};
+let nominalGeneration=0, localSourceGeneration=0;
+const checkedLocalSources=new WeakMap<object,number>();
+const waitingSymbolAsset=new WeakMap<object,number>();
+const measuredOpenMetrics=new WeakMap<object,{revision:number;generation:number;metrics:NominalMetrics[]}>();
+const localOpenDocs=new WeakSet<object>();
+const attemptedLocal=new Map<string,LocalFace>();
+const appliedEnvironment=new WeakMap<object,string>();
+const rejectedScopedEnvironment=new WeakMap<object,string>();
+// Isolated trial only. Reuse the existing SRI asset fetch and local face
+// permission; never ask the browser to substitute a family through CSS.
+const trialSymbolFont={file:'NotoSansSymbols2-Regular.ttf',
+  sha256:'7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21'};
+let readySymbolTrialAsset:{bytes:Uint8Array<ArrayBuffer>;widths:ReturnType<typeof readLocalGlyphWidths>}|undefined;
+const symbolTrialActive=new WeakSet<object>();
+const initializedSymbolTrial=new WeakSet<object>();
+const trialSymbol=(c:number)=>(c>=0x2190&&c<=0x22ff)||(c>=0x2460&&c<=0x24ff)||(c>=0x2500&&c<=0x25ff);
+const covered=(widths:ReturnType<typeof readLocalGlyphWidths>,cp:number)=>{
+  const w=widths.lookup(cp);return w>0&&w!==65535;
+};
+function symbolTrialMisses(a:RhwpAdapter){
+  const doc=a.doc;
+  // No installed-face bytes means no verified miss. Do not fetch the asset.
+  if(!localSources.size)return;
+  const missed=new Map<number,{bytes:Uint8Array<ArrayBuffer>;cps:Set<number>}>();
+  const metrics=new Map<Uint8Array<ArrayBuffer>,ReturnType<typeof readLocalGlyphWidths>>();
+  for(let page=0;page<doc.pageCount();page++){
+    const raw=JSON.parse(doc.getFontDecisionTrace(page,'{"maxCharacters":4096}'));
+    if(raw.status!=='complete')return;
+    const runs=a.runs(page);
+    for(const r of raw.records){
+      const x=r.source,f=r.document,cp=Number(x?.codePoint),id=Number(x?.charShapeId);
+      if(!trialSymbol(cp)||x?.status!=='complete'||!Number.isSafeInteger(id)||f?.embedded!==false
+        ||f.languageSlot!==5||typeof f.face!=='string'||x.charOffset==null)continue;
+      const run=runs.find(t=>(t as typeof t & {charShapeId?:number}).charShapeId===id&&
+        x.charOffset>=t.charStart&&t.text&&[...t.text][x.charOffset-t.charStart]?.codePointAt(0)===cp);
+      if(!run)continue;
+      const props=a.charProps(a.position(run,x.charOffset));
+      if(props.bold===true||props.italic===true||Number(props.charShapeId)!==id)continue;
+      const bytes=localSources.get(f.face)?.find(e=>e.weight==='400')?.bytes;
+      if(!bytes)continue;
+      let widths=metrics.get(bytes);
+      if(!widths){widths=readLocalGlyphWidths(bytes);metrics.set(bytes,widths);}
+      if(covered(widths,cp))continue;
+      const m=missed.get(id);
+      if(m&&m.bytes!==bytes)return;
+      if(m)m.cps.add(cp);else missed.set(id,{bytes,cps:new Set([cp])});
+      if(missed.size>64)return;
+    }
+  }
+  return missed;
+}
+async function loadSymbolTrialAsset(a:RhwpAdapter, verifiedMiss?:boolean){
+  if(readySymbolTrialAsset||!(verifiedMiss??!!symbolTrialMisses(a)?.size))return;
+  const bytes=await verifiedFont(trialSymbolFont.file,trialSymbolFont.sha256);
+  readySymbolTrialAsset={bytes,widths:readLocalGlyphWidths(bytes)};
+}
+
+function nominalFamily(name:string){
+  return scopedFamilies.find(group=>group.some(n=>familyKey(n)===familyKey(name)))?.[0];
+}
+function rememberNominal(family:string,weight:string,bytes:Uint8Array<ArrayBuffer>){
+  const name=nominalFamily(family);
+  if(!name)return;
+  try{
+    const widths=readLocalGlyphWidths(bytes);
+    const faces=exactNominal.get(name)??new Map();
+    faces.set(weight,widths);exactNominal.set(name,faces);nominalGeneration++;
+  }catch{/* A face can load in the browser without usable standalone metrics. */}
+}
+function authoredFonts(a:RhwpAdapter){
+  if(sourceRevisions.get(a.doc)!==a.revision){
+    const info=JSON.parse(a.doc.getDocumentInfo());
+    originalNames.set(a.doc,new Set<string>((info.fontsUsed??[])
+      .filter((n:unknown):n is string=>typeof n==='string'&&safe(n))));
+    sourceRevisions.set(a.doc,a.revision);
+  }
+  return originalNames.get(a.doc)!;
+}
+export async function loadOpenFonts(a:RhwpAdapter){
+  // Reuse the installed faces already available to this tab. No permission
+  // prompt on file open; out-of-scope families keep their existing resolver.
+  const names=[...authoredFonts(a)].filter(n=>nominalFamily(n));
+  await Promise.all(names.map(async name=>{
+    await ensureFont(name);
+    const face=localFaceFor(name,'400');
+    if(face&&!localSources.has(name)&&attemptedLocal.get(name)!==face){
+      attemptedLocal.set(name,face);pending.delete(name);await ensureFont(name);
+    }
+    if(fontSupply(name)?.status==='unavailable')await ensureFont(fallbackFamily(name));
+  }));
+  await document.fonts.ready;
+  try{await loadSymbolTrialAsset(a);}catch{/* Unknown coverage or asset integrity failure: keep existing display. */}
+}
+export function prepareLocalOpenDisplay(a:RhwpAdapter){
+  const doc=a.doc;
+  localOpenDocs.add(doc);
+  const asset=readySymbolTrialAsset;
+  if(!asset||initializedSymbolTrial.has(doc))return applyFontEnvironment(a);
+  try{
+    // FileLifecycle discards the validation document. Bind only fresh,
+    // re-read source slots in the actual replacement before its first SVG.
+    const misses=symbolTrialMisses(a);
+    const plan=new Map([...(misses??[])].filter(([,m])=>[...m.cps].some(cp=>covered(asset.widths,cp)))
+      .map(([id,m])=>[id,m.bytes]));
+    if(!plan.size)return applyFontEnvironment(a);
+    initializedSymbolTrial.add(doc);
+    symbolTrialActive.add(doc);
+    applyFontEnvironment(a);
+    for(const [id,primary] of plan){
+      const r=JSON.parse(doc.registerExactFontSource(id,5,primary,0));
+      if(!r.ok||r.role==='pinnedSymbolFallback')throw Error('trial original source declined');
+    }
+    const id=plan.keys().next().value!;
+    const r=JSON.parse(doc.registerExactFontSource(id,5,asset.bytes,0));
+    if(!r.ok||r.role!=='pinnedSymbolFallback'||r.handle?.fontSourceSha256!==trialSymbolFont.sha256)
+      throw Error('trial asset declined');
+    a.invalidateUpdateReads();
+    return true;
+  }catch{
+    symbolTrialActive.delete(doc);
+    return applyFontEnvironment(a);
+  }
+}
+// The user may permit installed-font access after opening the file. Reuse
+// the first-open probe on the adopted document, not on the discarded parser
+// probe. Until the pinned asset settles, keep the current presentation; the
+// next safe UI refresh publishes exactly one new layout for this result.
+export function refreshLocalOpenDisplay(a:RhwpAdapter, onAssetReady:()=>void):boolean{
+  const doc=a.doc, generation=localSourceGeneration;
+  if(!localOpenDocs.has(doc)||a.transientEdit||initializedSymbolTrial.has(doc)||generation===0)
+    return applyFontEnvironment(a);
+  if(waitingSymbolAsset.get(doc)===generation)return false;
+  if(checkedLocalSources.get(doc)!==generation){
+    checkedLocalSources.set(doc,generation);
+    if(readySymbolTrialAsset)return prepareLocalOpenDisplay(a);
+    let hasMiss=false;
+    try{ hasMiss=!!symbolTrialMisses(a)?.size; }
+    catch{/* Unknown coverage does not grant a fallback. */}
+    if(hasMiss){
+      waitingSymbolAsset.set(doc,generation);
+      void loadSymbolTrialAsset(a,true).then(()=>{
+        if(checkedLocalSources.get(doc)===generation)checkedLocalSources.delete(doc);
+      }).catch(()=>{/* Asset invalid or unavailable: ordinary font supply only. */}).finally(()=>{
+        if(waitingSymbolAsset.get(doc)===generation)waitingSymbolAsset.delete(doc);
+        if(a.doc===doc)onAssetReady();
+      });
+      return false;
+    }
+  }
+  return applyFontEnvironment(a);
+}
+function scopedMetrics(a:RhwpAdapter, names:Set<string>){
+  const cached=measuredOpenMetrics.get(a.doc);
+  if(cached?.revision===a.revision&&cached.generation===nominalGeneration)return cached.metrics;
+  const available=new Set([...names].map(nominalFamily)
+    .filter((n):n is string=>!!n&&exactNominal.has(n)));
+  if(!available.size)return [];
+  const chars=new Set<number>(),families=new Set<string>();
+  // Declared font tables may contain unused faces. Feed metrics only for
+  // authored runs, never for a paint-time CSS fallback of another family.
+  for(let page=0;page<a.doc.pageCount();page++){
+    const trace=JSON.parse(a.doc.getFontDecisionTrace(page,'{"maxCharacters":4096}')).records as
+      {document:{face?:string}}[];
+    for(const r of trace){
+      const f=r.document.face&&nominalFamily(r.document.face);
+      if(f&&available.has(f))families.add(f);
+    }
+    for(const run of JSON.parse(a.doc.getPageTextLayout(page)).runs)for(const c of run.text as string){
+        const cp=c.codePointAt(0)!;
+        if(cp===0xb7||(cp>=0xac00&&cp<=0xd7a3)||/^[0-9A-Za-z]$/.test(c))chars.add(cp);
+      }
+  }
+  const metrics=chars.size>4096?[]:[...families].flatMap(family=>[...exactNominal.get(family)!].flatMap(([weight,face])=>{
+    const advances:Record<number,number>={};
+    for(const cp of chars){const width=face.lookup(cp);if(width>0&&width!==65535)advances[cp]=width;}
+    return Object.keys(advances).length?[{family,bold:weight==='700',italic:false,
+      sourceSha256:unverifiedLocalMetricTag,unitsPerEm:face.unitsPerEm,advances}]:[];
+  }));
+  measuredOpenMetrics.set(a.doc,{revision:a.revision,generation:nominalGeneration,metrics});
+  return metrics;
+}
 const localSources=new Map<string,{weight:string;bytes:Uint8Array<ArrayBuffer>}[]>();
 const localCore=new WeakMap<object,Map<string,string>>(),boundLocalSlots=new WeakMap<object,Map<string,Uint8Array<ArrayBuffer>>>();
 const rejectedLocalSlots=new WeakMap<object,Map<string,Uint8Array<ArrayBuffer>>>();
@@ -76,9 +271,12 @@ function printSource(src:PrintFontSource):string{
   }
   return value;
 }
+let fontSupplyInFlight=0;
+export function hasPendingFontSupply(){return fontSupplyInFlight!==0;}
 export function ensureFont(family:string):Promise<void>{
   if(!safe(family)||pending.has(family))return pending.get(family)??Promise.resolve();
   // Reserve before dispatch: open font fields synchronously refresh on status.
+  fontSupplyInFlight++;
   const job=Promise.resolve().then(async()=>{
     const existing=loadedFaces(family);
     if(existing.length&&(!localFaceFor(family,'400')||localSources.has(family))){record(family,'loaded','document',existing.map(f=>f.weight));return;}
@@ -101,7 +299,8 @@ export function ensureFont(family:string):Promise<void>{
             const face=await new FontFace(family,bytes,{weight,style:'normal'}).load();document.fonts.add(face);
             const format=String.fromCharCode(...bytes.subarray(0,4))==='OTTO'?'opentype':'truetype';
             faces.push({family,weight,face,src:{bytes,format}});weights.push(weight);
-            const list=localSources.get(family)??[];list.push({weight,bytes});localSources.set(family,list);detail='설치 파일 이름·디코딩 확인 · Core는 정확 언어 슬롯별 별도 등록';continue;
+            rememberNominal(family,weight,bytes);
+            const list=localSources.get(family)??[];list.push({weight,bytes});localSources.set(family,list);if(weight==='400')localSourceGeneration++;detail='설치 파일 이름·디코딩 확인 · Core는 정확 언어 슬롯별 별도 등록';continue;
           }
           // Resolve real local names, never masquerade a different font as HCR.
           const names=weight==='700'?group.flatMap(n=>[n+' Bold',n.replaceAll(' ','')+'-Bold',n+' 굵게']):group;
@@ -125,7 +324,7 @@ export function ensureFont(family:string):Promise<void>{
       // Never mark the requested source family as loaded by a different font.
       if(!web&&!weights.length)void ensureFont(fallbackFamily(family));
     }
-  });pending.set(family,job);return job;
+  }).finally(()=>{fontSupplyInFlight--;});pending.set(family,job);return job;
 }
 let recovery:Promise<void>|undefined;
 /** Explicit user retry only. Successful verified bytes stay shared and intact. */
@@ -212,7 +411,9 @@ export function requestPageFonts(a:RhwpAdapter,pages:HTMLElement){
       }
     }
   }
-  bindLocalFontSources(a,pages);
+  const scopedLocalOpen=localOpenDocs.has(a.doc);
+  if([...localSources.keys()].some(family=>!scopedLocalOpen||!nominalFamily(family)))
+    bindLocalFontSources(a,pages);
 }
 function bindLocalFontSources(a:RhwpAdapter,pages:HTMLElement){
   if(!localSources.size||a.transientEdit)return;
@@ -227,6 +428,7 @@ function bindLocalFontSources(a:RhwpAdapter,pages:HTMLElement){
     if(!Number.isSafeInteger(shape)||seen.has(shape)||!Array.isArray(raw.fontFamilies)||raw.fontFamilies.length!==7)continue;seen.add(shape);
     raw.fontFamilies.forEach((family:unknown,language:number)=>{
       if(typeof family!=='string'||raw.italic===true)return;
+      if(localOpenDocs.has(a.doc)&&nominalFamily(family))return;
       const source=localSources.get(family)?.find(f=>f.weight===(raw.bold===true?'700':'400'));if(!source)return;
       const key=shape+':'+language;if(slots!.get(key)===source.bytes||rejected!.get(key)===source.bytes)return;
       requests.push({shape,language,family,bytes:source.bytes});
@@ -256,12 +458,34 @@ export function applyFontEnvironment(a:RhwpAdapter, source = a):boolean{
   }
   // Detached layout checks need the live document's display substitutions,
   // but an empty mapping leaves the sibling's default environment alone.
+  // Reuse the verified face before a replacement document is first laid out.
+  // Preparing a new document never requests permission again.
   if(source!==a&&!Object.keys(substitutions).length)return false;
   // A changed font generation invalidates derived Core measurements/page trees,
   // not document fonts/saved lines. Never call reflowLinesegs for supply changes.
-  const env=JSON.stringify({id:'edit-fonts-'+revision,substitutions});
-  a.invalidateUpdateReads();
-  return a.doc.setFontEnvironment(env);
+  const localOpen=localOpenDocs.has(a.doc);
+  const scopedGlyphMetrics=localOpen?scopedMetrics(a,authoredFonts(a)):[];
+  const selected=new Set(scopedGlyphMetrics.map(f=>f.family));
+  const scopedSubstitutions=Object.fromEntries(Object.entries(substitutions)
+    .filter(([name])=>!selected.has(nominalFamily(name)??'')));
+  const base={id:localOpen?'edit-fonts-local-open':'edit-fonts-'+revision,substitutions,
+    registeredSymbolFallbackSourceSha256:symbolTrialActive.has(a.doc)?trialSymbolFont.sha256:undefined};
+  const selectedEnv=JSON.stringify(scopedGlyphMetrics.length?{...base,substitutions:scopedSubstitutions,scopedGlyphMetrics}:base);
+  let env=rejectedScopedEnvironment.get(a.doc)===selectedEnv?JSON.stringify(base):selectedEnv;
+  if(localOpen&&appliedEnvironment.get(a.doc)===env)return false;
+  let changed:boolean;
+  try{changed=a.doc.setFontEnvironment(env);}
+  catch(error){
+    if(!scopedGlyphMetrics.length||!String(error).includes('scoped metrics cannot fit'))throw error;
+    // Its transaction is atomic. Keep the old/font fallback rule when a
+    // verified face cannot be fitted without changing the authored envelope.
+    rejectedScopedEnvironment.set(a.doc,selectedEnv);
+    env=JSON.stringify(base);
+    changed=appliedEnvironment.get(a.doc)===env?false:a.doc.setFontEnvironment(env);
+  }
+  if(changed)a.invalidateUpdateReads();
+  if(localOpen)appliedEnvironment.set(a.doc,env);
+  return changed;
 }
 // A standalone print image cannot share FontFace objects with the editor. Web
 // aliases can, however, name the same verified bytes at every supplied weight.

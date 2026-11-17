@@ -7,7 +7,9 @@ export function resetHancomCellDialog(root: HTMLElement) {
   root.closest("dialog")?.querySelector(".cell-close")?.remove();
   root.closest("dialog")?.querySelector(".cell-scope-note")?.remove();
 }
-export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, nestedOwner = false, blockScope = false, nestedValign = false) {
+export type TablePaginationDisplay = {treatAsChar:boolean; pageBreak:0|1|2};
+
+export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, nestedOwner = false, blockScope = false, nestedValign = false, pagination?: TablePaginationDisplay) {
   const lifetime = new AbortController(); lifetimes.set(root, lifetime);
   const dialog = root.closest<HTMLDialogElement>("dialog")!;
   const rows = new Map([...root.querySelectorAll<HTMLElement>("label[data-field]")].map(r => [r.dataset.field!, r]));
@@ -72,7 +74,22 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   const outer = group(pages[1], "바깥 여백"); for (const n of ["왼쪽", "위쪽", "오른쪽", "아래쪽"]) unsupported(outer, n + " (mm)", "number");
   const caption = group(pages[1], "캡션"); for (const n of ["위치", "크기 (mm)", "개체와의 간격 (mm)"]) unsupported(caption, n, "text"); unsupported(caption, "여백 부분까지 너비 확대"); unsupported(caption, "한 줄로 입력");
   const breaks = group(pages[2], "여러 쪽 지원");
-  for (const n of ["나눔", "셀 단위로 나눔", "나누지 않음", "제목 줄 자동 반복", "자동으로 나뉜 표의 경계선 설정"]) unsupported(breaks, n);
+  if (!blockScope) {
+    const setting = document.createElement("dl");
+    const value = (label: string, name: string, text: string) => {
+      const term = document.createElement("dt"), data = document.createElement("dd");
+      term.textContent = label; data.dataset.tablePagination = name; data.textContent = text;
+      setting.append(term, data);
+    };
+    value("글자처럼 취급", "inline", pagination ? (pagination.treatAsChar ? "켜짐" : "꺼짐") : "확인할 수 없음");
+    value("쪽 경계에서", "mode", pagination ? (["나누지 않음", "나눔", "셀 단위로 나눔"] as const)[pagination.pageBreak] : "확인할 수 없음");
+    const detail = document.createElement("p");
+    detail.textContent = pagination?.treatAsChar
+      ? "한컴에서 글자처럼 취급하는 표에는 쪽 경계 설정을 적용하지 않습니다. 위에는 문서에 저장된 값을 표시합니다."
+      : nestedOwner ? "이 표의 쪽 나누기 속성을 직접 조회할 수 없습니다. 바깥 표의 값은 표시하지 않습니다."
+      : "현재 값 보기만 지원합니다.";
+    breaks.append(setting, detail);
+  }
   const common = group(pages[2], "모든 셀의 안 여백"); for (const n of ["왼쪽", "위쪽", "오른쪽", "아래쪽"]) unsupported(common, n + " (mm)", "number");
   const cellSize = group(pages[3], "셀 크기", "cell-size"); unsupported(cellSize, "셀 크기 적용"); unsupported(cellSize, "너비 (mm)", "number"); unsupported(cellSize, "높이 (mm)", "number");
   const margins = group(pages[3], "안 여백 지정", "cell-margins"); move("applyInnerMargin", margins, 3, "안 여백 지정");
@@ -143,7 +160,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   const note = document.createElement("p"); note.className = "cell-scope-note"; note.textContent = "선택한 셀에 바꾼 항목만 적용합니다.";
   if(blockScope)note.textContent='선택한 범위의 바깥선과 단색 배경을 바꿉니다. 안쪽 선은 유지됩니다.';
   for(const p of [...pages,...borderPages])for(const f of p.querySelectorAll<HTMLFieldSetElement>('fieldset'))
-    if(!f.querySelector('input,select,button,output'))f.hidden=true;
+    if(!f.querySelector('input,select,button,output,[data-table-pagination]'))f.hidden=true;
   root.replaceChildren(nav, ...pages, ...borderPages, switcher);
   // Keep admission/preservation guidance visible beside the action buttons,
   // without adding another footer row to the captured native window height.
@@ -153,8 +170,8 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     dialog.dataset.cellPage = mode ? "border" : "properties";
     dialog.dataset.cellScope=blockScope?'block':'each';
     dialog.querySelector("#format-title")!.textContent = mode ? (blockScope?'셀 테두리/배경 · 하나의 셀처럼':'셀 테두리/배경') : "표/셀 속성";
-    const indices = mode ? [0, 1] : [3];
-    const labels = mode ? ["테두리", "배경"] : ["셀"];
+    const indices = mode ? [0, 1] : blockScope ? [3] : [2, 3];
+    const labels = mode ? ["테두리", "배경"] : blockScope ? ["셀"] : ["표", "셀"];
     if (tabs.dataset.mode !== String(mode)) {
       tabs.replaceChildren(); tabs.dataset.mode = String(mode);
       labels.forEach((text, ordinal) => {

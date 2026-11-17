@@ -1,3 +1,4 @@
+import { approvedEmbedChrome } from "./approved-embed-chrome.js";
 import { closeEditorDialog, keepDialogFieldFocus, showDocumentEditingDialog, showEditorDialog } from "./editor-popup-focus.js";
 import { subscribeWhileOpen } from "./ui-demand-lifetime.js";
 import {activeWorkset} from "./active-workset.js";
@@ -101,7 +102,7 @@ import { mountFields as basicFields } from "./format-dialog.js";
 import { mountFields } from "./integration/a-format-dialog.js";
 import { focusParagraphBeforeShortcut, mountHancomParagraphDialog, resetHancomParagraphDialog } from "./hancom-paragraph-dialog.js";
 import { appendDialogShortcutHelp } from "./dialog-shortcut-help.js";
-import { mountHancomCellDialog, resetHancomCellDialog } from "./hancom-cell-dialog.js";
+import { mountHancomCellDialog, resetHancomCellDialog, type TablePaginationDisplay } from "./hancom-cell-dialog.js";
 import { mountSearch } from "./integration/a-search.js";
 import { editMenuState, mountEditMenu } from "./integration/a-edit-menu.js";
 import { mountTableMenu } from "./integration/a-table-menu.js";
@@ -229,7 +230,7 @@ export function qaLocalCellSubmit(url: string): boolean {
 export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   const documentTools = doc.querySelector("header nav, #workspace-quickbar nav");
   if (
-    !files.ui.standalone ||
+    (!files.ui.standalone && !approvedEmbedChrome(doc)) ||
     !doc.getElementById("pages") ||
     !doc.getElementById("input") ||
     !documentTools
@@ -354,6 +355,12 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     }
     if(action==='toolbox'){(doc.getElementById('toolbox-collapse')??doc.querySelector<HTMLButtonElement>('[data-toolbox-view="toolbar"]'))?.click();return;}
     if(action==='paste-choose'){pasteChooser.show();return;}
+    if(action==='table-smart-delete'){
+      const target=editor.capture(), tracks=editor.selectedDeleteTracks();
+      if(tracks.row||tracks.col)tableKeyDraft.show('table-delete',tracks);
+      else {editor.execute({type:'clear-cells'},target);changed();focus();}
+      return;
+    }
     if(action==='table-add'||action==='table-delete'||action==='cell-split'){tableKeyDraft.show(action);return;}
     if(action==='object-background'){const row=shapes.readSelected();if(editor.selection.kind!=='object'||!row||row.name!=='글상자')throw Error('배경색 입구는 기존 본문 plain 글상자에서 지원합니다.');shapes.showProperties();const tab=doc.querySelector<HTMLButtonElement>('dialog[open] [data-object-tab="3"]');if(!tab)throw Error('글상자 채우기 탭을 확인할 수 없습니다.');tab.click();tab.focus();return;}
     if(action==='object-line'){
@@ -394,13 +401,14 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   const directPrintButton=doc.createElement('button');directPrintButton.type='button';directPrintButton.id='print-button';directPrintButton.textContent='인쇄';
   directPrintButton.setAttribute('aria-keyshortcuts','Control+P Meta+P Alt+P');documentTools!.append(directPrintButton);roots.push(directPrintButton);
   const showPrint = () => {
-    if(unavailable()||printDisposed||nativePrint.busy)return;
+    if(!files.ui.standalone||unavailable()||printDisposed||nativePrint.busy)return;
     for(const menu of doc.querySelectorAll<HTMLDetailsElement>('#main-menu > details[open]'))menu.open=false;
     void nativePrint.print();sync();
   };
   directPrintButton.onclick=showPrint;
   const syncPrint = () => {
     if(activeWorkset(doc)){directPrintButton.disabled=false;directPrintButton.title="브라우저 인쇄 창 (Ctrl+P) · 프린터·쪽 범위·매수·PDF 저장";return;}
+    if(!files.ui.standalone){directPrintButton.disabled=true;directPrintButton.title="독립 편집기에서 인쇄할 수 있습니다.";return;}
     nativePrint.sync();
     directPrintButton.disabled = unavailable() || nativePrint.busy;
     directPrintButton.title = "브라우저 인쇄 창 (Ctrl+P) · 프린터·쪽 범위·매수·PDF 저장";
@@ -563,7 +571,18 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
         mountHancomParagraphDialog(doc.getElementById("fields")!);
       else if (kind === "paragraph" && form.querySelector('input[name="spacingBefore"]:enabled:not([readonly])'))
         appendDialogShortcutHelp(doc.getElementById("fields")!, [["문단모양", [["u", "문단 위 간격 선택"]]]]);
-      if(kind === "cell") mountHancomCellDialog(doc.getElementById("fields")!, group === "테두리·배경", nested(capture.selection.focus),cellBlock,!!nestedDraft);
+      if(kind === "cell") {
+        const focus = capture.selection.focus;
+        let pagination: TablePaginationDisplay | undefined;
+        if(group !== "테두리·배경" && !cellBlock && focus.kind === "cell" && !nested(focus)){
+          try {
+            const {treatAsChar, pageBreak} = files.adapter.call("getTableProperties", focus.sec, focus.para, focus.control);
+            if(typeof treatAsChar === "boolean" && (pageBreak === 0 || pageBreak === 1 || pageBreak === 2))
+              pagination = {treatAsChar, pageBreak};
+          } catch { /* The cell editor still works when table-level values are unavailable. */ }
+        }
+        mountHancomCellDialog(doc.getElementById("fields")!, group === "테두리·배경", nested(focus),cellBlock,!!nestedDraft,pagination);
+      }
       form.onsubmit = (e) => {
         e.preventDefault();
         if (busy() || !format.open) return;
@@ -663,7 +682,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       return false;
     }
   }
-  mountTableBoundary(doc.getElementById('pages')!,editor,{busy:unavailable,changed,focus,error:e=>files.ui.error(e)});
+  mountTableBoundary(doc.getElementById('pages')!,editor,{busy:unavailable,layout:files.ui.tableDragLayout,changed,focus,error:e=>files.ui.error(e)});
   const pictureCanvas = mountPictureCanvas(doc.getElementById('pages')!,editor,{busy:unavailable,changed,selectionChanged:()=>files.ui.change(false),focus,error:e=>files.ui.error(e),selected:selecting=>selectionTools?.pointerSelectionStarted(selecting)});
   const objectHandles=mountObjectHandles(doc.getElementById('pages')!,editor,{busy:unavailable,changed,selectionChanged:()=>files.ui.change(false),focus,error:e=>files.ui.error(e),
     properties:()=>{
@@ -1111,7 +1130,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     // Only the exact equation script field owns its native Ctrl+P pile template.
     // The modal consumes it even while its local IME guard is settling.
     if(printKey&&e.ctrlKey&&!e.metaKey&&e.target instanceof Element&&e.target.matches('#remaining-equation[open] [data-equation-script]'))return;
-    if (printKey) {
+    if (printKey && files.ui.standalone) {
       e.preventDefault(); e.stopImmediatePropagation();
       const localField = e.target instanceof Element && e.target !== input && e.target.closest("input,select,textarea,[contenteditable=true]");
       if (!e.repeat && !e.isComposing && e.keyCode !== 229 && !e.getModifierState("AltGraph") && !localField) showPrint();

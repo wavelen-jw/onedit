@@ -1,3 +1,4 @@
+import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
 import { coreRuntimeDispatchEpoch } from "./core-runtime.js";
 import { isB338OwnerTrialDigest } from "./b338-focused-owner-trial.js";
 import { cursorModelMemoEnabled, cursorModelMemoEpoch, cursorModelReadWitness, readCursorModelMemo, screenInputDispatchEpoch, withCursorModelReadTransaction, type CursorModelView } from "./cursor-model-memo.js";
@@ -1204,9 +1205,55 @@ export class RhwpAdapter {
     >,
   ): CellBox[] {
     this.list({ ...p, cellPara: 0, offset: 0 });
-    return nested(p)
-      ? this.call("getTableCellBboxesByPath", p.sec, p.para, this.path(p))
-      : this.call("getTableCellBboxes", p.sec, p.para, p.control);
+    if (!nested(p)) return this.call("getTableCellBboxes", p.sec, p.para, p.control);
+    const boxes = this.call<CellBox[]>("getTableCellBboxesByPath", p.sec, p.para, this.path(p));
+    // 9aab may paint the last row of a complete 2×2 child on the following
+    // physical page. Its bbox cellIdx is local to each fragment, while the
+    // document path and hit-test own the original model indices.
+    if (coreRuntimeIdentity(this.doc)?.sha256 !==
+          rootEditorCoreSha256 ||
+        p.ancestors?.length !== 1 || boxes.length !== 4 ||
+        new Set(boxes.map(b => b.cellIdx)).size !== 2 ||
+        new Set(boxes.map(b => b.pageIndex)).size !== 2 ||
+        new Set(boxes.map(b => `${b.row}:${b.col}`)).size !== 4 ||
+        boxes.some(b => (b.row !== 0 && b.row !== 1) || (b.col !== 0 && b.col !== 1) ||
+          b.rowSpan !== 1 || b.colSpan !== 1 || b.cellIdx !== b.col ||
+          !Number.isSafeInteger(b.pageIndex) || b.pageIndex < 0 ||
+          ![b.x,b.y,b.w,b.h].every(Number.isFinite) || b.w <= 0 || b.h <= 0))
+      return boxes;
+    const top = boxes.find(b => b.row === 0)!.pageIndex;
+    if (boxes.some(b => b.pageIndex !== top + b.row)) return boxes;
+    try {
+      const dims = this.call("getTableDimensionsByPath", p.sec, p.para, this.path(p));
+      if (dims.rowCount !== 2 || dims.colCount !== 2 || dims.cellCount !== 4) return boxes;
+      const result: CellBox[] = [];
+      for (const b of boxes) {
+        const cellIdx = b.row * 2 + b.col;
+        const position = {...p,cell:cellIdx,cellPara:0,offset:0};
+        const path = this.path(position);
+        const model = this.call("getCellInfoByPath", p.sec, p.para, path);
+        if (model.row !== b.row || model.col !== b.col || model.rowSpan !== 1 || model.colSpan !== 1)
+          return boxes;
+        const caret = this.rect(position);
+        if (caret.pageIndex !== b.pageIndex || ![caret.x,caret.y,caret.height].every(Number.isFinite) ||
+            caret.x < b.x || caret.x >= b.x + b.w || caret.y < b.y ||
+            caret.y + caret.height > b.y + b.h + .2)
+          return boxes;
+        const hit = this.call("hitTest", b.pageIndex, caret.x + Math.min(1,(b.x+b.w-caret.x)/2), caret.y + caret.height/2);
+        if (hit.isTextBox || hit.sectionIndex !== p.sec || hit.parentParaIndex !== p.para ||
+            hit.cursorRect?.pageIndex !== b.pageIndex ||
+            !Array.isArray(hit.cellPath) || hit.cellPath.length !== 2 ||
+            !JSON.parse(path).every((h:{controlIndex:number;cellIndex:number;cellParaIndex:number},i:number)=>
+              h.controlIndex===hit.cellPath[i].controlIndex && h.cellIndex===hit.cellPath[i].cellIndex &&
+              h.cellParaIndex===hit.cellPath[i].cellParaIndex)) return boxes;
+        result.push({...b,cellIdx});
+      }
+      return result;
+    } catch {
+      // If the render/model bridge cannot prove all four owners, keep the
+      // existing raw selection refusal. Core authorizes every write itself.
+      return boxes;
+    }
   }
   runs(page: number): Run[] {
     return this.call("getPageTextLayout", page).runs;
@@ -1274,7 +1321,7 @@ export class RhwpAdapter {
     const position = this.hitPosition(page, x, r);
     // Use the original native hit's structured table text address, not the
     // converted position alone (which can also describe a textbox/object).
-    const hop=needTableWitness&&Array.isArray(r.cellPath)&&r.cellPath.length===1 ? r.cellPath[0] : undefined;
+    const hop=Array.isArray(r.cellPath)&&r.cellPath.length===1 ? r.cellPath[0] : undefined;
     const tableWitness=!!hop&&position.kind==="cell"&&!nested(position)&&r.isTextBox!==true&&
       r.innerControlIdx===undefined&&r.cursorRect?.pageIndex===page&&
       r.sectionIndex===position.sec&&r.parentParaIndex===position.para&&r.charOffset===position.offset&&
@@ -1296,7 +1343,7 @@ export class RhwpAdapter {
         }
       }
     }
-    return { position, rect, line, tableWitness };
+    return {position,rect,line,tableWitness:needTableWitness&&tableWitness,rootTableHitPage:tableWitness?page:undefined};
   }
   private hitPosition(page: number, x: number, r: any): Position {
     // Resolve no-text-run cell object hits through their exact owned control.

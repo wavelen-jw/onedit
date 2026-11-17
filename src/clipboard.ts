@@ -38,7 +38,7 @@ export function decodeEnvelope(wire: string) {
   )
     throw Error("지원하지 않거나 손상된 RHWP 클립보드 형식입니다.");
   if (data.paragraphMode !== undefined &&
-      data.paragraphMode !== "retain-target-at-body-end")
+      data.paragraphMode !== "retain-target-at-body-end" && data.paragraphMode !== "retain-target-for-inline-text")
     throw Error("지원하지 않는 클립보드 문단 결합 방식입니다.");
   const bytes = decode(data.payload);
   if (bytes.length > MAX_CLIPBOARD_BYTES)
@@ -124,6 +124,7 @@ export class StructuredClipboard {
         version: 1,
         encoding: "hwpx-fragment",
         payload: encode(payload),
+        ...(from.para === to.para && !a.hasBodyLayoutObject(from) ? {paragraphMode:"retain-target-for-inline-text"} : {}),
       });
       const data = a.call(
         "copyBodyBlock",
@@ -397,9 +398,9 @@ export class StructuredClipboard {
         "외부 HTML 표 가져오기는 아직 지원하지 않습니다. 텍스트 전용으로 복사한 내용을 붙여넣으세요.",
       );
     const payload = decodeEnvelope(envelope);
-    const retainParagraph =
-      JSON.parse(envelope).paragraphMode === "retain-target-at-body-end" &&
-      p.offset === a.length(p);
+    const paragraphMode = JSON.parse(envelope).paragraphMode;
+    const retainParagraph = paragraphMode === "retain-target-for-inline-text" ||
+      paragraphMode === "retain-target-at-body-end" && p.offset === a.length(p);
     const shapeId = retainParagraph ? a.paraProps(p).paraShapeId : undefined;
     if (retainParagraph && (!Number.isSafeInteger(shapeId) || Number(shapeId) < 0 ||
         typeof a.doc.setParaShapeId !== "function"))
@@ -412,7 +413,12 @@ export class StructuredClipboard {
       const source=siblingDocument(a.doc,fragment.toFragmentBytes());
       let object=false,objectOnly=false;
       try {
-        object=JSON.parse(source.getControls()).some((c:{ctrlId:string})=>c.ctrlId==='gso');
+        const controls: {ctrlId:string}[] = JSON.parse(source.getControls());
+        if (paragraphMode === "retain-target-for-inline-text" &&
+            (source.getSectionCount() !== 1 || source.getParagraphCount(0) !== 1 ||
+             controls.some(c => !["secd", "cold"].includes(c.ctrlId))))
+          throw Error("글자만 복사한 범위에 문단 또는 개체 구조가 포함되어 있습니다.");
+        object=controls.some(c=>c.ctrlId==='gso');
         objectOnly=object&&source.getSectionCount()===1&&source.getParagraphCount(0)===1&&source.getParagraphLength(0,0)===0;
       }finally{source.free();}
       if(object&&!allowObject)throw Error('개체 fragment는 본문 커서 위치에서 붙여넣으세요. 선택 대체는 별도 지원 범위입니다.');

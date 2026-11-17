@@ -196,11 +196,11 @@ export function showUtilityDialog(dialog: HTMLDialogElement, launcher: HTMLEleme
 }
 
 /** Return from a document-editing dialog through the editor's non-text viewport. */
-export function showDocumentEditingDialog(dialog: HTMLDialogElement) {
+export function showDocumentEditingDialog(dialog: HTMLDialogElement, ownsClipboardWork = false) {
   const doc = dialog.ownerDocument;
   const input = editorInput(doc), viewport = doc.getElementById('viewport');
   if (!dialog.open && dialog.isConnected && doc.hasFocus() && input &&
-      doc.activeElement === input && !blocked.get(doc)?.() && !doc.querySelector('dialog[open]') &&
+      doc.activeElement === input && (ownsClipboardWork || !blocked.get(doc)?.()) && !doc.querySelector('dialog[open]') &&
       viewport === input.parentElement && viewport?.getAttribute('tabindex') === '-1') {
     // showModal records the focused element. A keyboard launch from #input
     // must not hand the live text host back to native dialog.close(): that can

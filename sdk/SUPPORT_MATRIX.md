@@ -2,7 +2,7 @@
 
 | 항목 | RC2 범위 |
 | --- | --- |
-| 패키지 | 1.0.0-rc2, ESM / TypeScript declarations. Node.js 22 계약 시험. |
+| 패키지 | 1.0.0-rc3, ESM / TypeScript declarations. Node.js 22 계약 시험. |
 | 편집기 프로토콜 | onedit-host, transportVersion 2, apiVersion 1.0. checked-open-v1은 편집기 opt-in과 권한 확인 필요. |
 | 호환 타깃 | METADATA.json의 온편집 App과 Core. 타 빌드 또는 과거 v1 embed 호환은 이 RC의 새 브라우저 검증 범위가 아님. |
 | 생성 | Markdown / DocumentSpec. 등록 스타일, 일반 표, 구조화 DocumentSpec의 검증된 병합 격자 생성. |

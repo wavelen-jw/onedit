@@ -10,7 +10,7 @@ export function mountStatusStatistics(doc:Document,editor:Interaction,actions:{b
   const stats=characterStatistics(editor);
   const projectSelection=()=>{const node=doc.getElementById('selection');if(!node)return;try{node.textContent=stats.selection();}catch(error){node.textContent='선택정보 확인 불가';console.warn('선택 글자수 조회 실패',error);}};
   const attach=()=>{const line=doc.getElementById('workspace-status-line');if(line&&!line.contains(count))doc.getElementById('selection')?.before(count);};
-  const sync=()=>{attach();const value=stats.sync();count.textContent=value?`${value.total.toLocaleString()}자`:stats.error?'글자수 확인 불가':'집계 중…';count.setAttribute('aria-label',value?`문서 ${value.total.toLocaleString()}자 · 통계 열기`:count.textContent);count.disabled=actions.blocked();const state=doc.getElementById('status');if(state)state.textContent=specialEditingStatus(doc,editor);};
+  const sync=()=>{attach();const value=stats.sync();const text=value?`${value.total.toLocaleString()}자`:stats.error?'글자수 확인 불가':'집계 중…';if(count.textContent!==text)count.textContent=text;const label=value?`문서 ${text} · 통계 열기`:text;if(count.getAttribute('aria-label')!==label)count.setAttribute('aria-label',label);count.disabled=actions.blocked();const state=doc.getElementById('status');if(state)state.textContent=specialEditingStatus(doc,editor);};
   count.onpointerdown=e=>e.preventDefault();count.onclick=()=>{if(!actions.blocked())actions.show(count);};
   stats.onchange=()=>{sync();if(!doc.querySelector('#textbox-edit-dialog[open]'))projectSelection();doc.dispatchEvent(new CustomEvent('rhwp:statistics'));};
   doc.addEventListener('rhwp:editor-state',sync);

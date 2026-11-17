@@ -2185,6 +2185,7 @@ body:has(.host-view-footer) > #toolbar { max-height:150px; }
 #selection-tools [data-selection-section=paragraph] { border-top:1px solid var(--floating-line); padding-top:6px; }
 #selection-tools select[name=fontFamily] { appearance:auto; width:100px; font:12px/20px system-ui,sans-serif; padding:2px; border-color:var(--floating-line); }
 #selection-tools .selection-stepper { display:inline-flex; align-items:center; border:1px solid var(--floating-line); border-radius:5px; }
+#selection-tools .selection-size-input { box-sizing:border-box; width:44px; text-align:center; font:11px/20px system-ui,sans-serif; padding:0 2px; }
 #selection-tools .selection-value { min-width:28px; text-align:center; font:11px/20px system-ui,sans-serif; white-space:nowrap; }
 #selection-tools [data-metric=spacings] { font:11px/20px system-ui,sans-serif; }
 #selection-tools .selection-tracking { display:inline-flex;flex:none;align-items:center;gap:2px;border:1px solid var(--floating-line);border-radius:5px;padding:0 2px; }

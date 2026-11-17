@@ -196,8 +196,7 @@ export function mountEditMenu(
   root.querySelector('[data-menu-panel]')!.append(choose);
   live("format-copy", "g", "모양 복사(G)…", "Alt+C");
   live("format-paste", "v", "모양 붙여넣기", ""); separator();
-  // Ctrl+E shares text/table-object deletion. A cell block's shortcut opens
-  // the structural table draft; this explicit menu keeps content deletion.
+  // The explicit edit menu keeps content deletion for cell blocks.
   live("delete", "d", "지우기(D)", "Ctrl+E");
   held("y", "조판 부호 지우기(Y)…", "조판 부호 일괄 삭제 명령은 연결되지 않았습니다.");
   live("all", "a", "모두 선택(A)", "Ctrl+A"); separator();

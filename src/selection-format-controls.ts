@@ -5,6 +5,7 @@ import {formatValueState,formatToggleState,markFormatToggle} from './format-valu
 import {formatMenuItems} from './integration/a-format-menu.js';
 import {mountFormatHoverPreview} from './format-hover-preview.js';
 import {mountTextColorSplit} from './text-color-split.js';
+import {quickFormatDelta} from './quick-format.js';
 
 export function mountSelectionFormatControls(doc:Document,editor:Interaction,character:HTMLElement,paragraph:HTMLElement,actions:{valid:()=>boolean;blocked:()=>boolean;target:()=>ReturnType<Interaction['capture']>|undefined;execute:(command:Command)=>void;focus:()=>void}){
   const life=new AbortController(),signal=life.signal,preview=mountFormatHoverPreview(doc,editor),note=doc.createElement('output');note.setAttribute('aria-live','polite');paragraph.append(note);
@@ -46,15 +47,42 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
       svg.append(path);caption.append(svg);group.append(caption);
     }
     const change=(direction:-1|1):Command|undefined=>{const current=num(kind,key);if(current===undefined)return;const next=current+direction*step;if(next<min||next>max)return;return kind==='char'?{type:'char',props:toCoreCharacter({[key]:next})}:{type:'paragraph',props:toCoreParagraph({[key]:next,...(key==='lineSpacing'?{lineSpacingType:'Percent'}:{})})};};
-    const minus=button(group,'−',label+' 줄이기',()=>change(-1)),display=doc.createElement('span');display.className='selection-value';display.dataset.metric=key;numbers.set(key,display);group.append(display);const plus=button(group,'+',label+' 늘리기',()=>change(1));
-    return()=>{const value=num(kind,key);display.textContent=value===undefined?(formatValueState(state(kind),key)==='mixed'?'±':'?'):String(value)+(key==='lineSpacing'?'%':key==='fontSize'||key.startsWith('spacing')?'pt':'');display.setAttribute('aria-label',label+' '+display.textContent);minus.disabled=value===undefined||value-step<min||value-step>max;plus.disabled=value===undefined||value+step>max||value+step<min;};
+    const minus=button(group,'−',label+' 줄이기',()=>change(-1));
+    const display=doc.createElement('span');display.className='selection-value';display.dataset.metric=key;
+    numbers.set(key,display);
+    const draft=key==='fontSize'?doc.createElement('input'):undefined;
+    if(draft){
+      draft.type='text';draft.inputMode='decimal';draft.maxLength=7;
+      draft.setAttribute('aria-label','선택 글자 크기 (pt)');draft.className='selection-size-input';
+      draft.title='글자 크기 1~200pt · Enter 적용';
+      draft.addEventListener('focus',()=>draft.select());
+      draft.addEventListener('keydown',e=>{
+        if(e.isComposing||e.keyCode===229||e.key!=='Enter'||e.ctrlKey||e.altKey||e.metaKey||e.shiftKey)return;
+        e.preventDefault();e.stopPropagation();
+        run(()=>{
+          if(!/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(draft.value))throw Error('글자 크기는 1~200pt의 숫자로 입력하세요.');
+          const props=quickFormatDelta('all',{font:'',size:''},{font:'',size:draft.value});
+          return {type:'char',props};
+        });
+      });
+      draft.addEventListener('blur',()=>{const v=num(kind,key);draft.value=v===undefined?'':String(v);});
+      group.append(draft);
+    }else group.append(display);
+    const plus=button(group,'+',label+' 늘리기',()=>change(1));
+    return()=>{
+      const value=num(kind,key),placeholder=formatValueState(state(kind),key)==='mixed'?'±':'?';
+      display.textContent=value===undefined?placeholder:String(value)+(key==='lineSpacing'?'%':key.startsWith('spacing')?'pt':'');
+      display.setAttribute('aria-label',label+' '+display.textContent);
+      if(draft){draft.placeholder=placeholder;if(doc.activeElement!==draft)draft.value=value===undefined?'':String(value);}
+      minus.disabled=value===undefined||value-step<min;plus.disabled=value===undefined||value+step>max;
+    };
   };
   const fontGroup=doc.createElement('span');fontGroup.className='selection-font';character.append(fontGroup);
   const font=doc.createElement('button');font.type='button';font.setAttribute('aria-label','글꼴 선택');font.setAttribute('aria-expanded','false');fontGroup.append(font);
   const fontChoices=doc.createElement('span');fontChoices.className='selection-font-choices';fontChoices.hidden=true;fontGroup.append(fontChoices);
   font.onclick=()=>{preview.clear();fontChoices.hidden=!fontChoices.hidden;font.setAttribute('aria-expanded',String(!fontChoices.hidden));};
   for(const name of ['함초롬바탕','함초롬돋움','맑은 고딕']){const b=button(fontChoices,name.replace('맑은 고딕','맑은고딕'),name+' 적용',()=>({type:'char',props:toCoreCharacter({fontFamily:name})}));b.dataset.selectionFont=name;b.addEventListener('click',()=>{fontChoices.hidden=true;font.setAttribute('aria-expanded','false');},{signal});}
-  const sizeSync=metric(character,'fontSize','글자 크기','char',1,10,15);
+  const sizeSync=metric(character,'fontSize','글자 크기','char',1,1,200);
   const bold=button(character,'B','선택 진하게',()=>({type:'bold'}));bold.classList.add('selection-bold');
   const color=mountTextColorSplit(doc,editor,doc.createElement('input'),{
     idPrefix:'selection-text-color',busy:()=>!actions.valid()||actions.blocked(),readBusy:()=>!actions.valid()||actions.blocked(),focus:actions.focus,

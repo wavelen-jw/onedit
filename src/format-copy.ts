@@ -12,7 +12,7 @@ export type FormatCopyMode = "char" | "paragraph" | "both";
 export type FormatCopySample = {
   documentId: string; revision: number; mode: FormatCopyMode;
   character?: Props; paragraph?: Props;
-  snapshot?: Readonly<{ native: HwpDocument; value: OneditPrivateFormatSnapshotV1 }>;
+  snapshot?: Readonly<{ native: HwpDocument; value: OneditPrivateFormatSnapshotV1; paragraphOnly?: OneditPrivateFormatSnapshotV1 }>;
 };
 export function formatCopySelectionReason(editor: Interaction) {
   const s = editor.selection;
@@ -48,7 +48,17 @@ export function captureFormatCopy(editor: Interaction, mode: FormatCopyMode): Fo
         path: owner.path, expectedTargetId: owner.expectedTargetId },
       mode, offset: p.kind === "body" ? a.textOffset(p) : p.offset,
     }));
-    sample.snapshot = Object.freeze({ native: a.doc, value });
+    try {
+      const paragraphOnly = mode === "both" ? a.doc.oneditPrivateCaptureFormatSnapshotV1(JSON.stringify({
+        target: { section: owner.sectionIndex, paragraph: owner.parentParaIndex,
+          path: owner.path, expectedTargetId: owner.expectedTargetId },
+        mode: "paragraph", offset: 0,
+      })) : undefined;
+      sample.snapshot = Object.freeze({ native: a.doc, value, paragraphOnly });
+    } catch (error) {
+      value.free();
+      throw error;
+    }
   }
   return Object.freeze(sample);
 }
@@ -57,7 +67,7 @@ export function mountFormatCopy(doc: Document, editor: Interaction, hooks: {
   busy: () => boolean; changed: () => void; focus: () => void; feedback: (error: unknown) => void;
 }) {
   let sample: FormatCopySample | undefined, target: ReturnType<Interaction["capture"]> | undefined;
-  const discardSample = () => { const prior = sample; sample = undefined; prior?.snapshot?.value.free(); };
+  const discardSample = () => { const prior = sample; sample = undefined; prior?.snapshot?.value.free(); prior?.snapshot?.paragraphOnly?.free(); };
   doc.defaultView?.addEventListener("pagehide", discardSample);
   const dialog = doc.createElement("dialog"); dialog.id = "format-copy-dialog";
   dialog.setAttribute("aria-labelledby", "format-copy-title");

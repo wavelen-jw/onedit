@@ -64,7 +64,7 @@ import { selectedCutObject } from './object-clipboard.js';
 import { loadCoreRuntime,coreRuntimeSha256,coreRuntimeIdentity } from "./core-runtime.js";
 import type { LiveComposition } from "./live-composition.js";
 import { RhwpAdapter } from "./adapter.js";
-import { Interaction } from "./interaction.js";
+import { ClippedTextEdit, Interaction } from "./interaction.js";
 import { mountShortcutResults } from "./shortcut-results.js";
 import { mountMenuSettings } from "./menu-settings.js";
 import {mountLocalFontSettings} from './local-font-settings.js';
@@ -73,7 +73,7 @@ import { mountPageNumber } from "./page-number-ui.js";
 import { mountColumns } from "./columns-ui.js";
 import { formatMenuState as settingsCommandState } from "./integration/a-format-menu.js";
 import { type Props, type Run, copy, nested, samePosition } from "./model.js";
-import { startFontSupply, requestPageFonts, applyFontEnvironment, requestedFontDescriptions, requestedFontFailures, fontSupplyRevision } from "./font-provider.js";
+import { startFontSupply, loadOpenFonts, prepareLocalOpenDisplay, refreshLocalOpenDisplay, requestPageFonts, hasPendingFontSupply, applyFontEnvironment, requestedFontDescriptions, requestedFontFailures, fontSupplyRevision } from "./font-provider.js";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const input = $<HTMLTextAreaElement>("input"),
@@ -117,7 +117,12 @@ const files = new FileLifecycle(adapter, editor, {
   prompt: (message, name) => prompt(message, name),
   pickSaveTarget: nativeSavePicker(window),
   download: downloadHwpx,
-  prepareDisplay: (candidate) => { applyFontEnvironment(candidate); },
+  loadOpenFonts,
+  prepareDisplay: (candidate, localOpen) => {
+    if (localOpen) prepareLocalOpenDisplay(candidate);
+    else applyFontEnvironment(candidate);
+  },
+  tableDragLayout: stableTableDragLayout,
   clickTableScope: (page,run) => withStudioTableClick(page,run),
   paintedCellFormats: () => {
     const painted = paintedCellSelection;
@@ -239,6 +244,11 @@ function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
     }
     revealCommandSelection(document, before, editor.capture());
   } catch (e) {
+    if (e instanceof ClippedTextEdit) {
+      $("error").textContent = e.message;
+      $("error").hidden = false;
+      return;
+    }
     if(showTableNotice(e))return;
     if(e instanceof UnsupportedTableOperation){recordTableRefusal(document,e,editor.selection);$("error").hidden=true;$("clipboard-status").textContent=e.message;return;}
     knownDiagnosticError(e);
@@ -286,6 +296,19 @@ const qaRenderCause = (() => {
   };
 })();
 let fontRefreshTask: number | undefined;
+let fontRefreshRunning = false;
+let appliedFontLayout: {doc: typeof adapter.doc; revision:number}|undefined;
+function stableTableDragLayout(page:HTMLElement): string | undefined {
+  const fonts=fontSupplyRevision();
+  if(fontRefreshTask!==undefined || fontRefreshRunning || hasPendingFontSupply() ||
+     appliedFontLayout?.doc!==adapter.doc || appliedFontLayout.revision!==fonts ||
+     document.fonts.status!=='loaded' || composing || clipboardBusy ||
+     adapter.transientEdit || adapter.hasPendingLocalBodyFlow() ||
+     renderedDocument!==adapter.documentId || page.parentElement!==pages ||
+     page.matches('[data-render-pending],[data-ime-canvas],[data-resize-canvas]') ||
+     !page.querySelector(':scope > svg')) return;
+  return `${fonts}:${renderGeneration}:${devicePixelRatio}`;
+}
 // Presentation policy, not a retained layout/geometry receipt. Every render
 // still completes Core layout and reads current dimensions. A new document
 // starts with the original full font discovery/render path.
@@ -305,8 +328,11 @@ function scheduleFontRefresh(source: FontRefreshSource) {
       qaRenderCause?.("font-blocked", source);
       return;
     }
+    fontRefreshRunning = true;
+    appliedFontLayout = undefined;
     try {
-      const changed = applyFontEnvironment(adapter);
+      const revision = fontSupplyRevision(), doc = adapter.doc;
+      const changed = refreshLocalOpenDisplay(adapter, () => scheduleFontRefresh("font-event"));
       qaRenderCause?.("font-result", source, changed);
       if (changed) {
         editor.refreshFontGeometry(); formatViewKey = "";
@@ -314,8 +340,10 @@ function scheduleFontRefresh(source: FontRefreshSource) {
         render(false, false, false, undefined, source);
         document.dispatchEvent(new CustomEvent("rhwp:font-layout"));
       }
+      appliedFontLayout = {doc, revision};
     }
     catch (e) { console.error('글꼴 표시 갱신 실패',e); files.ui.error('글꼴 표시를 갱신하지 못했습니다. 문서를 다시 열어 주세요.'); }
+    finally { fontRefreshRunning = false; }
   }, 0);
 }
 document.addEventListener("rhwp:fonts-updated", () => scheduleFontRefresh("font-event"));
@@ -1452,6 +1480,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
     return;
   }
   const initiator = document.activeElement;
+  let fallbackDialog = false;
   let osWriteCompleted = false;
   let pasteApplied = false;
   let restoreTarget: ReturnType<Interaction["capture"]> | undefined;
@@ -1461,6 +1490,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
     if (kind === "paste" || kind === "paste-text") pasteResult.start(kind === "paste-text");
     const captured = editor.capture();
     restoreTarget = captured;
+    if (kind !== "copy") editor.assertVisibleTextEdit(captured.selection);
     const support = clipboardSupport(editor, kind === "paste-text" ? "paste" : kind);
     if (!support.supported) {
       // Known selection limits are admission decisions, not failed OS work.
@@ -1544,6 +1574,8 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
         };
         validateAlternative();
         $("clipboard-status").textContent = "";
+        fallbackDialog = true;
+        restoreTarget = captured;
         if (!await offerPlainPaste(document)) {
           $("clipboard-status").textContent = "붙여넣기 취소";
           return;
@@ -1588,7 +1620,8 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
     if(e instanceof UnsupportedTableOperation&&!pasteApplied&&!osWriteCompleted){recordTableRefusal(document,e,editor.selection);$("error").hidden=true;$("clipboard-status").textContent=e.message;return;}
     if (kind === "paste" || kind === "paste-text") {
       pasteResult.failed(e instanceof Error ? e.message : String(e), pasteApplied);
-      $("error").hidden = true;
+      $("error").hidden = !(e instanceof ClippedTextEdit);
+      if (e instanceof ClippedTextEdit) $("error").textContent = e.message;
     } else {
       $("error").textContent = `클립보드 작업 실패: ${String(e)}`;
       $("error").hidden = false;
@@ -1600,7 +1633,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
     clipboardBusy = false;
     paint();
     if (
-      mayRestoreClipboardFocus(document, initiator, restoreTarget, () =>
+      mayRestoreClipboardFocus(document, fallbackDialog && document.activeElement === viewport ? viewport : initiator, restoreTarget, () =>
         editor.capture(),
       )
     )

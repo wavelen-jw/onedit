@@ -1,5 +1,9 @@
 # Onedit Host SDK changelog
 
+## 1.0.0-rc3
+
+- Metadata and sample runtime updated for the RC3 editor. The SDK methods, events, and compiled API implementation are unchanged.
+
 ## 1.0.0-rc2
 
 - Onedit package identity, client, protocol and application contract.

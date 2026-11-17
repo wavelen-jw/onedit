@@ -218,6 +218,8 @@ export type Command =
       /** Existing localResize: only the selected cell and its one neighbor. */
       cellOnly?: true;trackBoundary?:true;
       nativeTrackKeys?: true;
+      splitRowKey?: true;
+      splitRangeKey?: true;
       nativeTrackRequired?: true;
       nativeEdge?: import('./table-track-resize.js').NativeResizeEdge;
       width: number;

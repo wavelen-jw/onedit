@@ -154,6 +154,11 @@ export function mountHancomParagraphDialog(root: HTMLElement) {
     if(!dialog.open||e.defaultPrevented||e.isComposing||e.keyCode===229||e.getModifierState("AltGraph")||
         e.ctrlKey||e.metaKey||e.shiftKey||e.repeat||!e.cancelable)return;
     const key=e.key.toLowerCase();
+    if(key==="enter"&&e.isTrusted&&!e.altKey&&alignButtons.includes(e.target as HTMLButtonElement)){
+      const form=dialog.querySelector("form"), submit=form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if(form&&submit&&!submit.disabled){e.preventDefault();e.stopPropagation();form.requestSubmit(submit);}
+      return;
+    }
     if(e.altKey&&key==="d"){e.preventDefault();dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();return;}
     if(focusParagraphBeforeShortcut(e,dialog,spacingBefore,()=>tabs[0].click()))return;
     // Plain letters only in the dialog chrome, never in a local text field.

@@ -36,9 +36,13 @@ export function recordTableRefusal(doc:Document,error:UnsupportedTableOperation,
 export function tableOperationNotice(error:unknown) {
  if(!(error instanceof UnsupportedTableOperation))return;
  switch(error.code){
+  case 'resize-drag-layout-pending':return '글꼴과 페이지 표시가 끝난 뒤 표 경계를 다시 끌어 주세요.';
   case 'resize-drag-stale':return '표나 화면이 바뀌었습니다. 다시 끌어 주세요.';
   case 'resize-frame-rollback':return '다른 행도 함께 바뀔 수 있어 표의 크기를 그대로 두었습니다.';
   case 'resize-parent-bound':return '표가 문서 여백을 넘도록 늘릴 수 없습니다.';
+  case 'resize-track-splitPostLayoutFlowChanged':return '표나 주변 문단의 배치가 달라질 수 있어 크기를 변경하지 않았습니다.';
+  case 'resize-track-splitPageUnconfirmed':return '조절할 행을 화면에서 다시 선택해 주세요.';
+  case 'resize-track-split-table':return '여러 쪽에 걸친 표는 현재 크기를 조절할 수 없습니다.';
   case 'resize-track-exceedsFrame':
   case 'resize-track-clippedBefore':return '표가 현재 쪽이나 상위 셀의 가용 범위를 벗어나 크기를 바꾸지 않았습니다.';
   case 'resize-track-contentWidthFloor':

@@ -1,5 +1,6 @@
 import { Interaction } from "./interaction.js";
 import { History } from "./history.js";
+import { prepareCharacterDelta } from "./character-count-delta.js";
 import { copy, nested, type Selection } from "./model.js";
 
 // A pending transaction on the current Core document, not a sibling document.
@@ -14,6 +15,7 @@ export class LiveComposition {
   private readonly block;
   private readonly preferredX;
   private readonly localEnvironment;
+  private readonly countDelta?: ReturnType<typeof prepareCharacterDelta>;
   private localRangeInvalidated = false;
   private readonly pending: Interaction;
   private expectedRevision;
@@ -25,8 +27,10 @@ export class LiveComposition {
     this.localEnvironment = a.localBodyTextIdentified && editor.selection.focus.kind === "body"
       ? a.localBodyEnvironmentToken() : undefined;
     if (a.transientEdit) throw Error("이미 한글을 조합하고 있습니다.");
+    editor.assertVisibleTextEdit();
     a.assertEditable(editor.selection.focus);
     this.original = editor.capture().selection;
+    try { this.countDelta=prepareCharacterDelta(a,{type:'insert',text:''},this.original); } catch { /* Deferred recount. */ }
     this.doc = a.doc; this.documentId = a.documentId;
     this.revision = this.expectedRevision = a.revision;
     this.expectedSelection = JSON.stringify(editor.selection);
@@ -145,6 +149,7 @@ export class LiveComposition {
       if (text) this.editor.history.commitComposition(this.pending.history);
       else this.restore();
       this.close();
+      if(text)try{this.countDelta?.(this.editor.selection,text);}catch{/* Deferred recount. */}
       return changed;
     } catch (error) {
       if (!this.closed) { this.restore(); this.close(); }

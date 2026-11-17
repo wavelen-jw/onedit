@@ -104,7 +104,7 @@ export function mountTableContext(doc: Document, editor: Interaction, busy: () =
   table(border,'block-background','하나의 셀처럼 · 배경…','F');
   separator();table(popup,"merge","셀 합치기","M · F5 블록");const split=table(popup,"split-dialog","셀 나누기…","S");
   const add=submenu("줄/칸 추가하기");table(add,'add-dialog','줄/칸 추가하기…','Alt+Insert');table(add,"row-add","아래 행 추가");table(add,"col-add","오른쪽 열 추가");
-  const remove=submenu("줄/칸 지우기");table(remove,'delete-dialog','줄/칸 지우기…','Alt+Delete · 셀 블록 Ctrl+E');table(remove,"row-delete","현재 행 삭제 · 내용 포함");table(remove,"col-delete","현재 열 삭제 · 내용 포함");
+  const remove=submenu("줄/칸 지우기");table(remove,'delete-dialog','줄/칸 지우기…','Alt+Delete');table(remove,"row-delete","현재 행 삭제 · 내용 포함");table(remove,"col-delete","현재 열 삭제 · 내용 포함");
   separator();const more=submenu("선택·이동·크기 도구");
   for(const id of ["select","text","object","previous","next","width-plus","width-minus","height-plus","height-minus","select-columns","leave","control-front","control-back","control-inFrontOfText","control-behindText"]){const entry=tableItems.find(x=>x.id===id)!;table(more,id,entry.label,entry.key);}
 

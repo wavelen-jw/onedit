@@ -1,11 +1,12 @@
+import { approvedEmbedChrome } from "./approved-embed-chrome.js";
+import { connectHostViewUI } from "./host-view-ui.js";
+import { connectHostSearch } from "./host-search-integration.js";
 import {activeWorkset} from "./active-workset.js";
 import { withQaReadPhase } from "./cursor-model-memo.js";
 import {observeSelectorMembership} from './selector-membership.js';
 import { openThroughFileMenu, confirmThroughFileMenu, fileMenuEnabled, lifecycleCommands } from "./file-chooser.js";
 export { openThroughFileMenu, confirmThroughFileMenu, fileMenuEnabled } from "./file-chooser.js";
-import { connectHostViewUI } from "./host-view-ui.js";
 import { fileAccessShortcut, fileAccessShortcuts } from "./file-access-shortcuts.js";
-import { connectHostSearch } from "./host-search-integration.js";
 import type { FileLifecycle } from "./file-lifecycle.js";
 import {
   lifecycleCommandState,
@@ -141,13 +142,18 @@ const bindings = new WeakMap<Window, () => void>();
 export function connectFileMenu(files: FileLifecycle) {
   if (typeof window === "undefined") return;
   if (!files.ui.standalone) {
-    connectHostSearch(files, window.document);
-    // Host exposes only the existing View controller/status. Keep standalone
-    // file/menu/edit gates below unchanged, and bootstrap after UI construction.
-    queueMicrotask(() => {
-      connectViewIntegration(files, window.document);
-      connectHostViewUI(window.document, () => files.busy);
-    });
+    const doc=window.document;
+    if(approvedEmbedChrome(doc)){
+      // This only mounts editor UI. The standalone file router below remains unreachable.
+      connectViewIntegration(files, doc);
+      connectMenuIntegration(files, doc);
+    }else{
+      connectHostSearch(files, doc);
+      queueMicrotask(()=>{
+        connectViewIntegration(files, doc);
+        connectHostViewUI(doc, ()=>files.busy);
+      });
+    }
     return;
   }
   bindings.get(window)?.();

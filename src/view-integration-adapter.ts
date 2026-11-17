@@ -1,3 +1,4 @@
+import { StalePointerTarget } from "./interaction.js";
 import { editorChanged } from "./editor-state-adapter.js";
 import { tableGuideState,setTableGuideMode,type TableGuideMode } from "./table-guides.js";
 import { ViewSequence } from "./view-sequence.js";
@@ -252,27 +253,38 @@ export function connectViewIntegration(
     subtree: true,
   });
   const point = (e: Pick<PointerEvent, "clientX" | "clientY">, extend: boolean, start = false, focusInput = true, scopedClick = false) => {
-    const target = document
-      .elementFromPoint(e.clientX, e.clientY)
-      ?.closest<HTMLElement>(".page");
+    const targetAtPointer=()=>document.elementFromPoint(e.clientX,e.clientY)?.closest<HTMLElement>('.page');
+    const target=targetAtPointer();
     if (!target || !pages.contains(target)) return false;
-    try {
-      const select=()=>{
-      const p = pagePoint(target, e.clientX, e.clientY);
-      connection.files.editor.pointer(
-        Number(target.dataset.page),
-        p.x,
-        p.y,
-        extend,
-        start,
-      );
+    const {adapter,editor}=connection.files;
+    const painted=target.querySelector(':scope > svg');
+    const native=adapter.doc, id=adapter.documentId, rev=adapter.revision, selection=editor.currentSelectionGeneration;
+    const select=(page:HTMLElement)=>{
+      const p=pagePoint(page,e.clientX,e.clientY);
+      editor.pointer(Number(page.dataset.page),p.x,p.y,extend,start);
       connection.files.ui.change(false);
       inputPosition();
-      };
-      if(scopedClick&&connection.files.ui.clickTableScope)connection.files.ui.clickTableScope(target,select);
-      else select();
-      if (focusInput) input.focus({ preventScroll: true });
-    } catch (error) {
+    };
+    try {
+      try {
+        if(scopedClick&&connection.files.ui.clickTableScope)connection.files.ui.clickTableScope(target,()=>select(target));
+        else select(target);
+      } catch(error) {
+        if(!(error instanceof StalePointerTarget))throw error;
+        // A refreshed SVG can retire the optional table-click witness before
+        // selection installs. Only retry a fresh hit for the same press.
+        const current=connection.files.adapter===adapter&&connection.files.editor===editor&&
+          adapter.doc===native&&adapter.documentId===id&&adapter.revision===rev&&editor.currentSelectionGeneration===selection;
+        const fresh=current&&scopedClick&&start&&!extend?targetAtPointer():undefined;
+        const freshSvg=fresh?.querySelector(':scope > svg');
+        if(!fresh||!freshSvg||freshSvg===painted||fresh.parentElement!==pages||
+           fresh.dataset.page!==target.dataset.page||document.fonts.status!=='loaded'||blocked()||
+           fresh.matches('[data-render-pending],[data-ime-canvas],[data-resize-canvas]')){stopPointer();return null;}
+        try { select(fresh); }
+        catch(retry){if(retry instanceof StalePointerTarget){stopPointer();return null;}throw retry;}
+      }
+      if(focusInput)input.focus({preventScroll:true});
+    } catch(error) {
       stopPointer();
       connection.files.ui.error(error);
       return null;
@@ -282,7 +294,7 @@ export function connectViewIntegration(
   // A stationary pointer produces no pointermove. Keep the existing exact
   // hit/owner path active while scrolling; never manufacture an endpoint.
   let edgeFrame = 0, edgeTime = 0;
-  let drag: { x: number; y: number; documentId: string; revision: number; selection: string } | undefined;
+  let drag: { x: number; y: number; documentId: string; revision: number; selection: string; click: boolean } | undefined;
   const pauseEdge = () => {
     if (edgeFrame) window.cancelAnimationFrame(edgeFrame);
     edgeFrame = edgeTime = 0;
@@ -316,6 +328,7 @@ export function connectViewIntegration(
     if (viewport.scrollTop !== previous) {
       const r = viewport.getBoundingClientRect(), top = r.top + viewport.clientTop;
       const d = drag!;
+      d.click = false;
       // Clamp only viewport coordinates, not Core addresses. Page gaps keep the
       // last valid endpoint until the next real page passes under the pointer.
       point({clientX: d.x, clientY: Math.max(top + 1, Math.min(top + viewport.clientHeight - 1, d.y))}, true);
@@ -469,7 +482,8 @@ export function connectViewIntegration(
       if (pointed === null) return;
       pointerId = e.pointerId;
       drag = {x: e.clientX, y: e.clientY, documentId: connection.files.adapter.documentId,
-        revision: connection.files.adapter.revision, selection: JSON.stringify(connection.files.editor.selection)};
+        revision: connection.files.adapter.revision, selection: JSON.stringify(connection.files.editor.selection),
+        click: e.isTrusted && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey};
       queueEdge();
     },
     true,
@@ -481,6 +495,7 @@ export function connectViewIntegration(
       if (!(e.buttons & 1) || !currentDrag()) { stopPointer(); return; }
       e.preventDefault();
       e.stopImmediatePropagation();
+      if (drag) drag.click = false;
       point(e, true);
       if (drag) { drag.x = e.clientX; drag.y = e.clientY;
         drag.selection = JSON.stringify(connection.files.editor.selection); queueEdge(); }
@@ -488,7 +503,19 @@ export function connectViewIntegration(
     true,
   );
   const endPointer = (e: PointerEvent) => {
-    if (pointerId === e.pointerId) stopPointer();
+    if (pointerId !== e.pointerId) return;
+    const revealClick = e.type === "pointerup" && e.isTrusted && drag?.click && currentDrag();
+    stopPointer();
+    if (!revealClick || document.activeElement !== input) return;
+    const selection = connection.files.editor.selection;
+    if (selection.kind !== "caret" || selection.focus.kind !== "body") return;
+    // A margin click may select a body line outside the current viewport.
+    // Reveal the already-painted caret after the click, without reselecting.
+    const caret = pages.querySelector(".page > .overlay > .caret");
+    if (!caret) return;
+    const r = caret.getBoundingClientRect();
+    const top = viewport.getBoundingClientRect().top + viewport.clientTop;
+    if (r.top < top || r.bottom > top + viewport.clientHeight) inputPosition(true);
   };
   window.addEventListener("pointerup", endPointer, true);
   window.addEventListener("pointercancel", endPointer, true);

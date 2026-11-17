@@ -18,7 +18,8 @@ export function mountSelectionTools(doc:Document,editor:Interaction,options:{bus
   const holdChrome=()=>{const height=chrome.getBoundingClientRect().height;chromeStyle=new Map(["height","min-height","max-height","overflow","box-sizing"].map(key=>[key,chrome.style.getPropertyValue(key)]));for(const key of ["height","min-height","max-height"])chrome.style.setProperty(key,`${height}px`);chrome.style.overflow="hidden";chrome.style.boxSizing="border-box";};
   const active=activeWorkset(doc);
   let capturedShape="null";const shapeKey=()=>JSON.stringify(options.shapeTarget()??null);
-  let applying=false,composing=false,cancelled=false,observed="";
+  let applying=false,composing=false,cancelled=false,observed="", formattingRange="";
+  const selectionKey=()=>JSON.stringify([editor.adapter.documentId,editor.selection]);
   let enabled=true,dragging=false,frame=0,forcePlacement=false,dismissed=false,captured:ReturnType<Interaction["capture"]>|undefined;
   let anchorLine="",anchorOrigin="",idle=0,pointerPending=false,documentId=editor.adapter.documentId;
   let pointerX=NaN,pointerY=NaN,pointerObserved="";
@@ -29,7 +30,7 @@ export function mountSelectionTools(doc:Document,editor:Interaction,options:{bus
   });
   const cancelIdle=()=>{if(idle)doc.defaultView!.clearTimeout(idle);idle=0;pointerPending=false;};
   doc.body.dataset.selectionToolsEnabled="true";
-  const hide=()=>{cancelIdle();controls?.clear();popup.hidden=true;captured=undefined;releasedPreview=undefined;anchorLine=anchorOrigin="";delete popup.dataset.pointerSelecting;delete doc.body.dataset.selectionToolsActive;if(frame)cancelAnimationFrame(frame);frame=0;forcePlacement=false;};
+  const hide=()=>{formattingRange="";cancelIdle();controls?.clear();popup.hidden=true;captured=undefined;releasedPreview=undefined;anchorLine=anchorOrigin="";delete popup.dataset.pointerSelecting;delete doc.body.dataset.selectionToolsActive;if(frame)cancelAnimationFrame(frame);frame=0;forcePlacement=false;};
   const valid=()=>{try{return !!captured&&sameFormatTarget(captured,editor.capture())&&capturedShape===shapeKey();}catch{return false;}};
   const blocked=()=>composing||editor.adapter.transientEdit||options.busy()||!!doc.querySelector("dialog[open]")||!doc.getElementById("selection-properties")!.hidden||!!doc.querySelector('#document-navigation:not([hidden])');
   function show(force=false){return editor.withViewQueries(owners=>{
@@ -106,6 +107,18 @@ export function mountSelectionTools(doc:Document,editor:Interaction,options:{bus
     }else touchActions.remove();
     popup.toggleAttribute('data-pointer-selecting',dragging);
     if(keep)return;
+    if(text&&!popup.hidden&&formattingRange===selectionKey()){
+      // A font-size change may wrap the same selection to a different row.
+      // Keep the card where the user is working, clamping only to the viewport.
+      const box=popup.getBoundingClientRect();
+      if(box.width<=v.width-16&&box.height<=v.bottom-v.top-16){
+        const left=Math.max(v.left+8,Math.min(box.left,v.right-8-box.width));
+        const top=Math.max(v.top+8,Math.min(box.top,v.bottom-8-box.height));
+        if(left!==box.left)popup.style.left=`${left-h.left}px`;
+        if(top!==box.top)popup.style.top=`${top-h.top}px`;
+        return;
+      }
+    }
     popup.hidden=false;popup.style.maxWidth=`${Math.max(0,v.width-16)}px`;
     // Prefer below/above the active line. A short viewport scrolls the card
     // inside its visible bounds; logical selection and hit testing stay intact.
@@ -131,7 +144,10 @@ export function mountSelectionTools(doc:Document,editor:Interaction,options:{bus
   },{signal});
   const controls=mountSelectionFormatControls(doc,editor,character,paragraph,{valid,blocked,target:()=>captured,focus:options.focus,execute:command=>{
     if(!valid()||blocked())throw Error("문서·선택이 바뀌었습니다. 다시 선택하세요.");
-    applying=true;try{options.execute(command,captured!);captured=editor.capture();capturedShape=shapeKey();}finally{applying=false;}
+    const range=selectionKey();
+    applying=true;try{options.execute(command,captured!);captured=editor.capture();capturedShape=shapeKey();
+      if(range===selectionKey())formattingRange=range;
+    }finally{applying=false;}
   }});
   const deferPointer=()=>{
     hide();

@@ -10,7 +10,8 @@ import {startupNow,startupStage} from './startup-timing.js';
 
 import { isB338OwnerTrialDigest } from "./b338-focused-owner-trial.js";
 import { checkedOpenCoreSha256 } from "./ai-checked-open-binding.js";
-export const coreRuntimeSha256 = checkedOpenCoreSha256;
+import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
+export const coreRuntimeSha256 = rootEditorCoreSha256;
 type Identity = Readonly<{ sha256: string }>;
 type ExternalConstructor = (bytes: Uint8Array, format: 'hwp' | 'hwpx') => HwpDocument;
 type Binding = { identity: Identity; create: (bytes?: Uint8Array) => HwpDocument; fragment: (bytes:Uint8Array)=>HwpBodyClipboard; openExternal?: ExternalConstructor };

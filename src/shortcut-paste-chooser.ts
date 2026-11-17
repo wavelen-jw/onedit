@@ -1,4 +1,4 @@
-import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
+import { closeEditorDialog, showDocumentEditingDialog } from "./editor-popup-focus.js";
 import type {Interaction} from './interaction.js';
 import {sameFormatTarget} from './integration/a-format-input-guard.js';
 import {pastePolicyHelp} from './paste-result-ui.js';
@@ -22,5 +22,5 @@ export function mountPasteChooser(doc:Document,editor:Interaction,actions:{block
   const cancel=doc.createElement('button');cancel.type='button';cancel.textContent='취소';cancel.dataset.pasteCancel='';cancel.onclick=()=>closeEditorDialog(dialog);buttons.push(cancel);dialog.append(note,status,cancel);doc.body.append(dialog);
   dialog.addEventListener('close',()=>{if(dialog.open)return;captured=undefined;});
   dialog.addEventListener('keydown',e=>{e.stopPropagation();if(e.isComposing||e.keyCode===229)return;if(e.key==='Escape'){e.preventDefault();closeEditorDialog(dialog);}if(e.key==='Tab'){const at=buttons.indexOf(doc.activeElement as HTMLButtonElement);if(e.shiftKey&&at<=0||!e.shiftKey&&at===buttons.length-1){e.preventDefault();buttons[e.shiftKey?buttons.length-1:0].focus();}}});
-  return {show(){if(actions.blocked()||dialog.open)return;captured=editor.capture();status.textContent='';doc.querySelectorAll('#main-menu details[open]').forEach(d=>d.removeAttribute('open'));showEditorDialog(dialog);buttons[0].focus();},dispose(){dialog.remove();}};
+  return {show(){if(actions.blocked()||dialog.open)return;captured=editor.capture();status.textContent='';doc.querySelectorAll('#main-menu details[open]').forEach(d=>d.removeAttribute('open'));showDocumentEditingDialog(dialog);buttons[0].focus();},dispose(){dialog.remove();}};
 }

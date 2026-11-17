@@ -1,16 +1,12 @@
 import type { Interaction } from './interaction.js';
 import { wholeBodySection } from './body-selection.js';
+import { characterDelta, countCharacters, type Count } from './character-count-delta.js';
+export { countCharacters } from './character-count-delta.js';
 import { ordered, paraIndex, withPara, sameContainer, samePosition, type Position, type ParagraphTarget } from './model.js';
 
 // Unicode scalars, including spaces/tabs/NBSP; paragraph/line separators are not
 // letters. Do not normalize NFC/NFD or count a surrogate pair twice.
 export const characterCountPolicy = '공백·탭 포함, 개행·문단 구분 제외 · Unicode 문자 단위(😀 1자, 결합문자는 각각 집계). 한글 조합은 확정 후 반영합니다.';
-export function countCharacters(text:string) {
-  let total=0,withoutSpaces=0;
-  for(const ch of text){if(/[\r\n\u2028\u2029]/u.test(ch))continue;total++;if(!/\s/u.test(ch))withoutSpaces++;}
-  return {total,withoutSpaces};
-}
-type Count=ReturnType<typeof countCharacters>;
 const noTextChange=new Set(['resize','char','paragraph','cell','char-relative','paragraph-relative','format-copy','paper','columns','shape-size','control-offset','control-key','table-object','cell-equal','paragraph-list','numbering-restart','style','style-manage']);
 const key=(p:Position)=>JSON.stringify(p.kind==='body'?['body',p.sec,p.para]:['cell',p.sec,p.para,p.ancestors??[],p.control,p.cell,p.cellPara]);
 const instances=new WeakMap<Interaction,CharacterStatistics>();
@@ -18,46 +14,50 @@ export function characterStatistics(editor:Interaction){let v=instances.get(edit
 class CharacterStatistics {
   private id='';private revision=-1;private value?:Count;private timer?:ReturnType<typeof setTimeout>;
   private undo?:Interaction['history']['undoStack'][number];private redo?:Interaction['history']['redoStack'][number];
-  private snapshots=new WeakMap<object,{before:Count;after:Count}>();
-  private paragraphs=new Map<string,{text:string;plain:boolean;length:number;breaks:number[]}>();
+  private snapshots=new WeakMap<object,{before:Count;after?:Count}>();
+  private paragraphs=new Map<string,{length:number;breaks:number[]}>();
   private tableTargets?:ParagraphTarget[];
   error='';onchange=()=>{};
   // The existing native textbox form owns its draft/selection, not Core text.
   selectionOverride:()=>string|undefined=()=>undefined;
   constructor(private editor:Interaction){}
-  private paragraph(p:Position){const id=key(p);let value=this.paragraphs.get(id);if(!value){const text=this.editor.adapter.text(p),breaks:number[]=[];let length=0;for(const ch of text){if(/[\r\n\u2028\u2029]/u.test(ch))breaks.push(length);length++;}value={text,plain:this.editor.adapter.length(p)===length,length,breaks};this.paragraphs.set(id,value);}return value;}
+  private paragraph(p:Position){const id=key(p);let value=this.paragraphs.get(id);if(!value){const text=this.editor.adapter.text(p),breaks:number[]=[];let length=0;for(const ch of text){if(/[\r\n\u2028\u2029]/u.test(ch))breaks.push(length);length++;}value={length,breaks};this.paragraphs.set(id,value);}return value;}
   sync():Count|undefined{
     const e=this.editor,a=e.adapter,u=e.history.undoStack.at(-1),r=e.history.redoStack.at(-1);
-    if(this.id!==a.documentId){clearTimeout(this.timer);this.timer=undefined;this.id=a.documentId;this.revision=-1;this.value=undefined;this.paragraphs.clear();this.snapshots=new WeakMap();this.undo=this.redo=undefined;}
+    if(this.id!==a.documentId){clearTimeout(this.timer);this.timer=undefined;this.id=a.documentId;this.revision=-1;this.value=undefined;this.paragraphs.clear();this.tableTargets=undefined;this.snapshots=new WeakMap();this.undo=this.redo=undefined;}
     // Live IME and hover previews are uncommitted. Never publish them as saved text.
     if(a.transientEdit)return this.value;
     if(this.revision!==a.revision){
       clearTimeout(this.timer);this.timer=undefined;
       const before=this.value,oldUndo=this.undo,oldRedo=this.redo;
+      const previousRevision=this.revision;
       this.revision=a.revision;this.undo=u;this.redo=r;this.error='';
-      const travel=r===oldUndo&&r?this.snapshots.get(r)?.before:u===oldRedo&&u?this.snapshots.get(u)?.after:undefined;
+      const travel=a.revision!==previousRevision+1?undefined:r===oldUndo&&r?this.snapshots.get(r)?.before:u===oldRedo&&u?this.snapshots.get(u)?.after:undefined;
       let next=travel;
-      if(!next&&before&&u!==oldUndo&&u){
-        if(noTextChange.has(u.label))next=before;
-        else if(['insert','delete'].includes(u.label)){
-          const from=u.selectionBefore,after=u.selectionAfter;
-          const one=from.kind==='caret'||from.kind==='text'&&sameContainer(from.anchor,from.focus)&&paraIndex(from.anchor)===paraIndex(from.focus);
-          const p=from.focus,cached=this.paragraphs.get(key(p));
-          // Only a known text-only paragraph delta can bypass a whole-text read.
-          // Structural deletion, inline objects and unknown commands invalidate.
-          if(one&&after.kind==='caret'&&key(p)===key(after.focus)&&cached?.plain){
-            const text=a.text(after.focus),plain=a.length(after.focus)===[...text].length;
-            if(plain){const old=countCharacters(cached.text),now=countCharacters(text);next={total:before.total+now.total-old.total,withoutSpaces:before.withoutSpaces+now.withoutSpaces-old.withoutSpaces};}
-          }
+      const delta=before&&characterDelta(a,previousRevision);
+      if(!next&&before&&delta)
+        next={total:before.total+delta.total,withoutSpaces:before.withoutSpaces+delta.withoutSpaces};
+      if(!next&&before&&u&&u!==oldUndo&&a.revision===previousRevision+1&&noTextChange.has(u.label))next=before;
+      this.paragraphs.clear();this.tableTargets=undefined;this.value=next;
+      if(next&&before&&u&&u!==oldRedo){
+        if(u!==oldUndo&&a.revision===previousRevision+1)this.snapshots.set(u,{before,after:next});
+        else if(u===oldUndo&&delta){
+          const group=this.snapshots.get(u);
+          if(group)this.snapshots.set(u,{before:group.before,after:next});
         }
       }
-      this.paragraphs.clear();this.tableTargets=undefined;this.value=next;
-      if(next&&before&&u&&u!==oldUndo&&u!==oldRedo)this.snapshots.set(u,{before,after:next});
-      if(!next){const id=this.id,revision=this.revision;
+      if(!next){
+        // A grouped edit with no certified delta can have changed the recorded
+        // endpoint; keep the original Undo count but invalidate the Redo count.
+        if(u&&u===oldUndo&&u!==oldRedo){
+          const group=this.snapshots.get(u);
+          if(group)this.snapshots.set(u,{before:group.before});
+        }
+        const id=this.id,revision=this.revision;
         // Coalesce structural edits/key repeats; never scan a document on drag,
         // selection changes, formatting or repeated resize commands.
         this.timer=setTimeout(()=>{this.timer=undefined;if(a.documentId!==id||a.revision!==revision||a.transientEdit)return;
-          try{this.value=countCharacters(a.call<string>('getTextFileUnicode'));this.error='';if(u&&before)this.snapshots.set(u,{before,after:this.value});}
+          try{this.value=countCharacters(a.call<string>('getTextFileUnicode'));this.error='';if(u&&before&&u!==oldUndo&&u!==oldRedo&&revision===previousRevision+1)this.snapshots.set(u,{before,after:this.value});else if(u&&u===oldUndo&&u!==oldRedo){const group=this.snapshots.get(u);if(group)this.snapshots.set(u,{before:group.before,after:this.value});}}
           catch(error){this.error=String(error);console.warn('문서 글자수 조회 실패',error);}
           this.onchange();
         },120);
@@ -66,10 +66,6 @@ class CharacterStatistics {
     // A pending initial read can meet live composition. Cancellation need not
     // change revision, so let the next committed/cancelled projection retry it.
     if(!this.value&&!this.timer&&!this.error){this.revision=-1;return this.sync();}
-    // Lazy revision-local paragraph index. Expanding a drag reuses visited
-    // owners; it never rereads the whole growing text range on every frame.
-    const p=e.selection.focus;
-    try{this.paragraph(p);}catch{/* Invalid selection is reported by its existing owner. */}
     return this.value;
   }
   selection(){

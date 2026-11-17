@@ -8,6 +8,13 @@ import { updateHangulSvgText } from "./svg-text-update.js";
 import { updateSvgTextRegion } from './svg-text-region.js';
 import { paragraphOnlyMarkers, separateSpaceMarkers, projectParagraphMarks, viewMarkerState } from "./view-markers.js";
 
+/** Apply identical screen marker policy to normal and speculative SVGs. */
+export function projectScreenPageMarkers(svg:SVGSVGElement, adapter:RhwpAdapter, page:number, paragraphOnly=paragraphOnlyMarkers(adapter)){
+  separateSpaceMarkers(svg,paragraphOnly);
+  projectParagraphMarks(svg,adapter.presentationDpi());
+  projectControlLabels(svg,adapter,page);
+}
+
 type RenderedPage = {
   doc: RhwpAdapter["doc"]; documentId: string; page: number; fontRevision: number;
   markup: string;
@@ -134,9 +141,7 @@ export function createPagePresenter({adapter, document, pages, invalidateSelecti
         cached.documentId === adapter.documentId && cached.page === page && cached.fontRevision === fontRevision
         ? cached.svg : undefined;
       const svg = createPageSvg(markup, page, document, previousSvg);
-      separateSpaceMarkers(svg,paragraphOnly);
-      projectParagraphMarks(svg,adapter.presentationDpi());
-      projectControlLabels(svg,adapter,page);
+      projectScreenPageMarkers(svg,adapter,page,paragraphOnly);
       div.append(svg);
       const overlay = document.createElement("div");
       overlay.className = "overlay";

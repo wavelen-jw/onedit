@@ -2,6 +2,7 @@ export type CharacterEntry = { character: string; name: string; aliases: string;
 export const characterCategories = ['공문서 기호', '화살표', '괄호', '숫자', '수학', '기타 기호'] as const;
 const groups: [string, [string, string, string?][]][] = [
   ['공문서 기호', [
+    ['「','여는 홑낫표','여는 꺾쇠 괄호 quote'], ['」','닫는 홑낫표','닫는 꺾쇠 괄호 quote'],
     ['※','참고표','참고 주의 참조 reference'], ['○','흰 원','동그라미 원형 circle'], ['●','검은 원','동그라미 원형 bullet'],
     ['□','흰 사각형','네모 상자 square'], ['■','검은 사각형','네모 상자 square'], ['△','흰 위쪽 삼각형','세모 triangle'],
     ['▲','검은 위쪽 삼각형','세모 triangle'], ['▽','흰 아래쪽 삼각형','역삼각형 triangle'], ['▼','검은 아래쪽 삼각형','역삼각형 triangle'],
@@ -72,5 +73,5 @@ export function searchCharacters(query:string):CharacterEntry[] {
   const results=characterCatalog.filter(e=>[e.character,e.name,e.aliases,e.category,characterCode(e.character)].join(' ').toLocaleLowerCase().includes(q));
   const literal=allowedCharacter(query.trim())?query.trim():undefined;
   if(literal&&!results.some(e=>e.character===literal))results.unshift(describeCharacter(literal));
-  return results;
+  return results.filter((e,i) => results.findIndex(v=>v.character===e.character)===i);
 }

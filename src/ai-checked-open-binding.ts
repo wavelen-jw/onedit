@@ -1,2 +1,2 @@
 /** Private RHW-104 build pin; no public Host contract depends on this digest. */
-export const checkedOpenCoreSha256 = '80bcaac1698aa586b29819c4853355dd2936748c0e564cd09c85f5ca375a84bd';
+export const checkedOpenCoreSha256 = 'a6fe3338ef0130d93ad186c91085103629b2ebc80ea0748c383efb6e576d5874';
