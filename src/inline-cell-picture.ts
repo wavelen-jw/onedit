@@ -1,10 +1,10 @@
 import type { RhwpAdapter } from './adapter.js';
 import { samePosition, type Position, type Selection, type Box } from './model.js';
-import { fragmentClipboardObjects } from './object-clipboard.js';
+import { fragmentClipboardObjects, selectedFragmentObject } from './object-clipboard.js';
 
 // A scalar-empty paragraph containing exactly one inline Picture has an exact
-// existing object owner. This does not invent scalar slots for mixed cell text,
-// multiple objects, Shape descendants or floating pictures.
+// existing text selection slot. This narrower contract is used by keyboard
+// selection and mutation commands that require a whole inline-picture cell.
 export function inlineCellPicture(a: RhwpAdapter, p: Position) {
   if (p.kind !== 'cell' || p.offset !== 0 || a.length(p) !== 0) return;
   a.validate(p);
@@ -19,6 +19,20 @@ export function inlineCellPictureBoxes(a: RhwpAdapter, s: Selection): Box[] {
   if (s.kind !== 'object' || s.focus.kind !== 'cell') return [];
   const row = inlineCellPicture(a, s.focus);
   if (!row || row.control !== s.control) return [];
+  return cellPictureBoxes(a, row);
+}
+export function selectedCellPicture(a: RhwpAdapter, s: Selection) {
+  if (s.kind !== 'object' || s.focus.kind !== 'cell') return;
+  try {
+    const row = selectedFragmentObject(a, s);
+    if (row.kind === '그림') return row;
+  } catch { /* The pointer may be over an unaddressable object. */ }
+}
+export function cellPictureSelectionBoxes(a: RhwpAdapter, s: Selection): Box[] {
+  const row = selectedCellPicture(a, s);
+  return row ? cellPictureBoxes(a, row) : [];
+}
+function cellPictureBoxes(a: RhwpAdapter, row: NonNullable<ReturnType<typeof inlineCellPicture>>): Box[] {
   const path = JSON.parse(row.path), stable = [row.sec, row.para, ...path.flatMap((p: any) => [p.controlIndex, p.cellIndex, p.cellParaIndex]), row.control];
   const boxes: Box[] = [];
   for (let page = 0; page < a.pageCount; page++) {

@@ -28,3 +28,5 @@ Copyright 2022 The Noto Project Authors. SIL Open Font License 1.1; see
 public/fonts/NotoSansSymbols2-OFL.txt. Unmodified googlefonts Regular TTF
 from https://github.com/notofonts/symbols/releases/tag/NotoSansSymbols2-v2.008.
 This asset is not a globally substituted family or a Windows/Hancom reference.
+
+The OnAI Work mark in `public/brand/` identifies the product. The App source license does not grant trademark rights.

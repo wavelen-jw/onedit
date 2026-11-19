@@ -10,18 +10,20 @@ export type Count=ReturnType<typeof countCharacters>;
 const receipts=new WeakMap<RhwpAdapter,{id:string;rows:Map<number,Count>}>();
 
 // A revision receipt is independent of the Undo entry (which can be coalesced).
-// Only a single plain body paragraph is certified here. Structural, cell and
-// uncertain edits are handled by the deferred document scan.
+// Only a plain paragraph in the body or a root table cell is eligible.
+// Boundary crossings, fields, and nested objects retain the full count.
 export function prepareCharacterDelta(a:RhwpAdapter, command:Command, s:Selection) {
   if(command.type!=='insert'&&command.type!=='delete')return;
   if(s.kind!=='caret'&&s.kind!=='text')return;
   const [from,to]=s.kind==='text'?ordered(s.anchor,s.focus):[s.focus,s.focus];
-  if(from.kind!=='body'||to.kind!=='body'||!sameContainer(from,to)||paraIndex(from)!==paraIndex(to))return;
+  if(!sameContainer(from,to)||paraIndex(from)!==paraIndex(to))return;
   const inserted=command.type==='insert'?command.text:'';
   if(/[\u0000-\u001f\u007f\u2028\u2029]/u.test(inserted))return;
-  const len=a.readStructural('getParagraphLength',from.sec,from.para);
-  // No embedded slots anywhere in this paragraph, including at its boundaries.
-  if(a.length(from)!==len)return;
+  if(from.kind==='cell'&&(from.ancestors?.length||typeof a.doc.getPlainTableCellTextLength!=='function'))return;
+  const length=()=>from.kind==='body'?a.readStructural('getParagraphLength',from.sec,from.para):
+    a.doc.getPlainTableCellTextLength(from.sec,from.para,from.control,from.cell,from.cellPara);
+  const len=length();
+  if(len===undefined||from.kind==='body'&&a.length(from)!==len)return;
   let lo=from.offset,hi=to.offset;
   if(command.type==='delete'&&s.kind==='caret'){
     if(command.backward)lo--;else hi++;
@@ -29,7 +31,8 @@ export function prepareCharacterDelta(a:RhwpAdapter, command:Command, s:Selectio
   if(lo<0||hi>len)return;
   // Large replacements are not part of the synchronous typing path.
   if(hi-lo>256||inserted.length>512)return;
-  const removed=hi===lo?'':a.readStructural('getTextRange',from.sec,from.para,lo,hi-lo);
+  const removed=hi===lo?'':from.kind==='body'?a.readStructural('getTextRange',from.sec,from.para,lo,hi-lo):
+    a.doc.getTextInCell(from.sec,from.para,from.control,from.cell,from.cellPara,lo,hi-lo);
   const oldCount=countCharacters(removed);
   if([...removed].length!==hi-lo)return;
   const {documentId,revision}=a;
@@ -39,7 +42,7 @@ export function prepareCharacterDelta(a:RhwpAdapter, command:Command, s:Selectio
     const delta={total:newCount.total-oldCount.total,withoutSpaces:newCount.withoutSpaces-oldCount.withoutSpaces};
     if(a.transientEdit||a.documentId!==documentId||a.revision!==revision+1||after.kind!=='caret'||
        !sameContainer(from,after.focus)||paraIndex(from)!==paraIndex(after.focus)||after.focus.offset!==lo+insertedLength||
-       a.readStructural('getParagraphLength',from.sec,from.para)!==len+insertedLength-(hi-lo))return;
+       length()!==len+insertedLength-(hi-lo))return;
     let history=receipts.get(a);
     if(history?.id!==documentId){history={id:documentId,rows:new Map()};receipts.set(a,history);}
     if(history.rows.size===64)history.rows.delete(history.rows.keys().next().value!);

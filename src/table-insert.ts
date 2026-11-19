@@ -17,7 +17,7 @@ export function tableInsertCommand(rows: string, cols: string, inline: boolean):
 
 export function assertTableInsertTarget(editor: Interaction, target: ReturnType<Interaction["capture"]>, busy=false) {
   if(busy)throw Error("입력·저장·다른 대화상자를 마친 후 사용하세요.");
-  if(!sameFormatTarget(target,editor.capture()))throw Error("문서·리비전·선택이 변경되었습니다. 취소 후 다시 여세요.");
+  if(!sameFormatTarget(target,editor.capture()))throw Error("삽입 위치가 바뀌었습니다. 닫고 다시 여세요.");
   const s=target.selection;
   if(!["body","cell"].includes(s.focus.kind)||!["caret","text"].includes(s.kind))throw Error("본문이나 셀 안의 글자 위치에 커서를 두세요.");
   if(s.focus.kind==='cell'&&!coreRuntimeSupportsNestedTableCreation(editor.adapter.doc))throw Error("이 위치에는 표를 넣을 수 없습니다.");

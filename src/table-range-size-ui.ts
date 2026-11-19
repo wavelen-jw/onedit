@@ -1,4 +1,4 @@
-import {bindEditorDialogFormSubmit, closeEditorDialog, showEditorDialog} from './editor-popup-focus.js';
+import {bindEditorDialogFormSubmit, closeEditorDialog, showEditorDialog, wrapDialogTab} from './editor-popup-focus.js';
 import {formatInputGuard, sameFormatTarget} from './integration/a-format-input-guard.js';
 import type {Interaction} from './interaction.js';
 import {sameTable, type Command} from './model.js';
@@ -44,6 +44,7 @@ export function mountTableRangeSize(doc: Document, editor: Interaction,
   let captured:{target:ReturnType<Interaction['capture']>; adapter:Interaction['adapter'];
     native:Interaction['adapter']['doc'];generation:number}|undefined;
   const close=()=>closeEditorDialog(dialog);
+  dialog.addEventListener('keydown',event=>wrapDialogTab(event,dialog));
   form.querySelector<HTMLButtonElement>('button[type="button"]')!.onclick=close;
   form.onsubmit=event=>{
     event.preventDefault();

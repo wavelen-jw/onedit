@@ -17,6 +17,7 @@ const fallback=(reason:string):ScreenPageDecision=>({status:"fallback",reason});
 const reasons=new Set(["invalidRequest","layoutPending","missingPage","unsupportedOutput","portableMetrics",
   "pageTree","witnessBudget","treeBudget","invalidVariants","supplementalMetrics","unsupportedPaint","serialExhausted"]);
 const uint=(n:unknown):n is number=>Number.isSafeInteger(n)&&(n as number)>=0;
+const maxWitnessBytes = 512 * 1024;
 
 /** Screen SVG reuse only. Do not use this result as geometry, selection or
  * command evidence. Process one page at a time in the synchronous render.
@@ -42,7 +43,7 @@ export function prepareScreenPageReceipt(
   if (!reply||typeof reply!=="object"||Array.isArray(reply)) return fallback("invalidResponse");
   if (reply.status==="fallback"&&reasons.has(reply.reason)) return fallback(reply.reason);
   if (reply.page!==page||!uint(reply.pageCount)||reply.pageCount<=page||
-      !uint(reply.witnessBytes)||!reply.witnessBytes||reply.witnessBytes>262144||
+      !uint(reply.witnessBytes)||!reply.witnessBytes||reply.witnessBytes>maxWitnessBytes||
       typeof reply.receipt!=="string"||!/^\d{1,10}:\d{1,20}:\d{1,20}$/.test(reply.receipt))
     return fallback("invalidResponse");
   if (reply.status==="reuse"&&previous&&oldToken&&reply.receipt===oldToken&&

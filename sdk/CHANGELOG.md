@@ -1,5 +1,9 @@
 ## 1.0.0-rc4
 
+## v1.0.0-rc5
+
+- Update the paired browser editor and Core. The Host SDK protocol and client API are unchanged.
+
 - Checked HWPX opening with the supplied browser runtime.
 - Continuous multi-paragraph selections in the body or one top-level cell, including merged cells, with preview and one Undo/Redo per apply.
 - The existing 20 methods, 8 events and transport remain compatible.

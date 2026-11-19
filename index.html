@@ -46,7 +46,10 @@
     </section>
     <header>
       <div>
-        <strong class="product-brand" aria-label="온편집"><span class="product-name-on">온</span><span class="product-name-edit">편집</span></strong><small>한글 문서 편집기</small>
+        <strong class="product-brand" aria-label="온편집">
+          <img class="product-brand-logo" src="public/brand/onai-work-ae7b5167feac4788.png" width="22" height="22" alt="" />
+          <span class="product-name-on">온</span><span class="product-name-edit">편집</span>
+        </strong>
       </div>
       <nav aria-label="문서">
         <button id="new">새 문서</button
@@ -117,7 +120,10 @@
       ><span id="clipboard-status" role="status" aria-live="polite"></span
       ><span id="table-operation-status" role="status" aria-live="polite" aria-atomic="true"></span
       ><span id="selection" role="status" aria-live="polite" aria-atomic="true"></span>
-      <span id="font-notice" role="status" aria-live="polite" hidden></span>
+      <span id="font-notice" hidden>
+        <span id="font-notice-text" role="status" aria-live="polite"></span>
+        <button type="button" id="font-notice-settings" data-local-font-settings hidden>글꼴 설정</button>
+      </span>
     </footer>
     <div id="file-notice" aria-label="파일 저장 안내" hidden>
       <span id="file-status" role="status" aria-live="polite"></span>
@@ -130,16 +136,13 @@
       </button>
     </div>
     <div id="error" role="alert" hidden></div>
-    <dialog id="format" aria-labelledby="format-title" aria-describedby="format-note">
+    <dialog id="format" aria-labelledby="format-title">
       <form id="format-form">
         <h2 id="format-title"></h2>
-        <p id="format-note">
-          변경한 속성만 적용합니다. 혼합 값과 빈 항목은 유지하며, 음영 없음과
-          흰색은 구분됩니다.
-        </p>
+        <p id="format-note" role="status"></p>
         <div id="fields"></div>
         <menu>
-          <button type="submit" class="primary">설정</button><button type="button" id="cancel">취소</button>
+          <button type="submit" class="primary">적용</button><button type="button" id="cancel">취소</button>
         </menu>
       </form>
     </dialog>

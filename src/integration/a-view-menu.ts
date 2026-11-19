@@ -1,3 +1,4 @@
+import {firstPageBelow, activeMenuDemand} from '../active-workset.js';
 import {mountEditorFullscreen} from '../fullscreen-view.js';
 import {mountAutoPageLayout} from '../auto-page-layout.js';
 import { tableGuideModes,type TableGuideMode } from "../table-guides.js";
@@ -42,9 +43,8 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
   const layout=mountAutoPageLayout(pages,viewport);
   const pageList = () => Array.from(pages.getElementsByClassName("page")) as HTMLElement[];
   const current = () => {
-    const list = pageList(), top = viewport.getBoundingClientRect().top + viewport.clientTop + 24;
-    const found = list.findIndex(p => p.getBoundingClientRect().bottom > top);
-    return found < 0 ? Math.max(0, list.length - 1) : found;
+    const top = viewport.getBoundingClientRect().top + viewport.clientTop + 24;
+    return firstPageBelow(pages, top)?.index ?? 0;
   };
   const button = (text: string, action: string, callback: () => void) => {
     const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.dataset.viewAction = action;
@@ -58,15 +58,24 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
   const fit = () => {
     const list = pageList(); if (!list.length) return;
     const width = Math.max(...list.map(p => parseFloat(p.style.width)));
-    const height = parseFloat(list[current()].style.height);
-    const ratio = mode === "page" ? Math.min((viewport.clientWidth - 60) / width, (viewport.clientHeight - 40) / height)
-      : (viewport.clientWidth - 60) / width;
+    let ratio: number;
+    if (mode === "width") {
+      const horizontalPadding = (element: HTMLElement) => {
+        const { paddingLeft, paddingRight } = getComputedStyle(element);
+        return parseFloat(paddingLeft) + parseFloat(paddingRight);
+      };
+      ratio = (viewport.clientWidth - horizontalPadding(viewport)) / (width + horizontalPadding(pages));
+    } else {
+      const height = parseFloat(list[current()].style.height);
+      ratio = Math.min((viewport.clientWidth - 60) / width, (viewport.clientHeight - 40) / height);
+    }
     if (Number.isFinite(ratio) && ratio > 0) scale = Math.min(3, Math.max(.25, ratio));
     pages.style.setProperty("zoom", String(scale));
   };
   const zoom = (value: number, newMode = "custom") => {
     beforeTouchWidth = undefined;
     const keep=layout.anchor(),index = current(); mode = newMode; scale = Math.min(3, Math.max(.25, value));
+    viewport.dataset.viewMode = mode;
     if (mode !== "custom") fit(); else pages.style.setProperty("zoom", String(scale));
     layout.refresh(keep);if(!keep)go(index);
   };
@@ -148,7 +157,7 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
   }
   const presentation = mountViewMenuPresentation(root, busy);
   function refresh() {
-    const list = pageList();
+    const count = pages.children.length;
     let index = current();
     if (mode !== "custom") {
       const before = scale,keep=layout.anchor();
@@ -159,21 +168,26 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
       index = current();
     }
     layout.refresh();
-    number.max = String(list.length);
-    number.disabled = percent.disabled = busy() || !list.length;
+    // All fields below describe the same synchronous view publication.
+    // Each user action still checks the current editor state on entry.
+    const isBusy = busy(), unavailable = isBusy || !count;
+    number.max = String(count);
+    number.disabled = percent.disabled = unavailable;
     // A discarded draft's error must not describe the restored current value.
     // Keep both value and validation feedback while its input still has focus.
     if (document.activeElement !== percent) { percent.value = String(Math.round(scale * 100)); percent.setCustomValidity(""); }
-    if (document.activeElement !== number) { number.value = list.length ? String(index + 1) : ""; number.setCustomValidity(""); }
-    const label = `${list.length ? index + 1 : 0} / ${list.length}쪽 · ${Math.round(scale * 100)}%${mode === "width" ? " · 폭 맞춤" : mode === "page" ? " · 쪽 맞춤" : ""}`;
+    if (document.activeElement !== number) { number.value = count ? String(index + 1) : ""; number.setCustomValidity(""); }
+    const label = `${count ? index + 1 : 0} / ${count}쪽 · ${Math.round(scale * 100)}%${mode === "width" ? " · 폭 맞춤" : mode === "page" ? " · 쪽 맞춤" : ""}`;
     if (status.textContent !== label) status.textContent = label;
-    for (const [key,value] of Object.entries({viewPage:list.length ? index+1 : 0,viewPages:list.length,viewZoom:Math.round(scale*100),viewMode:mode,viewBusy:busy()||!list.length}))
+    for (const [key,value] of Object.entries({viewPage:count ? index+1 : 0,viewPages:count,viewZoom:Math.round(scale*100),viewMode:mode,viewBusy:unavailable}))
       if (status.dataset[key] !== String(value)) status.dataset[key] = String(value);
-    for (const b of panel.querySelectorAll<HTMLButtonElement>("[data-view-action]")) b.disabled = busy() || !list.length;
+    for (const b of panel.querySelectorAll<HTMLButtonElement>("[data-view-action]")) {
+      if (b.disabled !== unavailable) b.disabled = unavailable;
+    }
     for (const {item, button} of markerButtons) {
       let value: boolean | undefined, error = "";
       try { value = markers?.read(item.id); } catch (e) { error = String(e); }
-      const reason = error || (value === undefined ? "현재 Core/SVG 표시 연결 미지원" : busy() ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : !list.length ? "문서를 먼저 여세요." : "");
+      const reason = error || (value === undefined ? "현재 Core/SVG 표시 연결 미지원" : isBusy ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : !count ? "문서를 먼저 여세요." : "");
       button.disabled = !!reason; button.title = reason || (item.id === "transparent-borders" ? "선 없음 표·셀 경계를 화면에 점선으로 표시 · 저장/인쇄 제외" : item.id === "paragraph-marks" ? "문단 끝·기존 줄바꿈 표시 · 공백 표시는 조판 부호로 제어합니다." : "공백·조판 부호와 기존 문단 부호를 화면에 표시 · 저장/인쇄 제외");
       const shortcut = viewSequenceItems.find(([, action]) => action === item.id);
       if (!reason && shortcut) button.title += ` · 본문에서 Ctrl+G를 누른 뒤 ${shortcut[2]}`;
@@ -181,7 +195,7 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
       button.setAttribute("aria-disabled", String(!!reason));
     }
     if(guides){const state=guides.read();for(const b of guideButtons){b.setAttribute("role","menuitemradio");b.setAttribute("aria-pressed",String(b.dataset.tableGuideMode===state.mode));b.setAttribute("aria-checked",String(b.dataset.tableGuideMode===state.mode));b.title="화면 보조선 · 저장/인쇄 제외 · 출력 테두리 불변";}guideNote.textContent=state.reason||"붉은 점선은 선 없음 구간의 편집 보조선 · 실제 출력 테두리 불변 · 저장/인쇄 제외. ‘선택한 표’는 커서·셀 블록·표 개체가 속한 표입니다.";}
-    if (ruler) {
+    if (ruler && (activeMenuDemand(root) || ruler.state().shown)) {
       ruler.refresh();
       const rulerState = ruler.state(), rulerReason = rulerState?.reason || (!rulerState ? "현재 Core 쪽 눈금 조회 미지원" : busy() ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : "");
       rulerButton.disabled = !!rulerReason; rulerButton.title = rulerReason || "가로 눈금자 표시/숨기기 · mm · 조회 전용 · 저장/인쇄 제외";
@@ -189,11 +203,11 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
       rulerButton.setAttribute("aria-disabled", String(!!rulerReason));
     }
     nav[0].disabled ||= index === 0; nav[1].disabled ||= index === 0;
-    nav[2].disabled ||= index === list.length - 1; nav[3].disabled ||= index === list.length - 1;
+    nav[2].disabled ||= index === count - 1; nav[3].disabled ||= index === count - 1;
     zoomOut.disabled ||= scale <= .25; zoomIn.disabled ||= scale >= 3;
     presets.forEach((b, n) => b.setAttribute("aria-pressed", String(n === 0 ? mode === "custom" && Math.abs(scale - 1) < .001 : mode === (n === 1 ? "width" : "page"))));
     side.setAttribute("aria-pressed", String(!sidebar.hidden));
-    presentation.refresh(!!list.length);fullscreen.refresh();
+    presentation.refresh(!!count);fullscreen.refresh();
   }
   viewport.addEventListener("scroll", refresh, { passive: true });
   root.addEventListener("toggle", refresh);

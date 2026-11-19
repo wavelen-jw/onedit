@@ -7,14 +7,26 @@ import { fragmentClipboardObjects, captureFragmentObject } from "./object-clipbo
 
 // Internal responsibility only; no state ownership or policy changes.
 export function projectSemantic(this: RhwpAdapter) {
+    const parts = projectSemanticParts.call(this);
+    let part = parts.next();
+    while (!part.done) part = parts.next();
+    return part.value;
+}
+
+export function* projectSemanticParts(this: RhwpAdapter) {
     if (this.viewerOnlyReason) {
       // Explicitly a READ-ONLY DISPLAY projection, not full editable semantics.
       // No export/serialization fallback and no invented cell address. Saving is
       // rejected below; the original file remains the preservation authority.
+      const pages: string[] = [];
+      for (let page = 0; page < this.pageCount; page++) {
+        pages.push(this.doc.renderPageSvg(page));
+        yield;
+      }
       return {
         projection: "readonly-rendering-not-editable-semantics",
         reason: this.viewerOnlyReason,
-        pages: Array.from({ length: this.pageCount }, (_, page) => this.doc.renderPageSvg(page)),
+        pages,
         cursorModel: this.call("getCursorModel"),
       };
     }
@@ -26,7 +38,7 @@ export function projectSemantic(this: RhwpAdapter) {
       return properties;
     };
     // One synchronous projection, one immutable Core definition pool. A source
-    // shape and the SAME Unicode character have identical properties across
+    // shape and its language slot have identical properties across
     // paragraphs/owners (build_char_properties_json depends only on shape+lang).
     // Never share across documents, edits, or a second semantic() invocation.
     const propertiesByShape = new Map<number, Map<string, ReturnType<typeof strip>>>();
@@ -42,7 +54,7 @@ export function projectSemantic(this: RhwpAdapter) {
         // One paragraph in this synchronous projection only. Core properties
         // depend on shape AND character language, so a shape-only cache would
         // lose mixed-language source fonts. Reuse only an identical character
-        // in the same shape run; retain every character in the comparison.
+        // or a proven single-slot group; retain every character in the comparison.
         let next = 0;
         for (const run of runs) {
           if (run.startOffset !== next || !Number.isSafeInteger(run.endOffset) ||
@@ -55,7 +67,12 @@ export function projectSemantic(this: RhwpAdapter) {
           }
           for (; next < run.endOffset; next++) {
             const letter = letters[next];
-            let props = properties.get(letter);
+            // All modern precomposed Hangul syllables use Core slot 0. All ASCII
+            // letters and digits use slot 1. Keep every other character exact.
+            const cp = letter.codePointAt(0)!;
+            const propertyKey = cp >= 0xAC00 && cp <= 0xD7A3 ? "hangul-syllable" :
+              /[A-Za-z0-9]/u.test(letter) ? "ascii-letter-or-digit" : letter;
+            let props = properties.get(propertyKey);
             // Keep the independent shape-reference check at EVERY run boundary,
             // even if its first character was already projected elsewhere.
             if (next === run.startOffset || !props) {
@@ -63,7 +80,7 @@ export function projectSemantic(this: RhwpAdapter) {
               if (raw.charShapeId !== run.charShapeId)
                 throw Error("의미 검사 글자 모양 참조가 일치하지 않습니다.");
               props = strip(raw);
-              properties.set(letter, props);
+              properties.set(propertyKey, props);
             }
             chars.push(props);
           }
@@ -73,33 +90,48 @@ export function projectSemantic(this: RhwpAdapter) {
       }
       return { text, properties: strip(this.paraProps(p)), chars };
     };
+    const objects = this.call<{para:number;kind:string;anchored:boolean}[]>("getObjects");
+    // Core lists every root table and sets anchored from treat_as_char.
+    // Only those paragraphs can own the inline offsets queried below.
+    const inlineTableParagraphs = new Set(objects.filter(o => o.kind === "table" && !o.anchored).map(o => o.para));
+    const inlineOffsets = (sec: number, para: number): {controlIndex: number; offset: number}[] =>
+      typeof this.doc.getBodyInlineTableOffsets === "function"
+        ? JSON.parse(this.doc.getBodyInlineTableOffsets(sec, para))
+        : this.inline({kind: "body", sec, para, offset: 0});
     const body = [];
     for (let sec = 0; sec < this.doc.getSectionCount(); sec++)
-      for (let para = 0; para < this.doc.getParagraphCount(sec); para++)
+      for (let para = 0; para < this.doc.getParagraphCount(sec); para++) {
         body.push({
           sec,
           para,
           ...paragraph({ kind: "body", sec, para, offset: 0 }),
-          inlineTables: this.inline({ kind: "body", sec, para, offset: 0 }).map(
-            (t) => ({ control: t.controlIndex, offset: t.offset }),
-          ),
+          inlineTables: inlineTableParagraphs.has(body.length)
+            ? inlineOffsets(sec, para).map(t => ({control: t.controlIndex, offset: t.offset}))
+            : [],
         });
+        yield;
+      }
     const model = this.call("getCursorModel");
     const unaddressable=new Set<number>(), requiredOwners=new Map<string,any>();
-    for(const entry of model.lists.filter((l:any)=>l.isCell&&l.row!==undefined)){
+    const listById = new Map<number, any>();
+    for (const entry of model.lists) {
+      if (!listById.has(entry.listId)) listById.set(entry.listId, entry);
+    }
+    const tableLists = model.lists.filter((l: any) => l.isCell && l.row !== undefined);
+    for(const entry of tableLists){
       let owner=entry;const seen=new Set<number>(),chain=[entry];
       while(owner.hostListId!==0){
         if(seen.has(owner.hostListId))throw Error('의미 검사 소유 경로가 순환합니다.');
-        seen.add(owner.hostListId);owner=model.lists.find((l:any)=>l.listId===owner.hostListId);
+        seen.add(owner.hostListId);owner=listById.get(owner.hostListId);
         if(!owner)throw Error('의미 검사 소유 문단이 없습니다.');
         chain.push(owner);
       }
       const opaque=chain.reverse().find(e=>!e.isCell||e.row===undefined);
       if(opaque){unaddressable.add(entry.listId);requiredOwners.set(JSON.stringify([opaque.sectionIndex,opaque.hostListId,opaque.hostPara,opaque.controlIndex]),opaque);}
     }
-    const cells = model.lists
-      .filter((l: any) => l.isCell && l.hostListId === 0)
-      .map((l: any) => ({
+    const cells = [];
+    for (const l of model.lists.filter((l: any) => l.isCell && l.hostListId === 0)) {
+      cells.push({
         sec: l.sectionIndex,
         para: l.hostPara,
         control: l.controlIndex,
@@ -128,27 +160,22 @@ export function projectSemantic(this: RhwpAdapter) {
             offset: 0,
           }),
         ),
-      }));
-    const tables = [
-      ...new Map(
-        cells.map((c: any) => [
-          `${c.sec}/${c.para}/${c.control}`,
-          {
-            sec: c.sec,
-            para: c.para,
-            control: c.control,
-            properties: strip(
-              this.call("getTableProperties", c.sec, c.para, c.control),
-            ),
-          },
-        ]),
-      ).values(),
-    ];
-    const nestedCells = model.lists
-      .filter((l: any) => l.isCell && l.row !== undefined && l.hostListId !== 0 && !unaddressable.has(l.listId))
-      .map((l: any) => {
+      });
+      yield;
+    }
+    const tables = [];
+    const tableKeys = new Set<string>();
+    for (const {sec, para, control} of cells) {
+      const key = `${sec}/${para}/${control}`;
+      if (tableKeys.has(key)) continue;
+      tableKeys.add(key);
+      tables.push({ sec, para, control, properties: strip(this.call("getTableProperties", sec, para, control)) });
+      yield;
+    }
+    const nestedCells = [];
+    for (const l of tableLists.filter((l: any) => l.hostListId !== 0 && !unaddressable.has(l.listId))) {
         const p = this.listPosition(l, model.lists);
-        return {
+        nestedCells.push({
           position: p,
           row: l.row,
           col: l.col,
@@ -163,31 +190,22 @@ export function projectSemantic(this: RhwpAdapter) {
           paragraphs: Array.from({ length: this.count(p) }, (_, n) =>
             paragraph(withPara(p, n)),
           ),
-        };
-      });
+        });
+        yield;
+    }
     // Control array indices are transient addresses: export may prepend
     // SectionDef/ColDef to the first paragraph. Compare table order/ownership,
     // retaining every table/cell/text/style/geometry value in the projection.
-    const ordinal = (
-      sec: number,
-      host: number,
-      para: number,
-      control: number,
-    ) => {
-      const controls: number[] = [
-        ...new Set<number>(
-          model.lists
-            .filter(
-              (l: any) =>
-                l.isCell &&
-                l.row !== undefined &&
-                l.sectionIndex === sec &&
-                l.hostListId === host &&
-                l.hostPara === para,
-            )
-            .map((l: any) => l.controlIndex),
-        ),
-      ].sort((a, b) => a - b);
+    const controlGroups = new Map<string, number[]>();
+    for (const entry of tableLists) {
+      const key = JSON.stringify([entry.sectionIndex, entry.hostListId, entry.hostPara]);
+      const controls = controlGroups.get(key) ?? [];
+      if (!controls.includes(entry.controlIndex)) controls.push(entry.controlIndex);
+      controlGroups.set(key, controls);
+    }
+    for (const controls of controlGroups.values()) controls.sort((a, b) => a - b);
+    const ordinal = (sec: number, host: number, para: number, control: number) => {
+      const controls = controlGroups.get(JSON.stringify([sec, host, para])) ?? [];
       const index = controls.indexOf(control);
       if (index < 0) {
         // Non-table cell-like containers keep their existing strict address.
@@ -257,7 +275,7 @@ export function projectSemantic(this: RhwpAdapter) {
       }
       catch(e){throw new UnsupportedTableOwner(`복합 개체의 전체 보존 검사를 수행할 수 없습니다: ${String(e)}`);}
     }
-    const captions=captionCatalog(this).map(v=>({...v,paragraphs:v.paragraphs.map(p=>({...p,properties:strip(p.properties),chars:p.chars.map(strip)}))}));
+    const captions=captionCatalog(this,objects).map(v=>({...v,paragraphs:v.paragraphs.map(p=>({...p,properties:strip(p.properties),chars:p.chars.map(strip)}))}));
     const notes=noteCatalog(this).map(v=>({...v,properties:v.properties.map(strip)}));
     return {
       ...(notes.length?{notes}:{}),

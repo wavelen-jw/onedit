@@ -1,6 +1,8 @@
 import {activeWorkset} from "./active-workset.js";
 import { prepareScreenPageReceipt, type ScreenPageReceipt } from "./screen-page-receipt.js";
 import type { RhwpAdapter } from "./adapter.js";
+import { hftPaintFamilies } from "./font-provider.js";
+import { renderHftSvg } from "./hft-paint.js";
 import {hasPageLayers} from './page-layers.js';
 import { createPageSvg } from "./svg-page.js";
 import { projectControlLabels } from "./control-label-presentation.js";
@@ -37,11 +39,12 @@ export function createPagePresenter({adapter, document, pages, invalidateSelecti
   const renderedPages = new WeakMap<HTMLElement, RenderedPage>();
   function renderPage(page: number, info: { width: number; height: number }, div: HTMLElement | undefined, fontRevision: number, reusePages: boolean, hangulUpdate = false, resizeCanvas = false, receiptView?: ScreenReceiptView) {
     return adapter.withUpdateReads(() => {
+    const hftFaces = hftPaintFamilies(adapter);
     const controlCodes = viewMarkerState(adapter,'control-codes') === true;
     // Keep a composition surface through its commit; keyboard/range navigation restores SVG.
     // Enabled control labels require their SVG margin projection even when
     // paragraph marks happen to be off (e.g. a restored view state).
-    if ((hangulUpdate || resizeCanvas) && !controlCodes && viewMarkerState(adapter,'paragraph-marks')!==true) {
+    if ((hangulUpdate || resizeCanvas) && !hftFaces.size && !controlCodes && viewMarkerState(adapter,'paragraph-marks')!==true) {
       let canvas = div?.querySelector<HTMLCanvasElement>(":scope > canvas");
       if (!canvas) {
         canvas = document.createElement("canvas");
@@ -101,12 +104,21 @@ export function createPagePresenter({adapter, document, pages, invalidateSelecti
       cached.receipt = decision.receipt;
       return; // Exact native witness for this same already sanitized mounted SVG.
     }
-    const markup = adapter.doc.renderPageSvg(page);
+    const markup = renderHftSvg(adapter,page,adapter.doc.renderPageSvg(page),hftFaces);
+    // The browser resolves font faces again on attached SVG text. Compare the
+    // new Core drawing before retaining any ink, and retire measured geometry.
+    const refreshFonts = cached && cached.fontRevision !== fontRevision &&
+      activeWorkset(document) && document.fonts.status === "loaded" && !hangulUpdate && !resizeCanvas &&
+      !controlCodes && !cached.controlCodes && !cached.dirty && cached.doc === adapter.doc &&
+      cached.documentId === adapter.documentId && cached.page === page &&
+      cached.width === info.width && cached.height === info.height && cached.paragraphOnly === paragraphOnly &&
+      div === pages.children[page] && hasPageLayers(div, cached.svg);
+    if (refreshFonts) invalidateSelectionSvg(cached.svg);
     // A page that previously had no projected labels can acquire its first
     // one on an edit. The presence of a label in the old DOM is not an
     // admission test for an incremental renderer.
     if (!controlCodes && div && cached && !cached.controlCodes && !cached.dirty && cached.doc === adapter.doc &&
-        cached.documentId === adapter.documentId && cached.page === page && cached.fontRevision === fontRevision &&
+        cached.documentId === adapter.documentId && cached.page === page && (cached.fontRevision === fontRevision || refreshFonts) &&
         cached.width === info.width && cached.height === info.height && hasPageLayers(div,cached.svg) &&
         cached.paragraphOnly === paragraphOnly && cached.markup !== markup &&
         updateSvgTextRegion(cached.svg, cached.markup, markup, paragraphOnly,
@@ -125,6 +137,7 @@ export function createPagePresenter({adapter, document, pages, invalidateSelecti
       cached.observer.takeRecords();
       invalidateSelectionSvg(cached.svg);
     }
+    if (refreshFonts && cached.markup === markup) cached.fontRevision = fontRevision;
     // Ask Core for every page when that page is consumed. Only an identical, already
     // sanitized SVG in this same document can skip DOM parse/import. Commands,
     // snapshots and selection queries remain fresh. Never reuse a mutated SVG.
@@ -188,6 +201,9 @@ export function createPagePresenter({adapter, document, pages, invalidateSelecti
   function release(div:HTMLElement) {
     const entry=renderedPages.get(div);
     if(entry){entry.observer.disconnect();invalidateSelectionSvg(entry.svg);renderedPages.delete(div);}
+    const child=div.firstChild;
+    if(!entry && child instanceof HTMLDivElement && !child.nextSibling && !child.firstChild &&
+        child.className==='overlay' && child.attributes.length===1)return;
     div.replaceChildren();const overlay=document.createElement('div');overlay.className='overlay';div.append(overlay);
   }
   return {renderPage,release};

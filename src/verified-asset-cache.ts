@@ -55,11 +55,11 @@ async function matches(bytes: ArrayBuffer, sha256: string) {
 
 // Same URL+hash may survive a UI-only build. A changed expected hash never reads
 // the previous entry. Verify on read as well as write; metadata is not proof.
-export async function verifiedAssetBytes(url: URL, sha256: string, kind: 'wasm' | 'font', signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> {
+export async function verifiedAssetBytes(url: URL, sha256: string, kind: 'wasm' | 'font', signal?: AbortSignal, persist = true): Promise<Uint8Array<ArrayBuffer>> {
   if (url.origin !== location.origin || !/^https?:$/.test(url.protocol) || !/^[a-f0-9]{64}$/.test(sha256))
     throw Error('검증 자산 주소 또는 SHA가 올바르지 않습니다.');
   const key = JSON.stringify([kind, url.href, sha256]);
-  const cached = await storage(key, 'get');
+  const cached = persist ? await storage(key, 'get') : undefined;
   signal?.throwIfAborted();
   if (cached !== undefined) {
     if (cached instanceof ArrayBuffer && await matches(cached, sha256)) return new Uint8Array(cached);
@@ -67,8 +67,9 @@ export async function verifiedAssetBytes(url: URL, sha256: string, kind: 'wasm' 
   }
   const versioned = new URL(url);
   versioned.searchParams.set('rhwp-sha256', sha256);
-  const response = await fetch(versioned, { signal });
+  const response = await fetch(versioned, persist ? { signal } : { signal, cache:'no-store', credentials:'same-origin', redirect:'error' });
   if (!response.ok) throw Error(`${kind === 'font' ? 'font' : 'Core 읽기 실패:'} HTTP ${response.status}`);
+  if (!persist && response.headers.get('Content-Type') !== (url.pathname.endsWith('.otf')?'font/otf':'font/ttf')) throw Error('font response type mismatch');
   const bytes = await response.arrayBuffer();
   signal?.throwIfAborted();
   if (!await matches(bytes, sha256))
@@ -76,6 +77,6 @@ export async function verifiedAssetBytes(url: URL, sha256: string, kind: 'wasm' 
   signal?.throwIfAborted();
   // A transaction commits only this complete, checked response. Storage failures
   // cannot prevent the verified network bytes being used or enable stale bytes.
-  await storage(key, 'put', bytes);
+  if (persist) await storage(key, 'put', bytes);
   return new Uint8Array(bytes);
 }

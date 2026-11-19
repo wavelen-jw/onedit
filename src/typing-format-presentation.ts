@@ -24,7 +24,7 @@ function createPolicy(editor: Interaction, input: HTMLTextAreaElement, environme
       Object.freeze(value);
     }
   };
-  let ready = false, active = false, ticket = '', owner = '', env = '', typing = '', id = '';
+  let ready = false, active = false, ticket = '', projectedState = '', owner = '', env = '', typing = '', id = '';
   let native: object | undefined;
   let nodes: Element[] = [];
   let domChanged = false, projectedDOM: string[] = [];
@@ -95,11 +95,17 @@ function createPolicy(editor: Interaction, input: HTMLTextAreaElement, environme
     projectedDOM = nodes.map(n => n.outerHTML); domChanged = false;
     // Pointer selection projects before the existing focus() call. Focus is
     // checked when admitting an input, not while recording its preceding view.
-    ready = !blocked() && editor.selection.kind === 'caret'; ticket = ''; // A full projection is not itself a typing ticket.
+    ready = !blocked() && editor.selection.kind === 'caret';
+    projectedState = ready ? state() : '';
+    ticket = ''; // A full projection is not itself a typing ticket.
   };
   const run = <T>(action: () => T, textOnly: boolean): T => {
     publication = undefined;
-    const usable = intact() && ready && eligible() && textOnly;
+    // An input can arrive before the deferred format projection for a new
+    // selection. Only continue from that selection's projected controls.
+    const before = state();
+    const usable = textOnly && ready && eligible() &&
+      (projectedState === before || ticket === before) && intact();
     ticket = '';
     if (!usable) { invalidate(); return action(); }
     native = editor.adapter.doc; id = editor.adapter.documentId; owner = positionOwner();

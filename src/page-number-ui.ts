@@ -9,9 +9,9 @@ export function mountPageNumber(doc: Document, editor: Interaction, actions: {
   busy: () => boolean; page: () => number; changed: () => void; focus: () => void; error: (e: unknown) => void;
 }) {
   const launch = doc.getElementById('page-number-open') as HTMLButtonElement;
-  const dialog = doc.createElement('dialog'); dialog.id = 'page-number-dialog'; dialog.className = 'manager-dialog'; dialog.setAttribute('aria-label', '쪽 번호 필드 넣기');
+  const dialog = doc.createElement('dialog'); dialog.id = 'page-number-dialog'; dialog.className = 'manager-dialog'; dialog.setAttribute('aria-label', '본문에 쪽 번호 넣기');
   const form = doc.createElement('form'); form.id = 'page-number-form';
-  const title = doc.createElement('h2'); title.textContent = '쪽 번호 필드 넣기';
+  const title = doc.createElement('h2'); title.textContent = '본문에 쪽 번호 넣기';
   const label = doc.createElement('label'); label.textContent = '자동 번호 종류';
   const kind = doc.createElement('select'); kind.name = 'pageNumberKind';
   for (const [value, text] of [['page', '현재 쪽 번호'], ['total', '전체 쪽 수']]) {
@@ -19,7 +19,7 @@ export function mountPageNumber(doc: Document, editor: Interaction, actions: {
   }
   label.append(kind);
   const preview = doc.createElement('p'); preview.setAttribute('role', 'status');
-  const note = doc.createElement('p'); note.className = 'manager-note'; note.textContent = pageNumberLimit + ' 숫자는 본문 글자가 아니라 문서 쪽수에 따라 표시되는 필드입니다.';
+  const note = doc.createElement('p'); note.className = 'manager-note'; note.textContent = '본문 커서 위치에 넣고 쪽이 바뀌면 자동 갱신합니다.';
   const footer = doc.createElement('div'); footer.className = 'manager-footer';
   const ok = doc.createElement('button'); ok.type = 'submit'; ok.id = 'page-number-apply'; ok.textContent = '넣기';
   const cancel = doc.createElement('button'); cancel.type = 'button'; cancel.textContent = '취소'; cancel.id = 'page-number-cancel'; footer.append(ok, cancel);
@@ -35,7 +35,7 @@ export function mountPageNumber(doc: Document, editor: Interaction, actions: {
     if (!dialog.open) return;
     const message = stale() ? '문서·리비전·선택이 변경되었습니다. 취소 후 다시 여세요.' : reason;
     ok.disabled = kind.disabled = !!message; ok.title = message;
-    preview.textContent = message || `현재 ${actions.page() + 1}쪽 / 전체 ${editor.adapter.pageCount}쪽 · 본문 커서 위치에 삽입`;
+    preview.textContent = message || `현재 ${actions.page() + 1}쪽 / 전체 ${editor.adapter.pageCount}쪽`;
   };
   launch.onclick = () => {
     sync(true); if (launch.disabled || dialog.open) return;

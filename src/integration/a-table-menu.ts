@@ -86,7 +86,7 @@ export const tableItems: Item[] = [
   {id:'add-dialog',label:'줄/칸 추가하기…',key:'Alt+Insert'},
   {id:'delete-dialog',label:'줄/칸 지우기…',key:'Alt+Delete'},
   ...([['front','맨 앞으로','Shift+Page Up'],['back','맨 뒤로','Shift+Page Down'],['inFrontOfText','글 앞으로','Shift+Home'],['behindText','글 뒤로','Shift+End']]as const).map(([action,label,key]):Item=>({id:'control-'+action,label,key,command:{type:'control-key',action}})),
-  { id: "table-properties", label: "표 전체 속성…", unsupported: true },
+  { id: "table-object-pagination", label: "표 쪽 나누기…" },
   { id: "auto-fit", label: "내용에 맞춰 자동 크기", unsupported: true },
 ];
 export function tableMenuState(editor: Interaction, busy = false, inspectEqual = true, omitCellDialogs = false, previewView?:()=>string|undefined,phase3=false, batchView?:(page:number)=>(()=>string|undefined)|undefined,widthInputs?:WidthPreviewAdmission,passiveView?:()=>string|undefined) {
@@ -121,7 +121,7 @@ export function tableMenuState(editor: Interaction, busy = false, inspectEqual =
     if(cells.some(c=>c.rowSpan!==1||c.colSpan!==1))throw Error('이 임의 나누기/줄·칸 창은 병합 없는 일반 표에서 지원합니다. 기존 병합 해제는 별도 명령을 사용하세요.');
     ordinaryGrid=cells;
   }catch(error){draftReason=String(error);}
-  const objectReason=(transpose:boolean)=>{
+  const objectReason=(transpose:boolean,pagination=false)=>{
     const batch=transpose && batchView ? (focus:Position)=>{
       const owner=editor.tableDisplayGridOwner("table");
       if(!owner?.focusIs(focus))return;
@@ -132,11 +132,11 @@ export function tableMenuState(editor: Interaction, busy = false, inspectEqual =
       };
     } : undefined;
     try {
-      selectedTableObject(editor.adapter,editor.selection,transpose,batch);
+      selectedTableObject(editor.adapter,editor.selection,transpose,batch,pagination);
       return '';
     } catch(e) {
       if(e instanceof PassiveOwnerBatchRetired)try{
-        selectedTableObject(editor.adapter,editor.selection,transpose);
+        selectedTableObject(editor.adapter,editor.selection,transpose,undefined,pagination);
         return '';
       }catch(error){return String(error);}
       return String(e);
@@ -150,7 +150,7 @@ export function tableMenuState(editor: Interaction, busy = false, inspectEqual =
         : busy
           ? "입력 처리 중"
           : item.id==='range-size' ? tableRangeSizeReason(editor)
-          : item.id.startsWith('local-')?base||editor.localResizeReason(localResizeCommand(item.id.slice(6))!):item.id.startsWith('table-object-')||item.id==='table-transpose'?objectReason(item.id==='table-transpose'):base || equalReasons.get(item.id) || (['split-dialog','add-dialog','delete-dialog'].includes(item.id)?draftReason|| (item.id==='split-dialog'&&editor.selection.kind!=='cells'?'F5로 나눌 셀을 선택하세요.':''):'') || (item.id === 'select-rows' ? rows : item.id==='select-columns'?columns:'') || (item.id.startsWith('block-')?block:'') ||
+          : item.id.startsWith('local-')?base||editor.localResizeReason(localResizeCommand(item.id.slice(6))!):item.id.startsWith('table-object-')||item.id==='table-transpose'?objectReason(item.id==='table-transpose',item.id==='table-object-pagination'):base || equalReasons.get(item.id) || (['split-dialog','add-dialog','delete-dialog'].includes(item.id)?draftReason|| (item.id==='split-dialog'&&editor.selection.kind!=='cells'?'F5로 나눌 셀을 선택하세요.':''):'') || (item.id === 'select-rows' ? rows : item.id==='select-columns'?columns:'') || (item.id.startsWith('block-')?block:'') ||
             (item.command ? reason(item.command) : ""),
     ]),
   );

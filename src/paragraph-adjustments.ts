@@ -42,7 +42,7 @@ export function prepareParagraphAdjustment(a: RhwpAdapter, targets: {p: Position
 // A draft only. The shared dialog commits the chosen operation once, or discards it.
 export function mountParagraphAdjustments(container: HTMLElement, state: FormatState) {
   const panel = document.createElement('div');
-  const note = document.createElement('p');note.textContent = '각 문단의 원래 값에 1pt씩 증감합니다. 다른 필드 변경과는 따로 적용하세요. 표시값은 근사치이며 계산에는 Core 원시값을 사용합니다.';
+  const note = document.createElement('p');note.textContent = '각 문단의 값을 1pt씩 조절합니다. 다른 항목 변경과는 따로 적용하세요.';
   const choice = document.createElement('select');choice.name = 'paragraphAdjustment';
   choice.add(new Option('증감 없음 / 유지', ''));
   paragraphAdjustmentItems.forEach((item, n) => choice.add(new Option(item.label, String(n))));

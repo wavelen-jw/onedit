@@ -44,16 +44,16 @@ export function clipboardSupport(
   if (ordinaryCells) {
     structuredSelection = true;
     if (!coreNested)
-      reason = "NOT_SUPPORTED: 설치 Core의 셀 문단 서식 클립보드 API가 없습니다.";
+      reason = "이 버전에서는 셀 문단의 서식까지 복사할 수 없습니다.";
     else try {
       if (editor.cells(s).length === 1) for (const target of editor.targets(s))
         editor.adapter.assertTextOnly(target.p);
     } catch (e) { if(!(e instanceof UnsupportedTableOperation))throw e;reason=e.message;expectedUnsupported=true; }
   }
   if (nested(s.focus) && ["cells", "table"].includes(s.kind) && !coreNested)
-    reason = "NOT_SUPPORTED: 설치 Core의 중첩 구조화 클립보드 API가 없습니다.";
+    reason = "이 버전에서는 중첩 표 전체를 복사할 수 없습니다.";
   if (nestedText && action !== "paste" && !coreNested)
-    reason = "NOT_SUPPORTED: 설치 Core의 중첩 셀 텍스트 서식 클립보드 API가 없습니다.";
+    reason = "이 버전에서는 중첩 셀의 텍스트 서식까지 복사할 수 없습니다.";
   if (nested(s.focus) && s.kind === "table" && action !== "copy"){reason="자식 표 전체 삭제/선택 대체는 아직 지원하지 않습니다. 복사는 지원합니다.";expectedUnsupported=true;}
   if(action==='paste'&&s.kind==='cells'&&editor.cells(s).length>1){reason='복수 셀을 대신하는 붙여넣기는 아직 지원하지 않습니다.';expectedUnsupported=true;}
   if(action!=='paste'&&(s.kind==='table'&&nested(s.focus)||s.kind==='cells'&&(nested(s.focus)||editor.cells(s).length>1))){

@@ -35,7 +35,7 @@ export function mountTextColorSplit(doc:Document, editor:Interaction, hex:HTMLIn
     }catch(error){status.textContent=String(error).replace(/^Error: /,"");}
   }
   const button=(text:string)=>{const b=doc.createElement("button");b.type="button";b.textContent=text;return b;};
-  const automatic=button("자동색 (검정)");automatic.dataset.color="#000000";automatic.title="검정 RGB 적용 · 문서 테마 자동 연동은 지원하지 않습니다.";automatic.onclick=()=>commit("#000000");popup.append(automatic);
+  const automatic=button("검정");automatic.dataset.color="#000000";automatic.title="검정";automatic.onclick=()=>commit("#000000");popup.append(automatic);
   const bases=["#ffffff","#000000","#e7e6e6","#44546a","#4472c4","#ed7d31","#a5a5a5","#ffc000","#5b9bd5","#70ad47"];
   const shades=(color:string,factor:number)=>"#"+[1,3,5].map(i=>{const v=parseInt(color.slice(i,i+2),16);return Math.round(factor>=0?v+(255-v)*factor:v*(1+factor)).toString(16).padStart(2,"0");}).join("");
   const toneColors=[...bases,...[.8,.6,.4,-.25,-.5].flatMap(f=>bases.map(c=>shades(c,f)))];
@@ -61,7 +61,7 @@ export function mountTextColorSplit(doc:Document, editor:Interaction, hex:HTMLIn
   function fit(){if(popup.hidden)return;const a=trigger.getBoundingClientRect(),host=doc.body.getBoundingClientRect(),w=doc.defaultView!,width=Math.min(300,w.innerWidth-16,host.width-16);popup.style.width=`${Math.max(160,width)}px`;popup.style.maxHeight=`${Math.max(100,w.innerHeight-16)}px`;popup.style.left=`${Math.max(8,Math.min(a.left,host.right-width-8,w.innerWidth-width-8))}px`;popup.style.top=`${Math.max(8,Math.min(a.bottom+5,w.innerHeight-popup.getBoundingClientRect().height-8))}px`;}
   function open(){
     if(options.readBusy()||reason)return;
-    target=editor.capture();status.textContent="고정 RGB · 선택한 글자에만 적용";popup.hidden=false;trigger.setAttribute("aria-expanded","true");hex.value=valid(state.textColor)?state.textColor:"";
+    target=editor.capture();status.textContent="";popup.hidden=false;trigger.setAttribute("aria-expanded","true");hex.value=valid(state.textColor)?state.textColor:"";
     recents.replaceChildren(...recent.map(c=>{const b=button("");b.dataset.color=c;b.style.backgroundColor=c;b.title=c;b.setAttribute("role","option");b.setAttribute("aria-label",c);b.onclick=()=>commit(c);return b;}));
     for(const g of grids)for(const b of g.querySelectorAll<HTMLElement>("button"))b.setAttribute("aria-selected",String(current()==="common"&&b.dataset.color===String(state.textColor).toLowerCase()));
     guard.open();fit();focusColor(popup.querySelector<HTMLElement>('[aria-selected="true"]')??popup.querySelector<HTMLElement>('[role=option]')!);

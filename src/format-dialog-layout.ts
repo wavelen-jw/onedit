@@ -63,7 +63,7 @@ export function mountDialogLayout(root: HTMLElement, kind: FormatKind, controls:
     const label = document.createElement("label"), selector = document.createElement("select"), note = document.createElement("p");
     label.textContent = "언어"; selector.name = "dialogLanguage"; selector.add(new Option("모든 언어 · 공통값", "all"));
     languages.forEach((lang, i) => selector.add(new Option(lang, String(i)))); label.append(selector);
-    note.textContent = "언어를 바꾸어도 초안은 유지됩니다. 모든 언어는 같은 값을 전체 슬롯에 적용하며 한컴 대표 글꼴 묶음과는 다릅니다.";
+    note.textContent = "모든 언어를 선택하면 변경 값을 각 언어에 적용합니다.";
     note.className = "dialog-draft-note"; section.insertBefore(note, section.children[1]); section.insertBefore(label, note);
     const choose = () => { for (const row of section.querySelectorAll<HTMLElement>("[data-field]")) {
       const slot = /Language([0-6])$/.exec(row.dataset.field!);

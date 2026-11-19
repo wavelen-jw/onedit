@@ -1,4 +1,4 @@
-import { closeEditorDialog, showEditorDialog } from "../editor-popup-focus.js";
+import { closeEditorDialog, showEditorDialog, wrapDialogTab } from "../editor-popup-focus.js";
 import {diagnostics,freezeDiagnostic,currentDiagnostic,diagnosticCapturedAt} from './runtime.js';
 import {coarseEnvironment,makeReport,diagnosticView,validBuild,isSHA,REPORT_LIMITS,type BuildIdentity,type Category,type AttachmentKind,type ReportFile,type ReportPayload,type ReportReceipt} from './report-contract.js';
 import {firstPartyTransport,ReportFailure,type ReportTransport} from './report-client.js';
@@ -9,6 +9,20 @@ export function declareReportingRuntime(sha:string){if(isSHA(sha))declared=sha;}
 /** Internal integration consumes existing primitive JS state only. No Core reads. */
 export function configureReporting(context:{state:()=>ReportState;wasmDeclared:string;wasmObserved:()=>string|null}){stateProvider=context.state;declared=context.wasmDeclared;observed=context.wasmObserved;}
 let installed=false;
+const reportMenuButtons = new WeakMap<Document, HTMLButtonElement>();
+export function mountReportMenuEntry(panel: HTMLElement, busy: () => boolean) {
+ const doc = panel.ownerDocument, entry = reportMenuButtons.get(doc);
+ if (!entry) return;
+ entry.setAttribute('role', 'menuitem');
+ panel.append(entry);
+ entry.addEventListener('click', event => {
+  if (busy() || doc.querySelector('dialog[open]')) {
+   event.stopImmediatePropagation();
+   return;
+  }
+  panel.closest('details')?.removeAttribute('open');
+ }, {capture:true});
+}
 export function installReportUI(doc:Document,transport:ReportTransport=firstPartyTransport()){
  if(installed)return;installed=true;const win=doc.defaultView!;
  const id=()=>win.crypto.randomUUID(),environment=coarseEnvironment(win.navigator.userAgent);
@@ -23,10 +37,10 @@ export function installReportUI(doc:Document,transport:ReportTransport=firstPart
  const element=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string)=>{const e=doc.createElement(tag);if(text!==undefined)e.textContent=text;return e;};
  const button=(text:string)=>{const b=element('button',text);b.type='button';return b;};
  const openButton=button('문제 제보');openButton.id='reporting-open';openButton.setAttribute('aria-haspopup','dialog');
- const footerTools=element('span');footerTools.id='reporting-footer-tools';
- const version=element('span',loadedProduct ? '버전 '+loadedProduct.slice(0,12) : '버전 미확인');version.id='status-build-version';
+ reportMenuButtons.set(doc,openButton);
+ const version=element('span',loadedProduct ? '버전 '+loadedProduct.slice(0,4) : '버전 미확인');version.id='status-build-version';
  if(loadedProduct)version.title='현재 탭 빌드 '+loadedProduct;
- footerTools.append(version,openButton);doc.querySelector('body>footer')!.append(footerTools);
+ doc.querySelector('body>footer')!.append(version);
  const error=doc.getElementById('error')!,notice=element('div');notice.id='reporting-error-notice';error.before(notice);const errorButton=button('제보');errorButton.id='reporting-error-open';errorButton.title='문서 내용 없이 오류 진단 정보를 보냅니다.';const errorStatus=element('span');errorStatus.id='reporting-error-status';errorStatus.setAttribute('role','status');errorStatus.setAttribute('aria-live','polite');const errorDownload=button('제보 정보 저장');errorDownload.id='reporting-error-download';errorDownload.hidden=true;notice.append(error,errorButton,errorStatus,errorDownload);
  const d=element('dialog');d.id='report-dialog';d.setAttribute('aria-labelledby','report-title');d.setAttribute('aria-describedby','report-intro');
  const h=element('h2','문제 제보');h.id='report-title';const intro=element('p','설명 없이도 제보할 수 있습니다. 문서 내용은 자동으로 보내지 않습니다.');intro.id='report-intro';
@@ -92,7 +106,7 @@ export function installReportUI(doc:Document,transport:ReportTransport=firstPart
  openButton.onclick=()=>open(false);
  d.addEventListener('close',()=>{if(d.open)return;epoch++;active?.abort();active=undefined;for(const s of slots.values())clearSlot(s);prepared=undefined;if(completed){description.value='';expected.value='';}if(completed||partial){lastPayload=undefined;lastSerialized='';}completed=undefined;partial=undefined;});cancel.onclick=()=>closeEditorDialog(d);
  d.addEventListener('cancel',e=>{e.preventDefault();closeEditorDialog(d);});
- d.addEventListener('keydown',e=>{e.stopPropagation();});
+ d.addEventListener('keydown',e=>{e.stopPropagation();wrapDialogTab(e,d);});
  auto.onchange=()=>{if(!auto.checked)autoController?.abort();try{win.localStorage.setItem('ongle.reporting.auto.v1',String(auto.checked));}catch{/* current page opt-in only when storage is unavailable */}status.textContent=auto.checked?'자동 오류 제보를 켰습니다. 문서·화면·첨부파일은 보내지 않습니다.':'자동 오류 제보를 껐습니다.';};
  diag.onchange=updatePreview;
  const payload=(automatic=false):ReportPayload=>{const b=build();if(!b)throw new ReportFailure('UNAVAILABLE');return makeReport({id:id(),sessionId,build:b,environment,category:category.value as Category,automatic,description:automatic?'':description.value.trim()?description.value:'문제 제보 버튼으로 접수했습니다.',expected:automatic?'':expected.value,diagnostics:automatic||diag.checked,snapshot:automatic?currentDiagnostic():snapshot(),snapshotAtMs:diagnosticCapturedAt(automatic?currentDiagnostic():snapshot()),files:automatic?[]:included()});};

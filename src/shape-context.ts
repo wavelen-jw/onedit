@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {captionTarget} from './captions.js';
 import {registerPopupLifetime} from './menu-lifetime.js';
 import {prepareControlKey} from './control-shortcuts.js';
@@ -23,8 +24,8 @@ export function mountShapeContext(doc:Document,editor:Interaction,actions:{busy:
   const close=(focus=false)=>{popup.hidden=true;captured=undefined;if(focus)actions.focus();};
   const valid=()=>!!captured&&sameFormatTarget(captured,editor.capture())&&!!selected();
   const reason=(id:string)=>{
-    if(id==='caption'){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');captionTarget(editor.adapter,editor.selection);return '';}catch(error){return String(error);}}
-    if(['front','back','inFrontOfText','behindText'].includes(id)){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');prepareControlKey(editor.adapter,editor.selection,id as 'front'|'back'|'inFrontOfText'|'behindText');return '';}catch(error){return String(error);}}
+    if(id==='caption'){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');captionTarget(editor.adapter,editor.selection);return '';}catch(error){return editorFeedbackText(error);}}
+    if(['front','back','inFrontOfText','behindText'].includes(id)){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');prepareControlKey(editor.adapter,editor.selection,id as 'front'|'back'|'inFrontOfText'|'behindText');return '';}catch(error){return editorFeedbackText(error);}}
     if(id==='line')return actions.busy()?'현재 작업을 마친 후 사용하세요.':selected()?.reason??'';
     if(actions.busy())return "입력·저장·열린 대화상자를 먼저 마치세요.";
     if(id==="copy"||id==="cut")return clipboardSupport(editor,id).reason??"";

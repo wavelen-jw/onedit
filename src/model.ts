@@ -124,7 +124,7 @@ export type Props = Record<
 export type Command =
   | {type:"textbox-edit";change:import("./textbox-edit.js").TextboxEdit}
   | {type:'remaining-edit';change:import('./remaining-shortcut-commands.js').RemainingEdit}
-  | {type:'table-object';action:'transpose'|'format';props?:Props}
+  | {type:'table-object';action:'transpose'|'format'|'pagination';props?:Props}
   | {type:'object-ungroup'}
   | {type:'paper';change:import('./shortcut-supported2.js').PaperChange}
   | {type:'cell-equal';axis:'width'|'height'}
@@ -161,6 +161,7 @@ export type Command =
   | { type: "style"; id: number; resetDirect?: boolean }
   | {
       type: "insert";
+      nativeTypingAppend?: boolean;
       text: string;
     }
   | {

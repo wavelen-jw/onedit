@@ -266,7 +266,7 @@ export function mountSearch(
   root.id = "search-dialog";
   root.setAttribute("aria-labelledby", "search-dialog-title");
   root.innerHTML = `
-    <div class="search-heading"><h2 id="search-dialog-title">찾기</h2><button type="button" data-action="close" aria-label="찾기 닫기">×</button></div>
+    <div class="search-heading"><h2 id="search-dialog-title">찾기</h2><button type="button" data-action="close" aria-label="찾기 닫기">닫기</button></div>
     <div class="search-row"><label>찾을 내용 <input type="search" name="query"></label>
       <button type="button" data-action="previous" aria-label="이전 결과">↑</button><button type="button" data-action="next" aria-label="다음 결과">↓</button></div>
     <div class="search-row search-replace-row" hidden><label>바꿀 내용 <input name="replacement"></label>
@@ -284,9 +284,9 @@ export function mountSearch(
   const mode = (replace: boolean, focus?: "query" | "replacement") => {
     replacing = replace;
     root.querySelector<HTMLElement>(".search-replace-row")!.hidden = !replace;
-    root.querySelector("#search-dialog-title")!.textContent = replace ? "찾기 및 바꾸기" : "찾기";
+    root.querySelector("#search-dialog-title")!.textContent = replace ? "찾기·바꾸기" : "찾기";
     const toggle = root.querySelector<HTMLButtonElement>('[data-action="mode"]')!;
-    toggle.textContent = replace ? "바꾸기 닫기" : "바꾸기 열기";
+    toggle.textContent = replace ? "찾기만" : "바꾸기 열기";
     toggle.setAttribute("aria-expanded", String(replace));
     if (focus) get(focus).focus();
   };

@@ -32,7 +32,7 @@ export function mountCommandSearch(doc:Document,editor:Interaction,actions:{
     for(const row of order)rows.push({row,reason:stale||row.unavailable||admission.get(row.id)||"",keys:keyText(row),recent:recent.includes(row.id)});
     list.replaceChildren();active=Math.min(active,Math.max(0,rows.length-1));
     rows.forEach((r,i)=>{const option=doc.createElement("button");option.type="button";option.id=`command-result-${i}`;option.tabIndex=-1;option.setAttribute("role","option");option.setAttribute("aria-disabled",String(!!r.reason));option.dataset.commandId=r.row.id;const label=doc.createElement("span"),meta=doc.createElement("small"),why=doc.createElement("small");label.textContent=r.row.label;meta.textContent=`${r.recent?"최근 · ":""}${r.row!.group} · ${r.keys}`;why.textContent=r.reason;option.append(label,meta,why);option.onpointerdown=e=>e.preventDefault();option.onclick=()=>{active=i;run();};list.append(option);});
-    status.textContent=`${rows.length}개 · 현재 선택에 적용`;mark();
+    status.textContent=`${rows.length}개`;mark();
   };
   const disposeRows=()=>{if(activeWorkset(doc)){releaseSearchCatalog(doc);rows=[];admission.clear();list.replaceChildren();}};
   const close=(focus=true)=>{guard.close();captured=undefined;closeEditorDialog(dialog, focus);if(focus){disposeRows();actions.focus();}};
@@ -57,7 +57,7 @@ export function mountCommandSearch(doc:Document,editor:Interaction,actions:{
       if(!sameFormatTarget(target,editor.capture()))throw Error("실행 직전 선택이 바뀌었습니다.");
       {const row=choice.row,why=row.unavailable||actions.reasons().get(row.id)||"";if(why)throw Error(why);actions.invoke(row,target);recent.splice(0,recent.length,row.id,...recent.filter(id=>id!==row.id).slice(0,2));}
       disposeRows();if(!doc.querySelector("dialog[open]"))actions.focus();
-    }catch(error){captured=original;status.textContent=String(error);if(!dialog.open){if(activeWorkset(doc)){admission=actions.reasons();render();}showEditorDialog(dialog);query.focus();}guard.open();}
+    }catch(error){captured=original;status.textContent=error instanceof Error?error.message:String(error);if(!dialog.open){if(activeWorkset(doc)){admission=actions.reasons();render();}showEditorDialog(dialog);query.focus();}guard.open();}
     finally{running=false;}
   }
   function show(){
@@ -65,7 +65,7 @@ export function mountCommandSearch(doc:Document,editor:Interaction,actions:{
     captured=editor.capture();access=accessKey();admission=actions.reasons();query.value="";active=0;composing=false;
     for(const n of doc.querySelectorAll("#main-menu details[open]"))n.removeAttribute("open");
     heading.textContent="명령 찾기";
-    help.textContent="↑↓ 탐색 · Enter 실행 · Esc 취소 · 표시 키는 현재 메뉴 기준이며 브라우저 예약키 제한은 유지됩니다.";
+    help.textContent="↑↓ 이동 · Enter 실행 · Esc 닫기";
     render();guard.open();showEditorDialog(dialog);query.focus();return true;
   }
   button.onclick=()=>show();query.addEventListener("input",()=>{active=0;render();},{signal});

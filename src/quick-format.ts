@@ -3,7 +3,7 @@ import { activeWorkset } from "./active-workset.js";
 import { publishEditorDisplay, readEditorDisplay } from "./editor-state-coordinator.js";
 import {mountEditableCombo} from './editable-combo.js';
 import {toolbarFormContains} from './toolbar-form-view.js';
-import {documentFontNames} from './font-provider.js';
+import {documentFontNames, isSubstitutedFont} from './font-provider.js';
 import {fontChoiceGroups} from './integration/a-font-availability.js';
 import {readFormatPresentation, readPassiveFormatPresentation} from './typing-format-presentation.js';
 import { mountTextColorSplit } from "./text-color-split.js";
@@ -262,9 +262,22 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
   size.removeAttribute('list');sizeList.remove();
   const resetFont = () => {
     fontCombo.close();
-    const family = state[scope.value === "all" ? "fontFamily" : `fontLanguage${scope.value}`];
+    const key = scope.value === "all" ? "fontFamily" : `fontLanguage${scope.value}`;
+    const family = state[key];
     initial.font = typeof family === "string" ? family : "";
-    fontChoices();font.value = initial.font;markFormatValue(font,formatValueState(state,scope.value==="all"?"fontFamily":`fontLanguage${scope.value}`));font.placeholder="혼합";
+    const caretFamily = scope.value === "all" && typeof state.__caretFontFamily === "string"
+      ? state.__caretFontFamily : "";
+    const source = initial.font || caretFamily;
+    const substituted = source && isSubstitutedFont(editor.adapter.doc, source);
+    const label = substituted ? `${source} (대체)` : initial.font ? "" : caretFamily;
+    // A caret can have one current family even when its seven script slots
+    // differ. Display it as a hint so another format change cannot apply it
+    // to all slots. A range still uses the aggregate format state.
+    font.value = label ? "" : initial.font;
+    markFormatValue(font, label ? "common" : formatValueState(state, key));
+    font.placeholder = label || "혼합";
+    if (label) font.setAttribute("aria-description", label);
+    else font.removeAttribute("aria-description");
     fontChoices();
     note.textContent = ''; note.removeAttribute('title');
   };

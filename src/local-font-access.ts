@@ -3,23 +3,70 @@
 import {readLocalFontNames} from './local-font-names.js';
 import {offeredFontFamily} from './font-offerings.js';
 export type LocalFace = {family:string;fullName:string;postscriptName:string;style:string;blob?:()=>Promise<Blob>};
-type Snapshot={version:1;detectedAt:string;names:string[]};
+type FaceIdentity=Omit<LocalFace,'blob'>&{aliases:string[]};
+type Snapshot={version:1;detectedAt:string;names:string[];faces?:FaceIdentity[]};
 const key='rhwp-edit-local-fonts-v1',names=new Set<string>(),faces:LocalFace[]=[];
 let snapshot:Snapshot|undefined,message='',job:Promise<void>|undefined;
 const bytes=new Map<LocalFace,Promise<Uint8Array<ArrayBuffer>>>();
 let aliases=new WeakMap<LocalFace,readonly string[]>();
+let scanRevision=0;
 export const validFontName=(n:unknown):n is string=>typeof n==='string'&&!!n.trim()&&n.length<=200&&!/[\x00-\x1f\x7f,'"\\;{}]/.test(n);
 const normalize=(n:string)=>n.normalize('NFC').trim();
 const changed=()=>document.dispatchEvent(new CustomEvent('rhwp:local-fonts-updated'));
 function save(){try{if(snapshot)localStorage.setItem(key,JSON.stringify(snapshot));else localStorage.removeItem(key);}catch{message+=' 감지 결과를 저장하지 못했지만 이 탭에서는 사용할 수 있습니다.';}}
-try{const value=JSON.parse(localStorage.getItem(key)??'null');if(value?.version===1&&typeof value.detectedAt==='string'&&Array.isArray(value.names)&&value.names.length<=10000&&value.names.every(validFontName)){snapshot=value;for(const n of value.names)names.add(normalize(n));}}catch{/* Storage is optional. */}
+function validFace(face:LocalFace){return face&&[face.family,face.fullName,face.postscriptName].every(validFontName)&&typeof face.style==='string'&&face.style.length<=200;}
+try{
+  const value=JSON.parse(localStorage.getItem(key)??'null');
+  if(value?.version===1&&typeof value.detectedAt==='string'&&Array.isArray(value.names)&&value.names.length<=10000&&value.names.every(validFontName)){
+    const known=Array.isArray(value.faces)?value.faces.slice(0,10000).filter((f:FaceIdentity)=>validFace(f)&&Array.isArray(f.aliases)&&f.aliases.length<=64&&f.aliases.every(validFontName)):[];
+    snapshot={version:1,detectedAt:value.detectedAt,names:value.names,faces:known};
+    for(const n of value.names)names.add(normalize(n));
+  }
+}catch{/* Storage is optional. */}
 export function localFontNames(){return [...names].filter(offeredFontFamily).sort((a,b)=>a.localeCompare(b,'ko'));}
 export function localFontState(){return{busy:!!job,supported:typeof query()==='function',count:localFontNames().length,detectedAt:snapshot?.detectedAt,message:message||(snapshot?'이전 감지 목록입니다. 실제 사용 시 설치 글꼴을 다시 확인합니다.':'저장된 감지 결과가 없습니다.')};}
 function query(){return(globalThis as typeof globalThis&{queryLocalFonts?:(options?:{postscriptNames:string[]})=>Promise<LocalFace[]>}).queryLocalFonts;}
+const nameKey=(n:string)=>normalize(n).toLocaleLowerCase('en-US');
+const styleMatches=(f:LocalFace,weight:string,italic:boolean)=>/bold|굵게|demi|semi/i.test(f.style)===(weight==='700')&&/italic|oblique|기울임/i.test(f.style)===italic;
+function namedFace<T extends LocalFace>(candidates:readonly T[],family:string,weight:string,italic=false,extra:(f:T)=>readonly string[]){
+  const name=nameKey(family);
+  const matching=candidates.filter(f=>styleMatches(f,weight,italic));
+  const exact=candidates.filter(f=>[f.fullName,f.postscriptName].some(n=>nameKey(n)===name)&&
+    (styleMatches(f,weight,italic)||(weight==='400'&&!italic&&nameKey(f.family)!==name&&styleMatches(f,'700',false))));
+  if(exact.length===1)return exact[0];
+  if(exact.length>1)return;
+  const named=matching.filter(f=>[f.family,...extra(f)].some(n=>nameKey(n)===name));
+  if(named.length===1)return named[0];
+  const regular=named.filter(f=>/^(regular|normal|book|보통|표준)$/i.test(f.style));
+  if(regular.length===1)return regular[0];
+}
 export function localFaceFor(family:string,weight:string,italic=false){
-  const norm=normalize(family).toLocaleLowerCase('en-US');
-  const candidates=faces.filter(f=>[f.family,f.fullName,f.postscriptName,...aliases.get(f)??[]].some(n=>normalize(n).toLocaleLowerCase('en-US')===norm));
-  return candidates.find(f=>/bold|굵게|demi|semi/i.test(f.style)===(weight==='700')&&/italic|oblique|기울임/i.test(f.style)===italic);
+  return namedFace(faces,family,weight,italic,f=>aliases.get(f)??[]);
+}
+export function knownLocalNames(family:string,weight:string){
+  const face=namedFace(snapshot?.faces??[],family,weight,false,f=>f.aliases);
+  return face?[face.fullName,face.postscriptName]:[];
+}
+export async function restoreLocalFaces(families:readonly string[]){
+  const fn=query(), saved=snapshot?.faces??[];
+  if(!fn||!saved.length||job)return;
+  const current=scanRevision, required=new Map<string,FaceIdentity>();
+  for(const family of families)for(const weight of ['400','700']){
+    if(localFaceFor(family,weight))continue;
+    const face=namedFace(saved,family,weight,false,f=>f.aliases);
+    if(face)required.set(face.postscriptName,face);
+  }
+  if(!required.size)return;
+  try{
+    if((await navigator.permissions.query({name:'local-fonts' as PermissionName})).state!=='granted'||scanRevision!==current||job)return;
+    const restored=await fn.call(globalThis,{postscriptNames:[...required.keys()]});
+    if(scanRevision!==current||job)return;
+    for(const face of restored){
+      const previous=required.get(face.postscriptName);
+      if(!previous||!validFace(face)||nameKey(face.family)!==nameKey(previous.family)||nameKey(face.style)!==nameKey(previous.style)||faces.some(f=>f.postscriptName===face.postscriptName))continue;
+      faces.push(face);aliases.set(face,previous.aliases);
+    }
+  }catch{/* Opening can still resolve installed names and service assets. */}
 }
 /** The browser's FontData blob must identify the very face being registered. */
 export function localFaceBytes(face:LocalFace){
@@ -47,10 +94,11 @@ export function localFaceBytes(face:LocalFace){
 /** Must be called directly from the explicit button, before any await. */
 export function redetectLocalFonts(candidates:readonly string[]=[]){
   if(job)return job;
+  scanRevision++;
   const fn=query();let request:Promise<LocalFace[]>;
   try{request=fn?fn.call(globalThis):Promise.resolve([]);}catch(error){request=Promise.reject(error);}
   job=(async()=>{try{
-    const next=await request;const accepted=next.filter(f=>[f.family,f.fullName,f.postscriptName,f.style].every(n=>typeof n==='string')&&validFontName(f.family)&&validFontName(f.fullName)&&validFontName(f.postscriptName));
+    const next=await request;const accepted=next.filter(validFace);
     const detected=new Set<string>();
     const nextAliases=new WeakMap<LocalFace,readonly string[]>();
     if(fn){
@@ -69,8 +117,10 @@ export function redetectLocalFonts(candidates:readonly string[]=[]){
       catch{/* No claim that the OS lacks it. */}
     }
     faces.splice(0,faces.length,...accepted);aliases=nextAliases;bytes.clear();names.clear();for(const n of detected)names.add(n);
-    snapshot={version:1,detectedAt:new Date().toISOString(),names:localFontNames()};message=fn?`${localFontNames().length}개 설치 글꼴 이름을 감지했습니다. 선택한 글꼴만 실제로 불러옵니다.${probed?` 추가 요청 이름 ${probed}개는 local() 확인만 완료했으며 Core 바이트 등록은 미확인입니다.`:''}`:`전체 목록을 열거할 수 없어 요청한 이름 ${localFontNames().length}개만 설치 확인했습니다. Core 바이트 등록은 미확인입니다.`;save();
+    const identities=accepted.map(face=>({family:face.family,fullName:face.fullName,postscriptName:face.postscriptName,style:face.style,aliases:[...(nextAliases.get(face)??[])].slice(0,64)}));
+    snapshot={version:1,detectedAt:new Date().toISOString(),names:localFontNames(),faces:identities};
+    message=fn?`${localFontNames().length}개 설치 글꼴을 감지했습니다. 문서에 필요한 글꼴만 불러옵니다.${probed?` 이름으로만 확인한 글꼴 ${probed}개가 포함돼 있습니다.`:''}`:`요청한 이름 ${localFontNames().length}개를 확인했습니다.`;save();
   }catch(error){message=(error instanceof Error&&['NotAllowedError','SecurityError'].includes(error.name)?'글꼴 접근이 허용되지 않았습니다. 브라우저 권한을 확인한 뒤 다시 감지하세요.':'로컬 글꼴을 감지하지 못했습니다. 다시 시도할 수 있습니다.')+' 기존 목록과 문서는 유지했습니다.';}
   finally{job=undefined;changed();}})();changed();return job;
 }
-export function clearLocalFontNames(){if(job)return;names.clear();snapshot=undefined;message='감지 목록을 초기화했습니다. 현재 문서와 이미 사용 중인 글꼴은 유지합니다.';save();changed();}
+export function clearLocalFontNames(){if(job)return;scanRevision++;names.clear();faces.length=0;aliases=new WeakMap();bytes.clear();snapshot=undefined;message='감지 목록을 초기화했습니다. 현재 문서와 이미 사용 중인 글꼴은 유지합니다.';save();changed();}

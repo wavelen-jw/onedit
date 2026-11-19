@@ -12,7 +12,9 @@ const attributes = /\s+([^\s=/'"<>]+)\s*=\s*("[^"]*"|'[^']*')/g;
 
 export function parseSvgMarkup(markup: string, previous?: SvgTextTemplates): { parsed: Document; templates: SvgTextTemplates } {
   const eligible = !markup.includes("<!") && !markup.includes("<?") && !markup.includes(marker) && !markup.includes(imageMarker);
-  const raw: (string | undefined)[] = [], restored: string[] = [];
+  const raw: (string | undefined)[] = [];
+  const firstLiteral = new Map<string, number>();
+  const fontTokens = new Map<number, { token: string; source: string | number }>();
   const imageRaw: {name:string;quoted:string}[][] = [], imageValues: string[] = [];
   let index = 0, imageIndex = 0;
   const compact = eligible ? markup.replace(tags, tag => {
@@ -33,13 +35,18 @@ export function parseSvgMarkup(markup: string, previous?: SvgTextTemplates): { p
         return all.slice(0, -quoted.length) + '"' + token + '"';
       }
       if (name !== "font-family") return all;
-      // Exact quoted bytes are the cache key. Entity/quote changes are parsed
-      // normally. Keep the attribute name, so duplicate attributes still fail.
+      // Leave the first literal for the XML parser to validate and decode.
+      // Later exact copies can refer to it. Preserve the attribute name so
+      // duplicate attributes and invalid markup still fail XML validation.
       raw[i] = quoted;
-      const value = previous?.get(quoted);
-      if (value === undefined || quoted.length < 80) return all;
-      const token = `${marker}${restored.length}`;
-      restored.push(value);
+      if (quoted.length < 80) return all;
+      const source = previous?.get(quoted) ?? firstLiteral.get(quoted);
+      if (source === undefined) {
+        firstLiteral.set(quoted, i);
+        return all;
+      }
+      const token = `${marker}${i}`;
+      fontTokens.set(i, {token, source});
       return ` font-family="${token}"`;
     });
   }) : markup;
@@ -65,11 +72,12 @@ export function parseSvgMarkup(markup: string, previous?: SvgTextTemplates): { p
       }
     });
     texts.forEach((node, i) => {
-      const value = node.getAttribute("font-family");
-      if (value?.startsWith(marker)) {
-        const n = Number(value.slice(marker.length));
-        if (!Number.isSafeInteger(n) || restored[n] === undefined) throw Error("Invalid SVG font token");
-        node.setAttribute("font-family", restored[n]);
+      const replacement = fontTokens.get(i);
+      if (replacement) {
+        const {token, source} = replacement;
+        const value = typeof source === "number" ? texts[source]?.getAttribute("font-family") : source;
+        if (node.getAttribute("font-family") !== token || value == null) throw Error("Invalid SVG font token");
+        node.setAttribute("font-family", value);
       }
       if (raw[i] && node.hasAttribute("font-family")) templates.set(raw[i]!, node.getAttribute("font-family")!);
     });

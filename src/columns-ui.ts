@@ -14,7 +14,7 @@ export function mountColumns(doc:Document,editor:Interaction,actions:{busy:()=>b
   const count=doc.createElement('select');count.name='columnCount';for(const n of [1,2]){const o=doc.createElement('option');o.value=String(n);o.textContent=n+'단';count.append(o);}
   const spacing=doc.createElement('input');spacing.name='columnSpacing';spacing.type='number';spacing.min='0';spacing.step='0.01';
   for(const [name,input]of [['단 수',count],['단 사이 간격 (pt)',spacing]] as const){const l=doc.createElement('label');l.append(doc.createTextNode(name),input);fields.append(l);}
-  const note=doc.createElement('p');note.className='manager-note';note.textContent=columnLimit+' 현재 본문 구역 전체에 적용합니다. 1pt = 100 HWP 단위이며 1단에서는 간격을 저장해도 단 사이 공간은 생기지 않습니다.';
+  const note=doc.createElement('p');note.className='manager-note';note.textContent='현재 구역 전체에 적용합니다.';
   const status=doc.createElement('p');status.className='manager-status';status.setAttribute('role','status');
   const footer=doc.createElement('div');footer.className='manager-footer';const ok=doc.createElement('button');ok.type='submit';ok.id='columns-apply';ok.textContent='설정';
   const cancel=doc.createElement('button');cancel.type='button';cancel.id='columns-cancel';cancel.textContent='취소';footer.append(ok,cancel);
@@ -27,7 +27,7 @@ export function mountColumns(doc:Document,editor:Interaction,actions:{busy:()=>b
     if(!dialog.open&&!presets.some(menuControlDemanded)&&!menuControlDemanded(launch))return;
     let why='';try{why=busy()?'열린 작업을 마친 뒤 사용하세요.':columnEditReason(editor.adapter,editor.selection,columnView(editor.adapter,editor.selection.focus.sec));}catch(e){why=String(e);}
     for(const b of presets){b.disabled=!!why;b.setAttribute('aria-disabled',String(!!why));b.title=why;}
-    if(!dialog.open)return;const r=reason();ok.disabled=count.disabled=spacing.disabled=!!r;status.textContent=r||'설정 전까지 문서는 바뀌지 않습니다.';ok.title=r;};
+    if(!dialog.open)return;const r=reason();ok.disabled=count.disabled=spacing.disabled=!!r;status.textContent=r;ok.title=r;};
   for(const b of presets)b.onclick=()=>{try{if(busy())return;const target=editor.capture(),current=columnView(editor.adapter,target.selection.focus.sec),why=columnEditReason(editor.adapter,target.selection,current);if(why)throw Error(why);
     const count=Number(b.dataset.columnPreset);if(count!==1&&count!==2)throw Error('지원하지 않는 단 수입니다.');
     editor.execute({type:'columns',change:{expected:current,count,spacing:current.spacing}},target);actions.changed();

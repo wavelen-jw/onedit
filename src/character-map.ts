@@ -39,7 +39,7 @@ export function mountCharacterMap(doc:Document,editor:Interaction,actions:Action
   const detail=doc.createElement('div');detail.className='character-detail';
   const preview=doc.createElement('output'),name=doc.createElement('strong'),unicode=doc.createElement('code'),tip=doc.createElement('p');
   preview.className='character-preview';preview.setAttribute('aria-label','선택 문자 미리보기');
-  tip.textContent='방향키·Enter로 선택 문자 넣기 · 더블클릭으로 모으기';detail.append(preview,name,unicode,tip);content.append(gridHost,detail);
+  tip.textContent='Enter로 넣기 · 더블클릭으로 모으기';detail.append(preview,name,unicode,tip);content.append(gridHost,detail);
   const queue=doc.createElement('input');queue.setAttribute('aria-label','문자 모으기');queue.placeholder='문자를 더블클릭해 모으세요. 직접 수정할 수 있습니다.';queue.autocomplete='off';
   const queueTools=doc.createElement('div');queueTools.className='character-queue';queueTools.append(queue);
   const status=doc.createElement('p');status.setAttribute('role','status');status.className='character-status';
@@ -150,7 +150,7 @@ export function mountCharacterMap(doc:Document,editor:Interaction,actions:Action
     const state=editor.formatState('char'),kind=formatValueState(state,'fontFamily'),font=kind==='common'&&typeof state.fontFamily==='string'?state.fontFamily:undefined;
     grid.style.fontFamily=preview.style.fontFamily=font??'';
     fontNote.textContent=font?'현재 글꼴: '+font+' · 문서 서식을 그대로 사용합니다.':'글꼴 '+(kind==='mixed'?'혼합':'미조회')+' · 문서 서식을 유지합니다. 미리보기 글꼴은 다를 수 있습니다.';
-    fontNote.title='이름 검색은 제공 기호·별칭 목록을 사용합니다. 다른 문자는 기존 Unicode 영역/코드로 찾으세요. HNC/KS·개인용 문자·옛한글 조합은 미제공이며 없는 글리프는 대체될 수 있습니다.';
+    fontNote.title='기호 이름이나 유니코드 값으로 검색할 수 있습니다.';
     search.value='';queue.value='';areas.value='category:공문서 기호';refresh();refreshRecent();
     // Preserve the original picker’s selected-body-character code lookup.
     if(editor.selection.kind==='text'){

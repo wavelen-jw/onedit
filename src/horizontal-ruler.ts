@@ -1,3 +1,4 @@
+import {firstPageBelow} from './active-workset.js';
 // View-only projection of Core page geometry. No setters, selection or History.
 const SVG = "http://www.w3.org/2000/svg";
 export function rulerGeometry(info: unknown, dpi: number) {
@@ -21,12 +22,11 @@ export function mountHorizontalRuler(doc: Document, pages: HTMLElement, viewport
   let shown = false, reason = "", drawKey = "";
   function refresh() {
     const v = viewport.getBoundingClientRect(), top = v.top + viewport.clientTop + 24;
-    const list = [...pages.querySelectorAll<HTMLElement>(".page")];
-    const page = list.find(p => p.getBoundingClientRect().bottom > top) ?? list.at(-1);
+    const first = firstPageBelow(pages, top);
     try {
-      if (!page) throw Error("문서를 먼저 여세요.");
-      const index = Number(page.dataset.page), result = read(index), geometry = rulerGeometry(result.info, result.dpi);
-      const p = page.getBoundingClientRect(), scale = p.width / geometry.width;
+      if (!first) throw Error("문서를 먼저 여세요.");
+      const index = Number(first.page.dataset.page), result = read(index), geometry = rulerGeometry(result.info, result.dpi);
+      const p = first.rect, scale = p.width / geometry.width;
       if (!Number.isSafeInteger(index) || index < 0 || !Number.isFinite(scale) || scale <= 0)
         throw Error("쪽·배율 연결을 확인할 수 없습니다.");
       reason = ""; bar.hidden = !shown;

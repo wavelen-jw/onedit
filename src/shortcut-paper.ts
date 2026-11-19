@@ -1,3 +1,4 @@
+import { editorFeedbackText } from './editor-feedback-text.js';
 import { bindEditorDialogFormSubmit, closeEditorDialog, keepDialogFieldFocus, showEditorDialog } from "./editor-popup-focus.js";
 import type {Interaction} from './interaction.js';
 import {sameFormatTarget,formatInputGuard} from './integration/a-format-input-guard.js';
@@ -11,7 +12,7 @@ export function mountPaper(doc:Document,editor:Interaction,actions:{blocked:()=>
   const content=form.querySelector<HTMLElement>('.paper-content')!,status=form.querySelector('output')!,fields=new Map<string,HTMLInputElement>();
   const group=(name:string)=>{const f=doc.createElement('fieldset'),l=doc.createElement('legend');l.textContent=name;f.append(l);content.append(f);return f;};
   const label=(name:string,control:HTMLElement,unit='')=>{const l=doc.createElement('label'),span=doc.createElement('span');span.textContent=name;l.append(span,control);if(unit){const u=doc.createElement('span');u.textContent=unit;u.className='paper-unit';l.append(u);}return l;};
-  const paper=group('용지 종류'),preset=doc.createElement('select');preset.name='paperPreset';preset.setAttribute('aria-label','용지 종류');for(const[n]of paperPresets)preset.add(new Option(n,n));preset.add(new Option('사용자 정의','custom'));paper.append(label('종류',preset));
+  const paper=group('용지 종류'),preset=doc.createElement('select');paper.className='paper-dimensions';preset.name='paperPreset';preset.setAttribute('aria-label','용지 종류');for(const[n]of paperPresets)preset.add(new Option(n,n));preset.add(new Option('사용자 정의','custom'));paper.append(label('종류',preset));
   const add=(parent:HTMLElement,key:string,title:string)=>{const input=doc.createElement('input');input.name=key;input.type='number';input.min=['width','height'].includes(key)?'10':'0';input.max='2000';input.step='any';input.setAttribute('aria-label',title+' (mm)');fields.set(key,input);parent.append(label(title,input,'mm'));return input;};
   add(paper,'width','폭');add(paper,'height','길이');
   const orient=group('용지 방향'),bindingGroup=group('제본');
@@ -75,13 +76,13 @@ export function mountPaper(doc:Document,editor:Interaction,actions:{blocked:()=>
     // Then the common close path hands off once, even for a no-op Apply.
     try { if(a.revision!==revision)actions.changed(); }
     finally { close(); }
-  }catch(error){status.textContent=String(error);}};
+  }catch(error){status.textContent=editorFeedbackText(error);}};
   form.addEventListener('keydown',e=>{e.stopPropagation();if(e.isComposing||e.keyCode===229)return;if(e.key==='Escape'){e.preventDefault();close();}});
   dialog.addEventListener('close',()=>{
     if (dialog.open) return; // An old queued close does not own the reopened draft.
     guard.close();target=undefined;
   });
-  return{show(){if(actions.blocked()||dialog.open)return;target=editor.capture();original=editor.adapter.call('getPageDef',target.selection.focus.sec);for(const key of fields.keys())if(!Number.isSafeInteger(original[key]))throw Error('용지 원값 미조회');landscape=original.landscape;setDimensions(original.width,original.height);for(const[key,input]of fields){if(!['width','height'].includes(key))input.value=mm(original[key]);input.title=`원값 ${original[key]}HU · 미변경 시 정확히 보존`;}
-    const reason=paperNewSectionReason(editor.adapter,target.selection);future.disabled=!!reason;note.textContent=reason||'새 구역부터: 커서 위치에서 나누고 다음 기존 구역 전까지 바꾼 항목만 적용합니다.';
+  return{show(){if(actions.blocked()||dialog.open)return;target=editor.capture();original=editor.adapter.call('getPageDef',target.selection.focus.sec);for(const key of fields.keys())if(!Number.isSafeInteger(original[key]))throw Error('용지 원값 미조회');landscape=original.landscape;setDimensions(original.width,original.height);for(const[key,input]of fields){if(!['width','height'].includes(key))input.value=mm(original[key]);input.title="바꾸지 않으면 기존 값이 유지됩니다.";}
+    const reason=paperNewSectionReason(editor.adapter,target.selection);future.disabled=!!reason;note.textContent=reason;
     preset.value=paperPresets.find(([,w,h])=>Math.abs(w-original.width)<=3&&Math.abs(h-original.height)<=3)?.[0]??'custom';direction.forEach(i=>i.checked=(i.value==='true')===landscape);bindings.forEach(i=>i.checked=Number(i.value)===original.binding);scope.value='current';status.textContent='바꾼 항목만 한 번 적용합니다.';doc.querySelectorAll('#main-menu details[open]').forEach(e=>e.removeAttribute('open'));guard.open();showEditorDialog(dialog);preset.focus();},dispose(){disposePaperApplyFocus?.();disposePaperCancelFocus?.();guard.close();dialog.remove();}};
 }

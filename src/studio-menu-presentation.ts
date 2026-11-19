@@ -31,6 +31,7 @@ const selectors:Record<string,string>={
  'page:setup':'[data-page-entry="j"]','page:header-create':'#header-footer-open','page:footer-create':'#header-footer-open','page:page-number':'#page-number-open','page:break':'#page-break','page:column-break':'#column-break','page:col-settings':'#columns-open',
  'page:col-1':'[data-column-preset="1"]','page:col-2':'[data-column-preset="2"]',
  'table:create':'#table-menu [data-table-insert-entry]','table:cell-props':'[data-table-action="properties"]','table:border-each':'[data-table-action="border-properties"]','table:border-one':'[data-table-action="block-border"]',
+ 'table:pagination':'[data-table-action="table-object-pagination"]',
  'table:insert-row-col':'[data-table-action="add-dialog"]','table:delete-row-col':'[data-table-action="delete-dialog"]',
  'table:cell-split':'[data-table-action="split-dialog"]','table:cell-merge':'[data-table-action="merge"]','table:cell-height-equal':'[data-table-action="equal-height"]','table:cell-width-equal':'[data-table-action="equal-width"]','table:range-size':'[data-table-action="range-size"]',
  'table:block-sum':'[data-table-action="calc-SUM"]','table:block-avg':'[data-table-action="calc-AVG"]','table:block-product':'[data-table-action="calc-PRODUCT"]',
@@ -87,7 +88,8 @@ export function mountStudioMenus(doc:Document,busy:()=>boolean,focus:()=>void,op
    for(let i=0;i<visible.length;i++)if(visible[i].tagName==='HR'&&(!i||i===visible.length-1||visible[i-1].tagName==='HR'))visible[i].remove();
   };
   const range=name==='table'?sources.get('table:range-size'):null;
-  build(panel,range&&!range.hidden?[...rows,{label:'선택 범위 크기 조절…',command:'table:range-size'}]:rows);
+  const tableRows = name === 'table' ? [...rows, {label:'표 쪽 나누기…',command:'table:pagination'}] : rows;
+  build(panel,range&&!range.hidden?[...tableRows,{label:'선택 범위 크기 조절…',command:'table:range-size'}]:tableRows);
   // Keep the actual supported object selector reachable on demand. The
   // Studio static catalog has no proxy for this disclosure (it is not a button).
   if(active&&name==='insert'){const clipboard=retained.querySelector('#object-clipboard-menu');if(clipboard)panel.append(clipboard);}

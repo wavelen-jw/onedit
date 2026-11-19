@@ -3,18 +3,18 @@
   "scope": "Onedit source snapshot; exact verified Core provisioned separately",
   "source": "development/core",
   "files": {
-    "rhwp.d.ts": "b2a4b6f6ef924bab7b917b477f34f65ea903ba7d9f257db183dbf8920be8e6f0",
-    "rhwp.js": "cd0e8fea1b0664b5c672261550ace655cbc5bca58ac9651f64b41a37ef747ac5",
-    "rhwp_bg.wasm": "d412c4e19641e476b617f715b9d61df4e1fa8c2a74957320017b19153ed6faf0",
-    "rhwp_bg.wasm.d.ts": "2deef321de3de9e9fd7dc17fff781274b84a2b9d89ef8630566ef7e86df3ef65"
+    "rhwp.d.ts": "ade2772e3172179fe81372be79149e2c233d90f8f6204355c8078b7f67885c52",
+    "rhwp.js": "628e2a88de3f160972b040a70bde105c524a393a410ebfecc4e64f44972dbdc2",
+    "rhwp_bg.wasm": "8fbb7253449b1aab87ddd778b78294135999f087f9e4843cd86896985066a229",
+    "rhwp_bg.wasm.d.ts": "515e67bc6f0f71586543cc5e3228a51575dfa2543256dc0ba9422dabf55075f1"
   },
   "rev10FormatSnapshot": {
-    "sha256": "d412c4e19641e476b617f715b9d61df4e1fa8c2a74957320017b19153ed6faf0",
+    "sha256": "8fbb7253449b1aab87ddd778b78294135999f087f9e4843cd86896985066a229",
     "matched4": {
-      "rhwp.d.ts": "b2a4b6f6ef924bab7b917b477f34f65ea903ba7d9f257db183dbf8920be8e6f0",
-      "rhwp.js": "cd0e8fea1b0664b5c672261550ace655cbc5bca58ac9651f64b41a37ef747ac5",
-      "rhwp_bg.wasm": "d412c4e19641e476b617f715b9d61df4e1fa8c2a74957320017b19153ed6faf0",
-      "rhwp_bg.wasm.d.ts": "2deef321de3de9e9fd7dc17fff781274b84a2b9d89ef8630566ef7e86df3ef65"
+      "rhwp.d.ts": "ade2772e3172179fe81372be79149e2c233d90f8f6204355c8078b7f67885c52",
+      "rhwp.js": "628e2a88de3f160972b040a70bde105c524a393a410ebfecc4e64f44972dbdc2",
+      "rhwp_bg.wasm": "8fbb7253449b1aab87ddd778b78294135999f087f9e4843cd86896985066a229",
+      "rhwp_bg.wasm.d.ts": "515e67bc6f0f71586543cc5e3228a51575dfa2543256dc0ba9422dabf55075f1"
     }
   }
 }

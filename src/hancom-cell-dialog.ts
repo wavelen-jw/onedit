@@ -38,11 +38,6 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     const f = document.createElement("fieldset"), l = document.createElement("legend");
     f.className = cls; l.textContent = title; f.append(l); p.append(f); return f;
   }
-  function unsupported(target: HTMLElement, text: string, type = "checkbox") {
-    // Studio's wider dialog is a reference, not an Edit capability. Do not
-    // present disconnected controls as if they could be enabled here.
-    target.dataset.omittedUnsupported = [target.dataset.omittedUnsupported, text].filter(Boolean).join(' / ');
-  }
   function move(name: string, target: HTMLElement, at: number, caption?: string) {
     const row = rows.get(name); if (!row) return;
     target.append(row); pageOf.set(name, at);
@@ -56,9 +51,8 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     input.dataset.cellMargin = name; input.setAttribute("aria-label", `${caption} 안 여백 (mm)`);
     input.placeholder = source.placeholder || "혼합 / 유지"; input.disabled = source.disabled;
     input.dataset.valueState=source.dataset.valueState;input.dataset.mixed=source.dataset.mixed;
-    input.title = source.title || "mm 표시 · 변경할 때 기존 0.01pt 정밀도로 적용 · 미변경 값 유지";
+    input.title = source.title || "안 여백 (mm)";
     input.value = source.value === "" ? "" : (Number(source.value) * 25.4 / 72).toFixed(2);
-    if (!source.disabled && source.value !== "") input.title += ` · 원래 값 ${source.value}pt`;
     input.oninput = () => {
       source.value = input.value === "" ? "" : String(Math.round(Number(input.value) * 72 / 25.4 * 100) / 100);
       source.dispatchEvent(new Event("input", { bubbles: true }));
@@ -66,15 +60,8 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     input.addEventListener("invalid", () => { mode = false; page = 3; sync(); }, true);
     label.append(text, input, document.createTextNode("mm")); target.append(label);
   }
-  const size = group(pages[0], "크기", "cell-table-size"); unsupported(size, "너비 (mm)", "number"); unsupported(size, "높이 (mm)", "number"); unsupported(size, "크기 고정");
-  const position = group(pages[0], "위치"); unsupported(position, "글자처럼 취급");
-  for (const name of ["본문과의 배치", "가로 위치", "세로 위치", "쪽 영역 안으로 제한", "서로 겹침 허용", "개체와 조판부호를 항상 같은 쪽에 놓기"]) unsupported(position, name);
-  const rotation = group(pages[0], "개체 회전 · 기울이기"); unsupported(rotation, "회전각", "number"); unsupported(rotation, "가로/세로", "number");
-  const other = group(pages[0], "기타"); unsupported(other, "번호 종류", "text"); unsupported(other, "개체 보호하기");
-  const outer = group(pages[1], "바깥 여백"); for (const n of ["왼쪽", "위쪽", "오른쪽", "아래쪽"]) unsupported(outer, n + " (mm)", "number");
-  const caption = group(pages[1], "캡션"); for (const n of ["위치", "크기 (mm)", "개체와의 간격 (mm)"]) unsupported(caption, n, "text"); unsupported(caption, "여백 부분까지 너비 확대"); unsupported(caption, "한 줄로 입력");
   const breaks = group(pages[2], "여러 쪽 지원");
-  if (!blockScope) {
+  if (!blockScope && pagination) {
     const setting = document.createElement("dl");
     const value = (label: string, name: string, text: string) => {
       const term = document.createElement("dt"), data = document.createElement("dd");
@@ -82,16 +69,14 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
       setting.append(term, data);
     };
     value("글자처럼 취급", "inline", pagination ? (pagination.treatAsChar ? "켜짐" : "꺼짐") : "확인할 수 없음");
-    value("쪽 경계에서", "mode", pagination ? (["나누지 않음", "나눔", "셀 단위로 나눔"] as const)[pagination.pageBreak] : "확인할 수 없음");
+    value("쪽 경계에서", "mode", pagination ? (["나누지 않음", "셀 단위로 나눔", "행 단위로 나눔"] as const)[pagination.pageBreak] : "확인할 수 없음");
     const detail = document.createElement("p");
     detail.textContent = pagination?.treatAsChar
-      ? "한컴에서 글자처럼 취급하는 표에는 쪽 경계 설정을 적용하지 않습니다. 위에는 문서에 저장된 값을 표시합니다."
-      : nestedOwner ? "이 표의 쪽 나누기 속성을 직접 조회할 수 없습니다. 바깥 표의 값은 표시하지 않습니다."
-      : "현재 값 보기만 지원합니다.";
+      ? "글자처럼 취급하는 표에는 쪽 나누기 설정을 적용하지 않습니다."
+      : nestedOwner ? "이 표의 쪽 나누기 값을 확인할 수 없습니다."
+      : "표 메뉴의 ‘표 쪽 나누기’에서 변경할 수 있습니다.";
     breaks.append(setting, detail);
   }
-  const common = group(pages[2], "모든 셀의 안 여백"); for (const n of ["왼쪽", "위쪽", "오른쪽", "아래쪽"]) unsupported(common, n + " (mm)", "number");
-  const cellSize = group(pages[3], "셀 크기", "cell-size"); unsupported(cellSize, "셀 크기 적용"); unsupported(cellSize, "너비 (mm)", "number"); unsupported(cellSize, "높이 (mm)", "number");
   const margins = group(pages[3], "안 여백 지정", "cell-margins"); move("applyInnerMargin", margins, 3, "안 여백 지정");
   const apply = controls.get("applyInnerMargin") as HTMLSelectElement;
   rows.get("applyInnerMargin")!.dataset.cellBacking = "true";
@@ -100,7 +85,6 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   applyLabel.className = "cell-inner-toggle"; applyLabel.append(applyProxy, document.createTextNode("안 여백 지정")); margins.append(applyLabel);
   for (const [side, label] of [["Left", "왼쪽"], ["Top", "위쪽"], ["Right", "오른쪽"], ["Bottom", "아래쪽"]]) marginProxy("padding" + side, margins, label);
   const properties = group(pages[3], "속성", "cell-properties");
-  for (const n of ["한 줄로 입력", "셀 보호", "제목 셀", "세로쓰기"]) unsupported(properties, n);
   move("verticalAlign", properties, 3); rows.get("verticalAlign")!.dataset.cellBacking = "true";
   const align = controls.get("verticalAlign") as HTMLSelectElement, aligns = document.createElement("div"); aligns.className = "cell-aligns";
   const alignTitle = document.createElement("span"); alignTitle.textContent = "세로 정렬"; aligns.append(alignTitle);
@@ -110,7 +94,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     const icon = document.createElement("span"); icon.className = `cell-align-icon cell-align-${value}`; icon.setAttribute("aria-hidden", "true");
     for (let i = 0; i < 4; i++) icon.append(document.createElement("i")); b.append(icon); b.onclick = () => { align.value = value; align.dispatchEvent(new Event("change", { bubbles: true })); }; aligns.append(b); alignButtons.push(b);
   }
-  properties.append(aligns); const field = group(pages[3], "필드"); unsupported(field, "필드 이름", "text"); unsupported(field, "양식 모드에서 편집 가능");
+  properties.append(aligns);
   // The actual visible proxies, rather than their hidden backing inputs, own
   // the adjacent admission explanation. No setter/default value is changed.
   const marginReason=document.createElement("small"),alignReason=document.createElement("small");
@@ -127,7 +111,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     row.dataset.cellBacking = 'true';
     const palette = objectLinePalette(backing.value, lifetime.signal, {
       id: 'cell-color-' + name.replace('.', '-') + '-popup', label, caption,
-      keep: true, allowNone: name === 'background',
+      keep: true, allowNone: name === 'background', boundary: root,
       onChange: value => {
         if (backing instanceof HTMLSelectElement && ![...backing.options].some(o => o.value === value))
           backing.add(new Option(value, value));
@@ -152,12 +136,11 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   border.append(edges);
   const sample = document.createElement("div"); sample.className = "cell-border-sample"; sample.setAttribute("aria-label", "셀 테두리·단색 배치 예시 · 실제 문서 미리보기 아님"); border.append(sample);
   const background = group(borderPages[1], "채우기"); colorProxy("background", background, "면 색", "셀 배경 면 색", 5);
-  for (const n of ["무늬 색", "무늬 모양", "그라데이션", "그림", "워터마크 효과"]) unsupported(background, n);
-  const diagonal = group(borderPages[2], "대각선"); for (const n of ["종류", "굵기", "색", "\\ 대각선", "/ 대각선", "+ 중심선"]) unsupported(diagonal, n);
   const switcher = document.createElement("button"); switcher.type = "button"; switcher.className = "cell-dialog-switch";
   switcher.onclick = () => { mode = !mode; sync(); tabs.querySelector<HTMLElement>('[aria-selected="true"]')?.focus(); };
-  if(blockScope){switcher.disabled=true;switcher.title='여러 셀의 바깥선과 배경을 바꾸는 화면입니다.';}
+  switcher.hidden = blockScope;
   const note = document.createElement("p"); note.className = "cell-scope-note"; note.textContent = "선택한 셀에 바꾼 항목만 적용합니다.";
+  note.hidden = !blockScope;
   if(blockScope)note.textContent='선택한 범위의 바깥선과 단색 배경을 바꿉니다. 안쪽 선은 유지됩니다.';
   for(const p of [...pages,...borderPages])for(const f of p.querySelectorAll<HTMLFieldSetElement>('fieldset'))
     if(!f.querySelector('input,select,button,output,[data-table-pagination]'))f.hidden=true;
@@ -165,13 +148,13 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   // Keep admission/preservation guidance visible beside the action buttons,
   // without adding another footer row to the captured native window height.
   dialog.querySelector("form")!.append(note);
-  const close = document.createElement("button"); close.type = "button"; close.className = "cell-close"; close.setAttribute("aria-label", "표/셀 대화상자 닫기"); close.textContent = "×"; close.onclick = () => dialog.querySelector<HTMLButtonElement>("#cancel")!.click(); dialog.querySelector("form")!.append(close);
+  const close = document.createElement("button"); close.type = "button"; close.className = "cell-close"; close.setAttribute("aria-label", "표/셀 대화상자 닫기"); close.textContent = "×"; close.onclick = () => dialog.querySelector<HTMLButtonElement>("#cancel")!.click(); root.before(close);
   function sync() {
     dialog.dataset.cellPage = mode ? "border" : "properties";
     dialog.dataset.cellScope=blockScope?'block':'each';
     dialog.querySelector("#format-title")!.textContent = mode ? (blockScope?'셀 테두리/배경 · 하나의 셀처럼':'셀 테두리/배경') : "표/셀 속성";
-    const indices = mode ? [0, 1] : blockScope ? [3] : [2, 3];
-    const labels = mode ? ["테두리", "배경"] : blockScope ? ["셀"] : ["표", "셀"];
+    const indices = mode ? [0, 1] : blockScope || !pagination ? [3] : [2, 3];
+    const labels = mode ? ["테두리", "배경"] : blockScope || !pagination ? ["셀"] : ["표", "셀"];
     if (tabs.dataset.mode !== String(mode)) {
       tabs.replaceChildren(); tabs.dataset.mode = String(mode);
       labels.forEach((text, ordinal) => {
@@ -195,7 +178,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     applyProxy.checked = apply.value === "true"; applyProxy.indeterminate = apply.value === ""; applyProxy.disabled = apply.disabled; applyProxy.title = apply.title;
     applyProxy.dataset.valueState=apply.dataset.valueState;applyProxy.dataset.mixed=apply.dataset.mixed;
     const marginWhy=apply.disabled?(apply.title):
-      apply.value!=="true"?`${apply.value===""?(apply.dataset.valueState==="mixed"?"안 여백 지정이 혼합입니다.":"안 여백 지정이 미조회입니다."):"안 여백 지정이 꺼져 있습니다."} 여백을 바꾸려면 안 여백 지정을 켜세요. 미변경 값은 유지됩니다.`:"";
+      apply.value!=="true"?`${apply.value===""?(apply.dataset.valueState==="mixed"?"셀마다 안 여백 설정이 다릅니다.":"안 여백 설정을 읽을 수 없습니다."):"안 여백 지정이 꺼져 있습니다."} 안 여백을 바꾸려면 지정을 켜세요.`:"";
     const alignWhy=align.disabled?(align.title):align.value===""?`세로 정렬이 ${align.dataset.valueState==="mixed"?"혼합":"미조회"}입니다. 명시적으로 선택하기 전에는 유지됩니다.`:"";
     for(const [note,text]of [[marginReason,marginWhy],[alignReason,alignWhy]] as const){if(note.textContent!==text)note.textContent=text;note.hidden=!text;}
     for (const input of root.querySelectorAll<HTMLInputElement>("[data-cell-margin]")) input.disabled = controls.get(input.dataset.cellMargin!)!.disabled || apply.value !== "true";

@@ -1,8 +1,8 @@
 import {PassiveOwnerBatchRetired} from './passive-owner-batch.js';
 import type {RhwpAdapter} from './adapter.js';
 import {copy,nested,samePosition,type Position,type Props,type Selection} from './model.js';
-export function selectedTableObject(a:RhwpAdapter,s:Selection,transpose=false, prepareBatch?:(focus:Position)=>((page:number)=> (()=>boolean)|undefined)|undefined){
-  if(s.kind!=='table'||s.focus.kind!=='cell'||nested(s.focus))throw Error('본문의 일반 표 개체 한 개를 선택하세요. 셀 블록·중첩 표는 기존 별도 명령을 사용하세요.');
+export function selectedTableObject(a:RhwpAdapter,s:Selection,transpose=false, prepareBatch?:(focus:Position)=>((page:number)=> (()=>boolean)|undefined)|undefined, allowCaret=false){
+  if((s.kind!=='table' && !(allowCaret && s.kind==='caret'))||s.focus.kind!=='cell'||nested(s.focus))throw Error('본문의 일반 표 개체 한 개를 선택하세요. 셀 블록·중첩 표는 기존 별도 명령을 사용하세요.');
   const p=s.focus;a.validate(p);a.assertEditable(p);
   let global=p.para;for(let sec=0;sec<p.sec;sec++)global+=a.doc.getParagraphCount(sec);
   const row=a.call<any[]>('getControls').find(c=>c.list===0&&c.para===global&&c.controlIndex===p.control);
@@ -39,8 +39,26 @@ export function tableObjectDelta(props:Props){
     patch['border'+side]={type,width,color};
   }return patch;
 }
-export function prepareTableObject(a:RhwpAdapter,s:Selection,action:'transpose'|'format',props:Props={}){
-  const {p,cells,raw,row}=selectedTableObject(a,s,action==='transpose'),patch=action==='format'?tableObjectDelta(props):undefined;
+export function prepareTableObject(a:RhwpAdapter,s:Selection,action:'transpose'|'format'|'pagination',props:Props={}){
+  const {p,cells,raw,row}=selectedTableObject(a,s,action==='transpose',undefined,action==='pagination'),patch=action==='format'?tableObjectDelta(props):undefined;
+  if (action === 'pagination') {
+    const {treatAsChar, pageBreak} = props;
+    if (typeof treatAsChar !== 'boolean' || (!treatAsChar && pageBreak !== 0 && pageBreak !== 1 && pageBreak !== 2))
+      throw Error('표의 배치와 쪽 나누기 방식을 확인하세요.');
+    if (treatAsChar === raw.treatAsChar && (treatAsChar || pageBreak === raw.pageBreak)) return;
+    const textWrap = !treatAsChar && pageBreak !== 0 ? 'TopAndBottom' : raw.textWrap;
+    const change = treatAsChar ? {treatAsChar, textWrap} : {treatAsChar, pageBreak, textWrap};
+    return () => {
+      selectedTableObject(a, s, false, undefined, true);
+      a.call('setTableProperties', p.sec, p.para, p.control, JSON.stringify(change));
+      const after = a.call('getTableProperties', p.sec, p.para, p.control);
+      if (JSON.stringify(after) !== JSON.stringify({...raw, ...change}))
+        throw Error('표 쪽 나누기 설정을 적용하지 못했습니다.');
+      a.validate(p);
+      a.exportChecked();
+      return copy(s);
+    };
+  }
   if(patch&&!Object.keys(patch).length)return;
   // The existing setter rebinds table.common.attr from table.attr even for a
   // fill-only request. Round-trip the exact already-queried wrap value so that

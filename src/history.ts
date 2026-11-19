@@ -20,6 +20,8 @@ export class History {
    * the first snapshot for adjacent typing in one paragraph. No time heuristic. */
   recordTyping(before: {documentId:string;revision:number;selection:Selection}, undoCount:number) {
     const current = this.undoStack.at(-1), prior = this.typingRun;
+    if (prior && prior.entry === current && prior.revision === this.adapter.revision &&
+        before.revision + 1 === prior.revision && this.undoStack.length === undoCount) return;
     this.typingRun = undefined;
     if (!current || this.undoStack.length !== undoCount + 1 || before.selection.kind !== 'caret' ||
         current.selectionAfter.kind !== 'caret' || before.documentId !== this.adapter.documentId ||
@@ -110,6 +112,7 @@ export class History {
     unchanged?: () => boolean,
     redoSelection?: Selection,
     nativeVerifiedNoop = false,
+    plainCellAppend = false,
   ): Selection {
     this.admit();
     if (this.adapter.scope !== "edit" || this.adapter.documentLocked)
@@ -132,6 +135,29 @@ export class History {
         this.adapter.call("restoreSnapshot", before);
         throw error;
       } finally { this.adapter.doc.discardSnapshot(before); }
+    }
+    const previous = this.typingRun;
+    const p = selection.focus;
+    const doc = this.adapter.doc;
+    if (plainCellAppend && !this.transient && previous && selection.kind === 'caret' &&
+        p.kind === 'cell' && !p.ancestors?.length && previous.documentId === this.adapter.documentId &&
+        previous.revision === this.adapter.revision && previous.entry === this.undoStack.at(-1) &&
+        !this.redoStack.length && JSON.stringify(previous.entry.selectionAfter) === JSON.stringify(selection) &&
+        typeof doc.beginCellTypingRollback === 'function' &&
+        doc.beginCellTypingRollback(p.sec, p.para, p.control, p.cell)) {
+      try {
+        const next = run();
+        const reference = this.adapter.captureSelection(next);
+        previous.entry.selectionAfter = copy(next);
+        previous.entry.referenceAfter = reference;
+        previous.revision = ++this.adapter.revision;
+        doc.finishCellTypingRollback(false);
+        return next;
+      } catch (error) {
+        this.adapter.invalidateUpdateReads();
+        doc.finishCellTypingRollback(true);
+        throw error;
+      }
     }
     const referenceBefore = this.adapter.captureSelection(selection);
     const before = this.adapter.doc.saveSnapshot();

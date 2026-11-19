@@ -16,12 +16,10 @@ import {
   languages,
   toCoreCharacter,
   toCoreParagraph,
-  bodyBorderHold,
 } from "../formatting.js";
 import { mountTabs } from "./a-tab-stops.js";
 import type { Props } from "../model.js";
 type Field = {
-  disabled?: boolean;
   name: string;
   label: string;
   type?: "number";
@@ -206,18 +204,6 @@ export function fields(kind: FormatKind): Field[] {
           ["1", "위"],
           ["2", "가운데"],
           ["3", "아래"],
-        ],
-        group: "줄 나눔",
-      },
-      {
-        disabled: true,
-        name: "englishBreakUnit",
-        label: "영문 줄 나눔",
-        numeric: true,
-        options: [
-          ["0", "단어"],
-          ["1", "하이픈"],
-          ["2", "글자"],
         ],
         group: "줄 나눔",
       },
@@ -485,15 +471,12 @@ export function mountFields(
       (cellLayoutKeys as readonly string[]).includes(field.name) &&
       !(field.name === "verticalAlign" && mergedAlignment?.ready === true);
     control.disabled =
-      !!field.disabled ||
       bodyLayoutUnsupported ||
       bodyOffsetUnsupported ||
       bodyGapUnsupported ||
       bodyOutlineUnsupported || cellLayoutUnsupported;
-    if (field.disabled) control.title = "NOT_SUPPORTED: 저장·재열기 보존 실패";
     if (bodyLayoutUnsupported)
-      control.title =
-        "NOT_SUPPORTED: 본문 화면 배치 미지원 · 저장된 원본 값 유지";
+      control.title = "본문에서는 바꿀 수 없습니다. 기존 설정은 유지됩니다.";
     if (cellLayoutUnsupported)
       control.title = field.name === "verticalAlign"
         ? mergedAlignment?.reason ?? cellLayoutHold
@@ -513,16 +496,16 @@ export function mountFields(
       hint.textContent = "단색 없음 · 그림/그라데이션은 조회 불가";
     if (bodyLayoutUnsupported)
       hint.textContent +=
-        " · 본문 화면 배치 미지원(NOT_SUPPORTED), 저장된 값 유지";
+        " · 본문 화면에 적용할 수 없습니다. 기존 값이 유지됩니다.";
     if (bodyOffsetUnsupported) {
       control.title = field.name === "charOffsets"
-        ? "NOT_SUPPORTED: 모든 언어 변경에는 본문에서 지원하지 않는 글자 위치가 포함됩니다. 저장된 값은 유지합니다."
-        : "NOT_SUPPORTED: 본문 확인된 문자군의 글자 위치는 저장만 지원, 설치 Core 렌더 소비 없음 · 기존 값 보존";
+        ? "모든 언어의 글자 위치를 한 번에 바꿀 수 없습니다."
+        : "본문 글자 위치는 화면에 반영되지 않습니다.";
       hint.textContent += " · " + control.title;
     }
     if (bodyOutlineUnsupported) {
       control.title =
-        "NOT_SUPPORTED: 본문 외곽선은 저장만 지원하고 설치 Core SVG 화면에는 반영되지 않습니다. 기존 값은 보존됩니다.";
+        "본문 외곽선은 저장되며, 화면에는 표시되지 않습니다.";
       hint.textContent += " · " + control.title;
     }
     if (
@@ -531,7 +514,7 @@ export function mountFields(
       ["fontLineHeight", "autoSpaceKrEn", "autoSpaceKrNum"].includes(field.name)
     ) {
       control.title =
-        "NOT_SUPPORTED: 본문 자동 간격은 저장만 지원하고 화면에는 반영되지 않습니다. 기존 값 유지·명시적 해제는 가능합니다.";
+        "본문 자동 간격은 화면에 표시되지 않습니다. 설정을 해제할 수 있습니다.";
       hint.textContent += " · " + control.title;
     }
     if (
@@ -539,15 +522,13 @@ export function mountFields(
       (field.name === "borderIgnoreMargin" &&
         state.__bodyLineProtectionHold === true)
     ) {
-      control.title =
-        bodyBorderHold +
-        (field.name === "borderIgnoreMargin"
-          ? " 여백 무시의 명시적 해제는 가능합니다."
-          : "");
+      control.title = field.name === "borderIgnoreMargin"
+        ? "본문에서는 여백 무시를 새로 켤 수 없습니다. 기존 설정은 끌 수 있습니다."
+        : "본문의 좌우 테두리 간격은 바꿀 수 없습니다. 기존 값은 유지됩니다.";
       hint.textContent += " · " + control.title;
     }
     if (field.name === "lineSpacing" && state.lineSpacingType !== "Percent")
-      hint.textContent += " · Core 반올림 조회값(근사 pt), 미변경 시 원본 유지";
+      hint.textContent += " · 표시 값은 약간 반올림됩니다. 단위: pt.";
     caption.append(hint);
     initial.set(field.name, control.value);
     controls.set(field.name, control);
@@ -598,23 +579,6 @@ export function mountFields(
   const spacingType = controls.get("lineSpacingType");
   if (spacingType)
     bindSpacingDraft(spacingType as HTMLSelectElement, controls.get("lineSpacing") as HTMLInputElement);
-  if (kind !== "cell") {
-    const unavailable = document.createElement("p");
-    unavailable.textContent = "이번 UI에서 미지원: ";
-    const names =
-      kind === "char"
-        ? ["취소선 모양 (저장 보존 제한)", "자동·테마 색"]
-        : ["기본 탭 간격", "기존 번호 정의 직접 편집·삭제", "그림·그라데이션 문단 배경"];
-    for (const name of names) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.disabled = true;
-      button.textContent = name;
-      button.title = "현재 Edit UI 연결 미지원 · 원본 속성은 유지합니다";
-      unavailable.append(button);
-    }
-    container.append(unavailable);
-  }
   const adjustments = kind === "paragraph" ? mountParagraphAdjustments(container, state) : undefined;
   if (adjustments) {
     adjustments.panel.hidden = initialGroup !== paragraphAdjustmentGroup;
@@ -623,10 +587,8 @@ export function mountFields(
   const validateLayout = kind === "cell" ? () => {} : mountDialogLayout(container, kind, controls);
   if (kind === "char") {
     const note = document.createElement("p"); note.dataset.characterBorderScope = "true";
-    note.textContent = "선택한 글자의 테두리·단색 배경만 적용합니다. 글자 음영·문단/셀 테두리와는 별개이며 미변경 속성은 유지합니다.";
-    const unsupported = document.createElement("button"); unsupported.type = "button"; unsupported.disabled = true;
-    unsupported.textContent = "그림·그라데이션 배경 · 미지원"; unsupported.title = "기존 조회·적용 계약으로 원본 세부 값을 안전하게 편집할 수 없어 보존합니다. 전용 계약 확인 후 연결할 후속 항목입니다.";
-    note.append(unsupported); note.hidden = initialGroup !== "테두리·배경";
+    note.textContent = "글자 테두리와 단색 배경을 설정합니다. 이 창에서 그림·그라데이션 배경을 편집할 수 없습니다.";
+    note.hidden = initialGroup !== "테두리·배경";
     container.append(note); labels.push({ element: note, group: "테두리·배경" });
   }
   // Native form validation runs before submit. Reveal its first invalid field,
@@ -658,7 +620,6 @@ export function mountFields(
     validateLayout();
     const props: Props = {};
     for (const f of fields(kind)) {
-      if (f.disabled) continue;
       const v = controls.get(f.name)!.value;
       if (!v || v === initial.get(f.name)) continue;
       if (controls.get(f.name)!.disabled)

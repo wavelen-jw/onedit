@@ -62,9 +62,8 @@ export function mountMenuSettings(doc: Document, actions: {
   form.id='menu-settings-form';
   dialog.id='menu-settings';dialog.className='manager-dialog';dialog.setAttribute('aria-label','이 탭의 메뉴·단축키 설정');
   const heading=doc.createElement('h2');heading.textContent='이 탭의 메뉴·단축키 설정';
-  const note=doc.createElement('p');note.className='manager-note';note.textContent='이번 편집 탭에서만 적용합니다. 새로고침하면 기본값으로 돌아갑니다. 서식 메뉴 항목 표시와 추가 단축키만 설정하며 기본 단축키·도구상자·문서는 바꾸지 않습니다. Ctrl+Shift+숫자 1~9 중 중복되지 않는 키를 선택하세요. OS·브라우저가 먼저 사용하는 키는 보장하지 않습니다. Ctrl+N 연속키는 일반 Chrome 탭의 새 창 예약키와 겹치며 Ctrl+K는 검색과 충돌할 수 있습니다. 기존 편의 연속키는 아래 안내를 참고하세요. 추가 키 설정 대상은 아래 목록의 기존 서식 명령이며 그림·글상자·머리말 창은 포함하지 않습니다.';
+  const note=doc.createElement('p');note.className='manager-note';note.textContent='이 탭에만 적용됩니다. 새로고침하면 기본값이 복원됩니다.';
   note.textContent+=' '+browserReplacementPolicy;
-  note.textContent+=' 원키의 문맥별 지원·제한은 도움말의 한/글 단축키 결과표에서 확인하세요. 사용자 추가 키가 원키 연결보다 먼저 적용됩니다.';
   const shortcutHelp=doc.createElement('p');shortcutHelp.className='manager-note';shortcutHelp.dataset.dialogShortcutHelp='';shortcutHelp.textContent=dialogShortcutHelp;
   const help=doc.createElement('details'), helpTitle=doc.createElement('summary');help.className='settings-help';helpTitle.textContent='설정 범위와 단축키 안내';help.append(helpTitle,note,shortcutHelp);
   const brief=doc.createElement('p');brief.className='manager-note';brief.textContent='이 편집 탭에만 적용됩니다. 새로고침하면 기본값으로 돌아갑니다.';

@@ -1,8 +1,9 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import type { Interaction } from './interaction.js';
 import { formatInputGuard, sameFormatTarget } from './integration/a-format-input-guard.js';
 import { visibleManagerControls } from './manager-layout.js';
-import { headerFooterCatalog, headerFooterView, headerFooterEditReason, headerFooterPages, headerFooterLimit, type HeaderFooterView } from './header-footer.js';
+import { headerFooterCatalog, headerFooterView, headerFooterEditReason, headerFooterCreationHold, headerFooterPages, type HeaderFooterView } from './header-footer.js';
 
 export function mountHeaderFooter(doc:Document,editor:Interaction,actions:{busy:()=>boolean;page:()=>number;changed:()=>void;focus:()=>void;error:(e:unknown)=>void}){
   const launch=doc.getElementById('header-footer-open') as HTMLButtonElement;
@@ -15,26 +16,32 @@ export function mountHeaderFooter(doc:Document,editor:Interaction,actions:{busy:
   for(const[value,label]of headerFooterPages){const o=doc.createElement('option');o.value=String(value);o.textContent=label;applyTo.append(o);}
   const content=doc.createElement('textarea');content.name='hfExisting';content.readOnly=true;content.rows=4;
   const text=doc.createElement('input');text.name='hfText';text.maxLength=2000;
-  const label=(name:string,field:HTMLElement)=>{const l=doc.createElement('label');l.append(doc.createTextNode(name),field);fields.append(l);};
-  label('기존 정의 선택',list);label('소유 구역',section);label('종류',kind);label('적용 쪽',applyTo);label('저장된 내용 (조회)',content);label('마지막 문단에 덧붙일 평문',text);
+  const label=(name:string,field:HTMLElement)=>{const l=doc.createElement('label');l.append(doc.createTextNode(name),field);fields.append(l);return l;};
+  label('기존 머리말·꼬리말',list);label('구역',section);label('종류',kind);label('적용 쪽',applyTo);
+  label('현재 내용',content);
+  const appendLabel=label('추가할 텍스트',text);
   const status=doc.createElement('p');status.className='manager-status';status.setAttribute('role','status');
-  const note=doc.createElement('p');note.className='manager-note';note.textContent=headerFooterLimit+' 대상을 바꾸면 입력 초안을 초기화합니다. 기존 본문 선택은 유지하며 닫으면 본문으로 복귀합니다.';
+  const note=doc.createElement('p');note.className='manager-note';note.textContent='대상을 바꾸면 입력 중인 내용이 지워집니다.';
   const footer=doc.createElement('div');footer.className='manager-footer';
-  const ok=doc.createElement('button');ok.type='submit';ok.id='header-footer-apply';
-  const cancel=doc.createElement('button');cancel.type='button';cancel.id='header-footer-cancel';cancel.textContent='본문으로 / 취소';footer.append(ok,cancel);
+  const ok=doc.createElement('button');ok.type='submit';ok.id='header-footer-apply';ok.textContent='추가';
+  const cancel=doc.createElement('button');cancel.type='button';cancel.id='header-footer-cancel';cancel.textContent='취소';footer.append(ok,cancel);
   form.append(title,fields,status,note,footer);dialog.append(form);doc.body.append(dialog);const guard=formatInputGuard(form);
   let captured:ReturnType<Interaction['capture']>|undefined,view:HeaderFooterView|undefined,rows:HeaderFooterView[]=[];
-  const target=()=>{if(!/^(0|[1-9]\d*)$/.test(section.value)||!['header','footer'].includes(kind.value)||!['0','1','2'].includes(applyTo.value))throw Error('소유 구역·종류·적용 쪽을 다시 선택하세요.');return{section:Number(section.value),isHeader:kind.value==='header',applyTo:Number(applyTo.value)};};
+  const target=()=>{if(!/^(0|[1-9]\d*)$/.test(section.value)||!['header','footer'].includes(kind.value)||!['0','1','2'].includes(applyTo.value))throw Error('구역, 종류, 적용할 쪽을 다시 선택하세요.');return{section:Number(section.value),isHeader:kind.value==='header',applyTo:Number(applyTo.value)};};
   const blocked=()=>actions.busy()||!!doc.querySelector('dialog[open]:not(#header-footer-dialog)');
   const stale=()=>!captured||!sameFormatTarget(captured,editor.capture());
   const sync=()=>{
-    launch.disabled=blocked();launch.title=launch.disabled?'입력·저장·열린 대화상자를 먼저 마치세요.':headerFooterLimit;
+    launch.disabled=blocked();launch.title=launch.disabled?'입력·저장·열린 대화상자를 먼저 마치세요.':'기존 머리말·꼬리말을 보고 내용을 추가합니다.';
     if(!dialog.open)return;
-    const reason=stale()?'문서·리비전·선택이 변경되었습니다. 취소 후 다시 여세요.':blocked()?'현재 작업을 먼저 마치세요.':view?headerFooterEditReason(editor.adapter,editor.selection,view):'정의를 다시 선택하세요.';
+    const detail=stale()?'문서나 선택이 바뀌었습니다. 닫고 다시 여세요.':blocked()?'현재 작업을 먼저 마치세요.':view?headerFooterEditReason(editor.adapter,editor.selection,view):'정의를 다시 선택하세요.';
+    const reason=detail===headerFooterCreationHold?'기존 머리말·꼬리말에만 내용을 추가할 수 있습니다.':detail;
     ok.disabled=!!reason;ok.title=reason;for(const f of [section,kind,applyTo,list])f.disabled=stale()||blocked();text.disabled=!!reason;
-    status.textContent=reason||(view?.exists?`기존 ${view.paragraphs.length}문단 · 마지막 문단 끝에만 추가합니다.`:'해당 정의가 없습니다.');
+    const canAppend=!!view?.exists;
+    appendLabel.hidden=ok.hidden=!canAppend;
+    note.hidden=!canAppend;
+    status.textContent=reason||(canAppend?'기존 내용 끝에 추가합니다.':'');
   };
-  const read=()=>{if(stale()||blocked()){sync();return;}try{view=headerFooterView(editor.adapter,target());content.value=view.paragraphs.map(p=>p.text).join('\n');text.value='';ok.textContent=view.exists?'평문 덧붙이기':'정의 만들기 (보류)';list.value=String(rows.findIndex(v=>JSON.stringify(v.target)===JSON.stringify(view!.target)));sync();}catch(error){view=undefined;ok.disabled=true;status.textContent=String(error);}};
+  const read=()=>{if(stale()||blocked()){sync();return;}try{view=headerFooterView(editor.adapter,target());content.value=view.paragraphs.map(p=>p.text).join('\n');text.value='';list.value=String(rows.findIndex(v=>JSON.stringify(v.target)===JSON.stringify(view!.target)));sync();}catch(error){view=undefined;ok.disabled=true;status.textContent=editorFeedbackText(error);}};
   for(const field of [section,kind,applyTo])field.onchange=read;
   list.onchange=()=>{const v=rows[Number(list.value)];if(!v||stale()||blocked())return;section.value=String(v.target.section);kind.value=v.target.isHeader?'header':'footer';applyTo.value=String(v.target.applyTo);read();};
   const open=()=>{if(dialog.open||blocked())return;try{

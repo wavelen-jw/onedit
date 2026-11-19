@@ -27,7 +27,7 @@ export function mountTableMenuUI1(root: HTMLDetailsElement, buttons: Map<string,
   const remove=make('table-delete-submenu','줄/칸 지우기(E)…','e');live(remove.p,'delete-dialog','줄/칸 지우기…',undefined,'Alt+Delete');live(remove.p,'row-delete','현재 행 삭제 (내용 포함)');live(remove.p,'col-delete','현재 열 삭제 (내용 포함)');
   for(const [s,key]of [[add.s,'Alt+Insert'],[remove.s,'Alt+Delete']]as const){const k=doc.createElement('kbd');k.textContent=key;k.title='기존 Command의 줄/칸 선택 창';s.append(k);}
   separator();held('a','채우기(A)','연속 데이터 채우기 명령은 미연결입니다. 지원하는 셀 배경색은 테두리/배경 창에서 변경합니다.');held('k','블록 계산식(K)','셀 계산식 편집은 연결돼 있지 않습니다. 기존 표 내용은 유지합니다.');
-  separator();live(panel,'table-transpose','표 뒤집기 · 줄/칸 전치…',undefined,'T');live(panel,'table-object-line','표 개체 테두리…',undefined,'L');live(panel,'table-object-background','표 개체 채우기…',undefined,'C');separator();panel.append(extra);
+  separator();live(panel,'table-transpose','표 뒤집기 · 줄/칸 전치…',undefined,'T');live(panel,'table-object-line','표 개체 테두리…',undefined,'L');live(panel,'table-object-background','표 개체 채우기…',undefined,'C');live(panel,'table-object-pagination','표 쪽 나누기…');separator();panel.append(extra);
   const menus=[border.d,add.d,remove.d,extra],disposers:(()=>void)[]=[];
   const close=()=>menus.forEach(d=>d.open=false);
   const rootRows=()=>[...panel.querySelectorAll<HTMLElement>(':scope>button:not(:disabled),:scope>details>summary')].filter(e=>!!e.getClientRects().length&&e.getAttribute('aria-disabled')!=='true');

@@ -5,7 +5,7 @@ import type { FileLifecycle } from "./file-lifecycle.js";
 import type { compositionCommitKey } from "./composition-commit-key.js";
 import { nativeTextDelta, retainNativeText } from './native-text-delta.js';
 import { runHistory } from './command-state-integration.js';
-import type { Position, Selection } from './model.js';
+import { samePosition, type Position, type Selection } from './model.js';
 
 type CompositionInputContext = {
   input: HTMLTextAreaElement; document: Document; editor: Interaction; files: FileLifecycle;
@@ -89,6 +89,7 @@ export function mountCompositionInput(context: CompositionInputContext) {
   input.addEventListener("compositionstart", () => {
     editor.resetBlockSequence();
     committedTail = undefined;
+    const interrupted = !!context.composition;
     try {
       cancelComposition();
       compositionKeys.start();
@@ -102,13 +103,19 @@ export function mountCompositionInput(context: CompositionInputContext) {
       context.composing = false;
       compositionKeys.cancel();
       $("error").textContent = String(error); $("error").hidden = false;
+      paint();
+      return;
     }
-    paint();
+    // Starting a transaction does not change the selection or ink. Repainting
+    // an existing text range here can synchronously materialize every pending
+    // page, since range surface preparation is disabled during composition.
+    // The first actual update renders the new caret and visible pages.
+    if (interrupted) paint();
   });
   input.addEventListener("compositionupdate", (e) => withTypingFormatPresentation(editor, () => {
     if (!context.composition) return;
     try {
-      if (context.composition.update(e.data)) render(e.data.length > 0);
+      if (context.composition.update(e.data)) render(true);
       if (e.data) input.dataset.imePreview = "true";
       else delete input.dataset.imePreview;
     } catch (error) {
@@ -150,13 +157,12 @@ export function mountCompositionInput(context: CompositionInputContext) {
       paint();
     }
   }, typingStart?.target.selection.kind === 'caret' && !!e.data && !/[\r\n]/.test(e.data)));
-  input.addEventListener("input", (e) => withTypingFormatPresentation(editor, () => {
-    const ev = e as InputEvent;
+  const handleInput = (ev: InputEvent) => withTypingFormatPresentation(editor, () => {
     if (context.composing || ev.isComposing) {
       // Some keyboards expose the current preedit only on input, rather than a
       // useful compositionupdate. Existing transaction/owner guards still own it.
       if (context.composition && ev.data !== null) try {
-        if (context.composition.update(ev.data)) render(ev.data.length > 0);
+        if (context.composition.update(ev.data)) render(true);
       } catch (error) {
         cancelComposition(); context.composing = false; resetNative(); render();
         $('error').textContent = String(error); $('error').hidden = false;
@@ -181,9 +187,15 @@ export function mountCompositionInput(context: CompositionInputContext) {
         const anchor = {...old.start, offset:a.logical(old.start, start + delta.from)};
         const focus = {...old.start, offset:a.logical(old.start, start + delta.to)};
         const selection: Selection = {kind:'text',anchor,focus};
-        const before = editor.capture(), count = editor.history.undoStack.length;
-        editor.execute({type:'insert',text:delta.text}, {...before,selection,paths:a.captureSelection(selection)});
-        if (delta.from === [...old.value].length && delta.to === delta.from && !/[\r\n]/u.test(delta.text)) editor.history.recordTyping(before,count);
+        const before = editor.capture(true), count = editor.history.undoStack.length;
+        const append = delta.from === [...old.value].length && delta.to === delta.from && !/[\r\n]/u.test(delta.text);
+        // An append at this exact cell caret has no range to erase. The
+        // captured native target still goes through normal command admission.
+        const caretAppend = append && ev.inputType === 'insertText' && ev.data === delta.text &&
+          before.selection.kind === 'caret' && focus.kind === 'cell' && samePosition(focus, before.selection.focus);
+        const target = caretAppend ? before : {...before,selection,paths:a.captureSelection(selection)};
+        editor.execute({type:'insert',text:delta.text,nativeTypingAppend:caretAppend}, target);
+        if (append) editor.history.recordTyping(before,count);
         applied = true;
       }, true);
       // A middle replacement retains its whole native buffer, not just the
@@ -202,8 +214,15 @@ export function mountCompositionInput(context: CompositionInputContext) {
       }, true);
     rememberNative();
     if (!native) input.value = '';
-  }, ((e as InputEvent).inputType === 'insertText' || (e as InputEvent).isComposing) &&
-    !/[\r\n]/.test((e as InputEvent).data ?? '') &&
-    ((e as InputEvent).isComposing ? typingStart?.target.selection.kind === 'caret' :
-      !native || input.value === native.value + ((e as InputEvent).data ?? ''))));
+  }, (ev.inputType === 'insertText' || ev.isComposing) &&
+    !/[\r\n]/.test(ev.data ?? '') &&
+    (ev.isComposing ? typingStart?.target.selection.kind === 'caret' :
+      !native || input.value === native.value + (ev.data ?? '')));
+  input.addEventListener("input", e => {
+    const ev=e as InputEvent, selection=editor.selection;
+    if (ev.inputType==="insertText" && ev.data && !/[\r\n]/.test(ev.data) &&
+        !context.composing && !ev.isComposing && selection.kind==="caret" && selection.focus.kind==="cell")
+      return editor.adapter.withTypingCellOwner(selection.focus, () => handleInput(ev));
+    handleInput(ev);
+  });
 }

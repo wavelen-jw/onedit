@@ -1,9 +1,8 @@
 // User-provided Hancom Web UI specification, 2026-11-01.
 // UI-only reorganisation; no reference document content or defaults. Move existing drafts only: the original reader and Command remain
 // authoritative, including mixed values, held properties and language slots.
-import {dialogGap,dialogUnit} from './dialog-support.js';
+import {dialogUnit} from './dialog-support.js';
 import { objectLinePalette } from './object-line-palette.js';
-import { appendDialogShortcutHelp } from './dialog-shortcut-help.js';
 const basicFields = {
   z: ["fontSize", "크기"], l: ["dialogLanguage", "언어"], t: ["fontFamily", "글꼴"],
   r: ["relativeSizes", "상대 크기"], w: ["ratios", "장평"], p: ["spacings", "자간"],
@@ -168,11 +167,6 @@ export function mountHancomCharacterDialog(root: HTMLElement) {
   caption("underlineType", "위치");caption("underlineShape", "모양");caption("underlineColor", "색");
   const strike = group(1, "취소선");move(["strikeColor"], strike, 1);caption("strikeColor", "색");
   colorProxy('strikeColor','취소선 색','색');
-  const unsupported = (target: HTMLElement, text: string, reason: string) => {
-    const button = document.createElement("button");button.type = "button";button.disabled = true;
-    button.textContent = text;button.title = reason;target.append(button);
-  };
-  dialogGap(strike,"모양","취소선 모양의 저장·재열기 계약 미지원; 원본 유지");
   const other = group(1, "기타");move(["outlineType", "emphasisDot", "kerning"], other, 1);
   const border = group(1, "테두리"), edgePicker=document.createElement("div");edgePicker.className="character-edge-picker";
   const edgeButtons: HTMLButtonElement[] = [];let edge="Left";
@@ -186,8 +180,6 @@ export function mountHancomCharacterDialog(root: HTMLElement) {
   border.append(edgePicker);
   const background=group(1, "배경");move(["characterBackground"], background, 1);caption("characterBackground", "면 색");
   colorProxy('characterBackground','글자 배경 면 색','면 색',true);
-  dialogGap(background,"무늬 색","글자 무늬 배경 조회·적용 계약 미지원; 원본 유지");
-  dialogGap(background,"무늬 모양","글자 무늬 배경 조회·적용 계약 미지원; 원본 유지");
   const supplemental=document.createElement("details"),supplementTitle=document.createElement("summary");supplemental.className="dialog-supported-more";supplementTitle.textContent="추가 글자 속성";supplemental.append(supplementTitle,shadow,other);panels[1].append(supplemental);
   // Four primary groups retain the real named drafts and are ordered as the
   // Web reference. The extra existing shadow/kerning controls remain reachable.
@@ -200,21 +192,14 @@ export function mountHancomCharacterDialog(root: HTMLElement) {
   // One preview well rather than eight full previews inside the language grid.
   // Their existing source/display and late-loading listeners remain attached.
   preview.append(...fontPreviews);panels[0].append(preview);
-  languageNote.className="character-language-note";languageNote.textContent="언어별 초안은 탭을 바꾸어도 유지됩니다. 모든 언어를 선택하면 같은 글꼴을 각 언어에 적용합니다.";
-  const preset=document.createElement("div");preset.className="character-presets";
-  unsupported(preset,"대화 상자 설정 · 사용자 지정", "대화 상자 프리셋 저장·구성 명령은 연결되어 있지 않습니다. 문서 서식은 기존 설정 버튼으로 적용합니다.");
+  languageNote.className="character-language-note";languageNote.textContent="모든 언어를 선택하면 같은 글꼴을 각 언어에 적용합니다.";
   // Detach only old presentation wrappers. Every existing field/control and
   // its listener has already moved into the new panels.
   root.replaceChildren(nav,...panels,languageNote);
-  appendDialogShortcutHelp(root, [
-    ["기본", [...Object.entries(basicFields).map(([key, [,label]])=>[key,label] as const),
-      ...Object.entries(basicToggles)]],
-    ["확장", Object.entries(extendedFields).map(([key, [,label]])=>[key,label] as const)],
-    ["공통", [["d","적용"]]],
-  ]);
+
   const close=document.createElement("button");close.type="button";close.className="character-close";close.setAttribute("aria-label","글자 모양 닫기");close.textContent="×";
   close.onclick=()=>dialog.querySelector<HTMLButtonElement>("#cancel")!.click();
-  dialog.querySelector(".character-close")?.remove();dialog.querySelector("form")!.append(close);
+  dialog.querySelector(".character-close")?.remove();root.before(close);
   function sync() {
     const active=tabs.findIndex(tab=>tab.getAttribute("aria-selected")==="true");
     panels.forEach((panel,index)=>panel.hidden=index!==active);

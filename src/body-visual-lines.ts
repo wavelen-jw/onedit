@@ -1,5 +1,5 @@
 import type {Interaction} from './interaction.js';
-import type {BodyLine,NavigationRect} from './adapter.js';
+import type {BodyLayoutControl,BodyLine,NavigationRect} from './adapter.js';
 import type {Position} from './model.js';
 
 export type BodyVisualLine={position:Extract<Position,{kind:'body'}>;line:BodyLine;start:{position:Position;rect:NavigationRect};end:{position:Position;rect:NavigationRect};left:number;right:number;top:number;bottom:number};
@@ -69,9 +69,10 @@ export function bodyVisualLines(editor:Interaction,page:number):BodyVisualLine[]
   // Share only within this synchronous read; each run still resolves its owner
   // and validates its current line. No values survive an edit or view refresh.
   const edges=new Map<string,Pick<BodyVisualLine,'start'|'end'>>();
+  let controls: BodyLayoutControl[] | undefined;
   for(const group of groups)for(const run of group.runs){
     const p=a.position(run,run.charStart+Math.floor(Array.from(run.text).length/2));
-    if(p.kind!=='body'||a.hasBodyLayoutObject(p))continue;
+    if(p.kind!=='body'||a.hasBodyLayoutObject(p,controls??=a.call<BodyLayoutControl[]>('getControls')))continue;
     const line=lineFor(p),key=JSON.stringify([p.sec,p.para,line.lineIndex,line.charStart,line.charEnd]);
     let edge=edges.get(key);
     if(!edge){edge={start:a.bodyLineEdge(p,line,false),end:a.bodyLineEdge(p,line,true)};edges.set(key,edge);}

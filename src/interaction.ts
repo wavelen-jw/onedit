@@ -50,7 +50,7 @@ import { prepareColumns } from "./columns.js";
 import { preparePicture, pictureSelectionRect } from "./pictures.js";
 import { bodyClipboardObjects, prepareObjectCut, selectedCutObject } from './object-clipboard.js';
 import { assertMixedCellPictureRange, mixedCellPictureBoxes, ownsMixedCellPictureHit } from './mixed-cell-picture.js';
-import { inlineCellPicture, inlineCellPictureBoxes, crossesPicture } from './inline-cell-picture.js';
+import { inlineCellPicture, inlineCellPictureBoxes, cellPictureSelectionBoxes, crossesPicture } from './inline-cell-picture.js';
 import { prepareParagraphAdjustment, paragraphAdjustmentRaw, type ParagraphAdjustment } from "./paragraph-adjustments.js";
 import { numberRestartReason, validateNumberRestart } from "./numbering-restart.js";
 import { prepareStyleMutation } from "./style-definitions.js";
@@ -724,6 +724,18 @@ export class Interaction {
         ),
       );
   }
+  private inlineTableParagraph(s: Selection): Position | undefined {
+    const p = s.focus;
+    if (s.kind === "text" && p.kind === "body" && s.anchor.kind === "body" &&
+        p.sec === s.anchor.sec && p.para === s.anchor.para) {
+      const [from, to] = ordered(s.anchor, p);
+      if (this.adapter.inline(p).some(table => from.offset <= table.offset && table.offset < to.offset))
+        return {...p, offset:0};
+    }
+    if (s.kind !== "table" || p.kind !== "cell" || nested(p)) return;
+    const {treatAsChar} = this.adapter.call("getTableProperties", p.sec, p.para, p.control);
+    if (treatAsChar) return {kind:"body", sec:p.sec, para:p.para, offset:0};
+  }
   private formatTargets(kind: FormatKind, s: Selection, prepared?:ReturnType<Interaction["targets"]>) {
     if (kind === "cell") {
       if (s.focus.kind !== "cell" || nested(s.focus))
@@ -866,15 +878,18 @@ export class Interaction {
       Array.from({length: 7}, (_, i) => p[`fontLanguage${i}`])
         .filter((name): name is string => typeof name === "string" && !!name.trim())
     ))];
+    if (kind === "char" && s.kind === "caret" && typeof rows[0]?.fontFamily === "string")
+      state.__caretFontFamily = rows[0].fontFamily;
     // UI-only scope metadata; imported properties remain available to Core.
     if (kind === "char")
       state.__bodyCharacterOffsetsHold = targets.some(
         (t) => t.p.kind === "body",
       );
-    if (kind === "paragraph")
-      state.__bodyLineProtectionHold = targets.some(
-        (t) => t.p.kind === "body",
-      );
+    if (kind === "paragraph") {
+      state.__bodyLineProtectionHold = targets.some(t => t.p.kind === "body");
+      const host = this.inlineTableParagraph(s);
+      if (host) state.alignment = this.adapter.paraProps(host).alignment;
+    }
     if (kind === "cell" && s.focus.kind === "cell") {
       const selected = new Set(targets.map(t => t.p.kind === "cell" ? t.p.cell : -1));
       state.__cellLayoutHold = this.adapter.cells(s.focus).some(c => selected.has(c.cellIdx) && (c.rowSpan !== 1 || c.colSpan !== 1));
@@ -909,9 +924,18 @@ export class Interaction {
     const byCell = borders && kind === "cell" && s.focus.kind === "cell"
       ? cellBorderPlan(this.adapter.cells(s.focus), this.formatTargets(kind,s).map(t => (t.p as Extract<Position,{kind:"cell"}>).cell), borders)
       : undefined;
-    return this.formatTargets(kind, s)
+    // An inline table moves with the paragraph that contains its object slot.
+    // Keep other formatting on its existing targets, including cell selections.
+    const host = kind === "paragraph" && "alignment" in props ? this.inlineTableParagraph(s) : undefined;
+    const {alignment, ...remaining} = props;
+    const targets = host
+      ? [...(Object.keys(remaining).length ? this.formatTargets(kind, s) : []), {p:host, end:0}]
+      : this.formatTargets(kind, s);
+    return targets
       .map((t) => {
-        const requested = blockPlan && t.p.kind==='cell' ? blockPlan.get(t.p.cell)??{} : byCell && t.p.kind === "cell" ? {...props,...byCell.get(t.p.cell)} : props;
+        const requested = host ? (t.p === host ? {alignment} : remaining)
+          : blockPlan && t.p.kind === "cell" ? blockPlan.get(t.p.cell) ?? {}
+          : byCell && t.p.kind === "cell" ? {...props,...byCell.get(t.p.cell)} : props;
         const samples = this.formatSamples(kind, t);
         const delta = Object.fromEntries(
           Object.entries(requested).filter(
@@ -1400,16 +1424,29 @@ export class Interaction {
       this.preferredX = x;
       // Stay in the child cell for vertical text movement. F5 and Tab handle
       // cell traversal; parent exit is explicit at the text/table boundary.
-      const ownerBoxes = p.kind === "cell" && !nested(p) ? a.cells(p) : [];
+      const ownerBoxes = p.kind === "cell" && !nested(p) && !selecting &&
+        (key === "ArrowUp" || key === "ArrowDown") ? a.cells(p, "owner-page") : [];
       // Text motion exhausts the current cell's own lines before considering
       // another cell. A vertically centered neighbour can lie between these
       // lines but is not an intermediate caret stop inside this cell.
-      const ownLines = p.kind === "cell" && !selecting &&
-        (key === "ArrowUp" || key === "ArrowDown") ? this.lines(p) : undefined;
+      const cellArrow = p.kind === 'cell' && !selecting && (key === 'ArrowUp' || key === 'ArrowDown');
+      const step = key === 'ArrowDown' ? 1 : -1;
       const base = rect.pageIndex * 100000 + rect.y;
-      const ownDestination = ownLines?.some(l => key === "ArrowDown"
-        ? l.page * 100000 + l.y > base + 2 : l.page * 100000 + l.y < base - 2);
-      const lines = (ownDestination ? ownLines! : this.lines(selecting || nested(p) ? p : undefined)).map((line) => ({
+      const inDirection = (line: {page: number; y: number}) =>
+        step * (line.page * 100000 + line.y - base) > 2;
+      const hostPages = cellArrow && !nested(p) && typeof a.doc.tableNavigationPages === 'function'
+        ? a.doc.tableNavigationPages(p.sec, p.para, p.control) : undefined;
+      const bounded = hostPages?.includes(rect.pageIndex);
+      let ownLines = cellArrow ? this.lines(p, bounded ? rect.pageIndex : undefined) : [];
+      if (bounded && !ownLines.some(inDirection)) {
+        for (const page of (step > 0 ? hostPages! : hostPages!.slice().reverse())) {
+          if ((page - rect.pageIndex) * step <= 0) continue;
+          const candidates = this.lines(p, page);
+          if (candidates.length) { ownLines = ownLines.concat(candidates); break; }
+        }
+        ownLines.sort((left,right)=>left.page-right.page || left.y-right.y);
+      }
+      const filterLines = (input: typeof ownLines) => input.map((line) => ({
         ...line,
         // An inline table's body text shares its enclosing line box, not a
         // preceding/following cell line. Leaving the table vertically must
@@ -1425,6 +1462,23 @@ export class Interaction {
                 r.secIdx === p.sec && r.parentParaIdx === p.para))
             : line.runs,
       })).filter((line) => line.runs.length > 0);
+      let lines: typeof ownLines;
+      if (ownLines.some(inDirection)) {
+        lines = filterLines(ownLines);
+      } else if (bounded) {
+        // Only the nearest eligible line can win. Do not read layout in later sections
+        // once it is known. Keep the host-line exclusion used by the full traversal.
+        lines = filterLines(this.lines(undefined, rect.pageIndex));
+        for (let page = rect.pageIndex + step; page >= 0 && page < a.pageCount; page += step) {
+          if (lines.some(l => inDirection(l) && (l.page !== rect.pageIndex ||
+              !(l.y <= rect.y + 2 && l.runs.some(r => r.y + r.h >= rect.y))))) break;
+          lines.push(...filterLines(this.lines(undefined, page)));
+        }
+        lines.sort((left,right)=>left.page-right.page || left.y-right.y);
+      } else {
+        lines = filterLines(this.lines(selecting || nested(p) ? p : undefined,
+          key === "Home" || key === "End" ? rect.pageIndex : undefined));
+      }
       const current = lines.filter(
         (l) =>
           l.page === rect.pageIndex &&
@@ -3202,6 +3256,10 @@ export class Interaction {
       }
       const plan = this.formatPlan(kind, command.props, s, command.type === "cell" ? command.borders : undefined, command.type === 'cell' ? command.cellScope : undefined);
       if (!plan.length) return true;
+      if (kind === "paragraph" && s.kind === "table") {
+        for (const target of plan)
+          if (target.p.kind === "body") a.assertEditable(target.p);
+      }
       const selectionReference = a.captureSelection(s);
       // Snapshots cover the entire multi-target command. Shared-edge changes outside
       // the selection are rejected rather than silently widening the user's target.
@@ -3458,6 +3516,8 @@ export class Interaction {
       // Hancom Redo caret reference. Keep release and F5 block behavior intact.
       captured?.resizeSelectionBefore?.kind === "caret"
         ? captured.resizeSelectionBefore : undefined,
+      false, command.type === 'insert' && command.nativeTypingAppend === true &&
+        !/[\x00-\x1f]/u.test(command.text) && !Object.keys(this.typing).length,
     );
     try { countDelta?.(this.selection); } catch { /* Recount on the idle path. */ }
     this.preferredX = undefined;
@@ -3531,7 +3591,8 @@ export class Interaction {
         .entries()) {
         if (i) p = a.split(p);
         const from = copy(p);
-        p = a.insert(p, line);
+        p = a.insert(p, line, command.type === "insert" && s.kind === "caret" &&
+          i === 0 && line === command.text && !Object.keys(this.typing).length);
         if (Object.keys(this.typing).length && line)
           a.format(from, p.offset, this.typing);
         if (external && line) a.format(from, p.offset, toCoreCharacter(external.props));
@@ -3823,7 +3884,7 @@ export class Interaction {
   rectangles(pageRuns: (page: number) => readonly Run[] = (page) => this.adapter.runs(page), owners?:OwnerProjection): SelectionBox[] {
     const s = this.selection,
       a = this.adapter;
-    if (s.kind === 'object' && s.focus.kind === 'cell') return inlineCellPictureBoxes(a,s);
+    if (s.kind === 'object' && s.focus.kind === 'cell') return cellPictureSelectionBoxes(a,s);
     if (s.kind === "cells" || s.kind === "table")
       return this.blockRectangles(this.cellBoxes(s));
     if (s.kind === "text") {
@@ -3836,6 +3897,7 @@ export class Interaction {
       for (let page = 0; page < a.pageCount; page++) {
         const rows = pageRuns(page).map(r => ({r, candidate:runOwner(r)}))
           .filter((row): row is {r:Run;candidate:Position} => !!row.candidate && sameContainer(p,row.candidate));
+        if (!rows.length) continue;
         const columns: {x:number;width:number}[] = p.kind === "body" ? a.call("getPageInfo",page).columns ?? [] : [];
         const lineStarts = new Map<string,number>(), flowLefts = new Map<string,number>();
         const columnOf = (r:Run) => columns.find(c=>Number.isFinite(c.x)&&Number.isFinite(c.width)&&c.width>0&&r.x>=c.x&&r.x<c.x+c.width);
@@ -3916,8 +3978,8 @@ export class Interaction {
     }
     return [];
   }
-  capture(coalesceLocalCellSubmit = false) {
-    // The opt-in is used only by a standalone modal submit. Resolve the live
+  capture(coalesceCellCaret = false) {
+    // Synchronous callers may coalesce validation of a flat cell caret. Resolve the live
     // reference first, even if the Selection object and its generation match.
     // A flat caret has just one endpoint: captureSelection -> captureParagraph
     // itself validates that exact position before issuing a fresh native path.
@@ -3925,7 +3987,7 @@ export class Interaction {
     const read = () => {
     const a = this.adapter, s = this.selection;
     let paths: SelectionReference | undefined;
-    this.validateSelection(s, undefined, coalesceLocalCellSubmit ? p => {
+    this.validateSelection(s, undefined, coalesceCellCaret ? p => {
       if (s === this.selection && s.kind === "caret" && p.kind === "cell" && !nested(p) &&
           !a.transientEdit && !a.hasPendingLocalBodyFlow() && a.scope === "edit" &&
           !a.documentLocked && !a.viewerOnlyReason && a.heightCandidateIdentified) {

@@ -28,7 +28,7 @@ export function mountShapes(host: HTMLElement, editor: Interaction, actions: {
   const ratio = document.createElement('input'); ratio.type = 'checkbox'; ratio.name = 'shapeRatio';
   const label = (text: string, field: HTMLElement) => { const l = document.createElement('label'); l.textContent = text; l.append(field); return l; };
   const message = document.createElement('p'); message.setAttribute('role', 'status');
-  const note = document.createElement('p'); note.textContent = '본문 빈 글상자 넣기와 글 앞으로 배치 글상자의 크기 늘리기를 지원합니다(1pt=100HU). 일반 글상자 내용은 선택 후 Enter 또는 내용 편집 메뉴에서 편집합니다. 축소·배치·캡션·그룹·셀 내부·OLE·글맵시는 미지원이며 기존 내용은 보존합니다. 기존 사각형 크기 편집은 유지합니다. 캔버스 선택·이동은 미지원입니다.';
+  const note = document.createElement('p'); note.textContent = '지원되는 글상자의 크기와 모양을 바꿀 수 있습니다.';
   const ok = document.createElement('button'); ok.type = 'submit'; ok.id = 'shape-apply'; ok.textContent = '적용';
   const cancel = document.createElement('button'); cancel.type = 'button'; cancel.id = 'shape-cancel'; cancel.textContent = '취소';
   form.append(title, label('너비(pt)', width), label('높이(pt)', height), label('가로 세로 비율 유지', ratio), message, note, ok, cancel);

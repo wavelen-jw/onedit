@@ -6,6 +6,10 @@ export type SelectionBox = Box & { textOnly?: boolean; lineKey?: string;
 // so selection overlays cannot invalidate their own measurement on every paint.
 type GlyphBounds = { key: string; fontRevision: number; dirty: boolean; boxes: Box[]; observer: MutationObserver };
 const glyphBounds = new WeakMap<SVGSVGElement, GlyphBounds>();
+export function invalidatePaintedGlyphs(svg: SVGSVGElement) {
+  const entry = glyphBounds.get(svg);
+  if (entry) entry.dirty = true;
+}
 const fontStates = new WeakMap<Document, { revision: number }>();
 function fontState(doc: Document) {
   let state = fontStates.get(doc);

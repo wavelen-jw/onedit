@@ -32,7 +32,14 @@ export async function offerPlainPaste(doc: Document): Promise<boolean> {
   actions.append(cancel, confirm);
   form.append(actions);
   dialog.append(title, message, form);
-  dialog.addEventListener("keydown", e => e.stopPropagation());
+  dialog.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key !== "Tab" || e.isComposing || e.keyCode === 229) return;
+    const last = e.shiftKey ? cancel : confirm;
+    if (doc.activeElement !== last) return;
+    e.preventDefault();
+    (e.shiftKey ? confirm : cancel).focus();
+  });
   const closed = new Promise<boolean>(resolve => {
     const finish = (text: boolean) => {
       closeEditorDialog(dialog, true, text ? "text" : "cancel");

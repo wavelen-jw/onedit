@@ -1,9 +1,9 @@
 import { closeEditorDialog, showDocumentEditingDialog, showUtilityDialog } from "./editor-popup-focus.js";
-import { characterStatistics,characterCountPolicy } from './document-statistics.js';
+import { characterStatistics } from './document-statistics.js';
 import type {Interaction} from './interaction.js';
 export function mountDocumentInfo(doc:Document,editor:Interaction,actions:{blocked:()=>boolean}){
   const dialog=doc.createElement('dialog');dialog.id='document-info';dialog.className='manager-dialog';dialog.setAttribute('aria-label','문서 정보 · 통계');
-  const h=doc.createElement('h2');h.textContent='문서 정보 · 통계';const body=doc.createElement('dl'),note=doc.createElement('p');note.textContent='글자수는 문서의 본문·표·글상자 등 기존 Core Unicode 텍스트 조회 기준입니다. ' + characterCountPolicy + ' 글꼴 지정값과 실제 공급/대체 여부는 별도입니다.';
+  const h=doc.createElement('h2');h.textContent='문서 정보 · 통계';const body=doc.createElement('dl'),note=doc.createElement('p');note.textContent='본문, 표, 글상자의 글자 수입니다.';
   note.className='manager-note';
   const footer=doc.createElement('div');footer.className='manager-footer';
   const close=doc.createElement('button');close.type='button';close.textContent='닫기';close.onclick=()=>closeEditorDialog(dialog);footer.append(close);dialog.append(h,body,note,footer);doc.body.append(dialog);

@@ -98,11 +98,24 @@ export class LiveComposition {
           this.original.anchor.kind === "body" && this.original.anchor.sec === this.original.focus.sec &&
           this.original.anchor.para === this.original.focus.para &&
           Math.abs(this.original.anchor.offset - this.original.focus.offset) <= 8);
-      const range = originalBody && this.editor.selection.focus.kind === "body" &&
-        this.adapter.localBodyTextEnabled && !this.localRangeInvalidated && this.localEnvironment !== undefined && text && this.text
-        ? this.presentationRange() : undefined;
+      const bodyPreview = originalBody && this.editor.selection.focus.kind === "body" &&
+        this.adapter.localBodyTextEnabled && !this.localRangeInvalidated && this.localEnvironment !== undefined && text && this.text;
+      const cellPreview = this.original.kind === "caret" && this.original.focus.kind === "cell" &&
+        !nested(this.original.focus) && this.editor.selection.focus.kind === "cell" &&
+        text.length === 1 && this.text.length === 1 && typeof this.doc.amendCellComposition === "function";
+      const range = bodyPreview || cellPreview ? this.presentationRange() : undefined;
       if (range && this.pending.history.undoStack.length === 1) {
         const next = this.pending.history.amendComposition(() => {
+          const p = range.anchor;
+          if (cellPreview && p.kind === "cell") {
+            this.adapter.assertEditable(p);
+            const result = this.adapter.call("amendCellComposition", p.sec, p.para, p.control,
+              p.cell, p.cellPara, p.offset, this.text, text);
+            if (result.amended === false) return;
+            if (!result.ok || result.charOffset !== range.focus.offset)
+              throw Error("셀 조합 입력 위치가 달라졌습니다.");
+            return {kind: "caret", focus: range.focus};
+          }
           // Retain the complete already-applied insertion shape, including
           // language slots/effects not represented by the toolbar projection.
           const shape = this.adapter.charProps(range.anchor).charShapeId;

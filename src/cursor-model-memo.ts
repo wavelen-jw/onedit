@@ -13,8 +13,13 @@ const irReaders = new Set([
   "getCellCharPropertiesAt","getCharPropertiesAt","getCellParaPropertiesAt",
   "getCellParaPropertiesByPath","getParaPropertiesAt","getCharShapeRuns",
   "captureCellParagraphPath","resolveCellParagraphPath","validateCellParagraphPath",
+  // Both page-location queries only traverse existing pagination. Looking up
+  // the selected table must not invalidate already rendered page surfaces.
+  "getPageOfPosition",
   "getPageTextLayout","getPageControlLayout","getTableCellBboxes","getTableCellBboxesByPath",
   "getCursorRect","getCursorRectInCell","getLineInfo","getCursorRectOnLine",
+  // Immutable cell-character counts and housekeeping for unreferenced snapshots.
+  "getPlainTableCellTextLength","discardSnapshot",
   "getPageInfo","getCaretStops","getControls","getObjects","getControlTextPositions","getBodyInlineTables",
   "getDpi","getShowParagraphMarks","getShowControlCodes","getShowTransparentBorders","pageCount","renderPageSvg",
   "oneditFocusedCellContextLiteV1","oneditCursorOwnerRowsBatchV1","oneditSelectionTargetContextLiteV1",
@@ -79,9 +84,13 @@ export function installCursorMemoFence(prototype:object, mode:"memo"|"observe"="
     if(name==="constructor")continue;
     const descriptor=Reflect.get(all,name) as PropertyDescriptor;
     if (typeof descriptor.value!=="function" || !descriptor.configurable) return;
-    if(typeof name==="string"&&irReaders.has(name))continue;
+    if(typeof name==="string"&&(irReaders.has(name)||name==="tableNavigationPages"||name==="getPageSizeRuns"))continue;
     const method=descriptor.value as Function;
     plan[name]={...descriptor,value:function(this:HwpDocument,...args:unknown[]){
+      // Releasing the temporary checkpoint only frees its private copy. A
+      // rollback (true) must invalidate every observer before native restore.
+      if (name === "finishCellTypingRollback" && args[0] === false)
+        return Reflect.apply(method, this, args);
       const s=documents.get(this);
       const terminal=name==="free"||name==="__destroy_into_raw"||name===Symbol.dispose;
       // A different JS wrapper for the same private native pointer may not be

@@ -1,3 +1,4 @@
+import {pageRectsFromY} from './active-workset.js';
 import type {Interaction} from './interaction.js';
 import type {Run} from './model.js';
 import type {SelectionBox} from './selection-display.js';
@@ -8,11 +9,10 @@ import type {OwnerProjection} from './owner-projection.js';
 export function visibleSelectionPages(pages:HTMLElement,viewport:HTMLElement):Set<number>|undefined {
   const bounds=viewport.getBoundingClientRect(),win=pages.ownerDocument.defaultView!;
   const top=Math.max(0,bounds.top),bottom=Math.min(win.innerHeight,bounds.bottom);
-  const elements=pages.querySelectorAll<HTMLElement>('[data-page]');
-  if(!elements.length||!Number.isFinite(top+bottom)||bottom<=top)return;
+  if(!pages.children.length||!Number.isFinite(top+bottom)||bottom<=top)return;
   const visible=new Set<number>();
-  for(const element of elements){
-    const page=Number(element.dataset.page),rect=element.getBoundingClientRect();
+  for(const {page:element,rect} of pageRectsFromY(pages,top,bottom)){
+    const page=Number(element.dataset.page);
     if(!Number.isInteger(page)||!Number.isFinite(rect.top+rect.bottom)||rect.height<=0)return;
     if(rect.bottom>top&&rect.top<bottom)visible.add(page);
   }
@@ -34,8 +34,7 @@ export function screenSelection(editor:Interaction,pages:HTMLElement,viewport:HT
   if(editor.selection.kind==='cells'||editor.selection.kind==='table')return{visible:undefined,
     rectangles:editor.presentationRectangles(sourceRuns,owners),runs:sourceRuns};
   const visible=editor.selection.kind==='text'?visibleSelectionPages(pages,viewport):undefined;
-  const surfaces=Array.from(pages.querySelectorAll<HTMLElement>(':scope > .page'))
-    .filter(page=>!visible||visible.has(Number(page.dataset.page)));
+  const surfaces=visible ? [...visible].map(n=>pages.children[n]) : Array.from(pages.children);
   const key=JSON.stringify([editor.selection,visible?[...visible]:null]);
   const current=()=>owners?.isCurrent(editor.adapter)===true&&
     pages.ownerDocument.fonts?.status!=='loading'&&surfaces.every(page=>

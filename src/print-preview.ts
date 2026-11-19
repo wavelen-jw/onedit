@@ -1,3 +1,4 @@
+import { renderHftSvg } from "./hft-paint.js";
 import { withoutViewMarkers } from "./view-markers.js";
 import type { RhwpAdapter } from "./adapter.js";
 export function parsePrintRange(value: string, total: number): number[] {
@@ -32,7 +33,7 @@ export function printSnapshot(a: RhwpAdapter, range: string) {
       width: info.width,
       height: info.height,
       margins:{left:info.marginLeft,right:info.marginRight,top:info.marginTop,bottom:info.marginBottom},
-      svg: a.doc.renderPageSvg(page),
+      svg: renderHftSvg(a,page,a.doc.renderPageSvg(page)),
     };
   }));
   if (a.documentId !== id || a.revision !== revision)

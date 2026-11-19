@@ -2,6 +2,7 @@ import {toCoreCharacter,toCoreParagraph} from './formatting.js';
 /** One supported block vocabulary shared by slash commands and report import. */
 export const reportBlockPresets = {
   subtitle:{text:'□',size:16,font:'함초롬돋움',before:15,color:'#17365D',bold:true,cells:0},
+  subsection:{text:'',size:16,font:'함초롬돋움',before:15,color:'#284E7A',bold:true,cells:1},
   body1:{text:'○',size:15,font:'함초롬바탕',before:10,cells:2},
   body2:{text:'-',size:15,font:'함초롬바탕',before:5,cells:4},
   reference1:{text:'*',size:12,font:'맑은 고딕',before:3,cells:6},

@@ -13,15 +13,6 @@ export function mountProductInfo(doc: Document, panel: HTMLElement, busy: () => 
   if (brand) h.append(brand.cloneNode(true)); else h.textContent = '온편집';
   const intro = doc.createElement('p'); intro.className = 'product-intro';
   intro.textContent = '브라우저에서 쓰는 한글 문서 편집기';
-  const features = doc.createElement('ul'); features.className = 'product-features';
-  for (const text of [
-    'HWPX 문서 불러오기·편집·저장',
-    '글자·문단 서식, 표·그림·글상자 편집',
-    '마크다운 텍스트·파일을 편집 가능한 문서로 가져오기',
-    '실행 취소·다시 실행과 문서 인쇄',
-  ]) { const item = doc.createElement('li'); item.textContent = text; features.append(item); }
-  const compatibility = doc.createElement('p');
-  compatibility.textContent = '한/글과의 HWPX 호환성을 우선합니다. 글꼴과 문서 기능에 따른 조판 차이는 계속 개선하고 있습니다.';
   const buildBox = doc.createElement('div'); buildBox.className = 'product-build';
   const version = doc.createElement('p'); version.textContent = '제품 버전 0.1.0 · 개발 중';
   const tab = doc.createElement('p'), server = doc.createElement('p');
@@ -51,11 +42,23 @@ export function mountProductInfo(doc: Document, panel: HTMLElement, busy: () => 
   productLicense.append(licenseSummary, core, links, licenseText);
   const close = doc.createElement('button'); close.type = 'button'; close.textContent = '닫기';
   close.onclick = () => closeEditorDialog(d);
-  d.append(h, intro, features, compatibility, buildBox, technical, productLicense, close); doc.body.append(d);
+  d.append(h, intro, buildBox, technical, productLicense, close); doc.body.append(d);
+  d.addEventListener('keydown', event => {
+    if (event.key !== 'Tab' || event.defaultPrevented || event.isComposing ||
+        event.altKey || event.ctrlKey || event.metaKey) return;
+    const active = doc.activeElement;
+    if (!event.shiftKey && active === close) {
+      event.preventDefault();
+      technicalSummary.focus();
+    } else if (event.shiftKey && active === technicalSummary) {
+      event.preventDefault();
+      close.focus();
+    }
+  });
   button.onclick = () => {
     if (busy() || doc.querySelector('dialog[open]')) return;
     doc.querySelectorAll('#main-menu details[open]').forEach(e => e.removeAttribute('open'));
-    showUtilityDialog(d, button); close.focus();
+    showUtilityDialog(d, button); technicalSummary.focus();
     server.textContent = '서버 빌드 확인 중…';
     fingerprint.textContent = tabSource ? '이 탭 Source ' + tabSource : '';
     void fetch(new URL('../asset-manifest.json', import.meta.url), {cache: 'no-store'})

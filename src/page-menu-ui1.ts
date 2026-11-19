@@ -31,7 +31,7 @@ export function mountPageMenuUI1(doc: Document, editor: Interaction, actions: {
       if (actions.busy() || button.disabled) { e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (!captured || !sameFormatTarget(captured,editor.capture())) {
         e.preventDefault(); e.stopImmediatePropagation(); root.open = false; closeChildren();
-        actions.feedback("문서·리비전·선택이 변경되었습니다. 쪽 메뉴를 다시 여세요."); actions.focus(); return;
+        actions.feedback("문서 또는 선택이 바뀌었습니다. 쪽 메뉴를 다시 여세요."); actions.focus(); return;
       }
       root.open = false; closeChildren(); // Existing source captures/validates again.
     };
@@ -88,14 +88,14 @@ export function mountPageMenuUI1(doc: Document, editor: Interaction, actions: {
     inherited.title = inheritReason || inheritNote.textContent!;
     paper.disabled=actions.busy()||editor.adapter.scope!=="edit"||editor.adapter.documentLocked;paper.setAttribute("aria-disabled",String(paper.disabled));paper.title=paper.disabled?"현재 작업 또는 문서 보호로 편집 용지를 사용할 수 없습니다.":"현재 구역의 명시한 용지·여백만 변경합니다.";
     const reason = actions.busy() ? "입력·저장 또는 대화상자 작업을 마친 뒤 사용하세요." : pageBreakReason(editor.adapter,editor.selection);
-    const disabled = !!reason, title = reason || "기존 Core로 본문 커서를 나누고 뒤 문단을 다음 쪽에서 시작합니다.";
+    const disabled = !!reason, title = reason || "커서 뒤의 내용을 다음 쪽에서 시작합니다.";
     if (pageBreak.disabled !== disabled) pageBreak.disabled = disabled;
     if (pageBreak.title !== title) pageBreak.title = title;
     if (pageBreak.getAttribute("aria-disabled") !== String(disabled)) pageBreak.setAttribute("aria-disabled",String(disabled));
     if (pageBreak.getAttribute("aria-description") !== title) pageBreak.setAttribute("aria-description",title);
     showReason(breakNotes[0],reason);
     const columnReason = actions.busy() ? "입력·저장 또는 대화상자 작업을 마친 뒤 사용하세요." : columnBreakReason(editor.adapter,editor.selection);
-    const columnDisabled = !!columnReason, columnTitle = columnReason || "기존 Core로 본문 커서를 나누고 뒤 문단을 다음 단에서 시작합니다. 1단에서는 다음 쪽으로 이어집니다.";
+    const columnDisabled = !!columnReason, columnTitle = columnReason || "커서 뒤의 내용을 다음 단에서 시작합니다. 단이 하나면 다음 쪽으로 이어집니다.";
     if (columnBreak.disabled !== columnDisabled) columnBreak.disabled = columnDisabled;
     if (columnBreak.title !== columnTitle) columnBreak.title = columnTitle;
     if (columnBreak.getAttribute("aria-disabled") !== String(columnDisabled)) columnBreak.setAttribute("aria-disabled",String(columnDisabled));

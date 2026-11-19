@@ -65,14 +65,43 @@ export function paintTableGuides(editor:Interaction,pages:HTMLElement){
         if(owner.kind!=="cell")throw Error("표 보조선 소유권을 확인할 수 없습니다.");
         const scoped=mode==="selected"?editor.clickedTableDisplayGrid(owner,"guides"):undefined;
         const click=scoped&&editor.clickedTableDisplay();
-        const boxes=scoped??a.cells(owner),props=new Map<number,Record<string,{type:number}>>();
-        for(const box of boxes)if(!props.has(box.cellIdx))props.set(box.cellIdx,click&&editor.clickedTableDisplay()===click?
-          a.readClickedTableGuideBorders(click.position,box.cellIdx):nested(owner)?
-          a.call("getCellPropertiesByPath",owner.sec,owner.para,a.path(owner),box.cellIdx):
-          a.call("getCellProperties",owner.sec,owner.para,owner.control,box.cellIdx));
+        type Borders=Record<string,{type:number}>;
+        const props=new Map<number,Borders>();
+        const borders=(cell:number):Borders=>{
+          const previous=props.get(cell);
+          if(previous)return previous;
+          const value=click&&editor.clickedTableDisplay()===click?
+            a.readClickedTableGuideBorders(click.position,cell):nested(owner)?
+            a.call("getCellPropertiesByPath",owner.sec,owner.para,a.path(owner),cell):
+            a.call("getCellProperties",owner.sec,owner.para,owner.control,cell);
+          props.set(cell,value);
+          return value;
+        };
+        // A fully bordered table produces no guide lines on any page. Check
+        // small root tables before asking Core to locate their page fragments.
+        if(mode==="selected"&&!scoped&&!nested(owner)){
+          try{
+            const {cellCount}=a.call("getTableDimensions",owner.sec,owner.para,owner.control);
+            if(Number.isSafeInteger(cellCount)&&cellCount>0&&cellCount<=256){
+              let cell=0;
+              for(;cell<cellCount;cell++){
+                const sides=borders(cell);
+                if(!["borderLeft","borderRight","borderTop","borderBottom"].every(key=>
+                  Number.isInteger(sides[key]?.type)&&sides[key].type>0))break;
+              }
+              if(cell===cellCount)return [];
+            }
+          }catch{/* Use the ordinary geometry and property reads below. */}
+        }
+        // The existing owner-page lookup starts from the host paragraph's
+        // first page and keeps the ordinary scan when the hint cannot be used.
+        // This retains every fragment of a table that spans several pages.
+        const boxes=scoped??a.cells(owner,"owner-page");
+        for(const box of boxes)borders(box.cellIdx);
         return[{boxes,props}];
       }catch(error){warnings.push(String(error));return[];}
     });
+    if(!tables.length&&!warnings.length)return;
     const layouts:{page:HTMLElement;edges:Omit<Edge,"visible">[]}[]=[];
     for(const page of pages.querySelectorAll<HTMLElement>(":scope > .page")){
       if(page.hasAttribute("data-render-pending")||!page.firstElementChild?.matches("svg,canvas"))continue;

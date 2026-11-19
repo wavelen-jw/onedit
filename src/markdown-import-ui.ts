@@ -19,7 +19,7 @@ export function installMarkdownImport(host:NextHostAdapter,files:FileLifecycle){
     const current=()=>sameFormatTarget(captured,host.editor.capture())&&host.adapter.documentId===context.documentId&&host.adapter.revision===context.expectedRevision;
     const dialog=doc.createElement('dialog');dialog.id='markdown-import-dialog';dialog.className='markdown-import';dialog.setAttribute('aria-label','마크다운 가져오기');
     const form=doc.createElement('form'),title=doc.createElement('h2');title.textContent='마크다운 가져오기';
-    const label=doc.createElement('label'),source=doc.createElement('textarea');label.textContent='마크다운 내용';source.id='markdown-source';source.name='markdown';source.rows=10;source.placeholder='여기에 마크다운을 붙여넣으세요.';label.className='markdown-source-label';label.htmlFor=source.id;
+    const label=doc.createElement('label'),source=doc.createElement('textarea');label.textContent='마크다운 내용';source.id='markdown-source';source.name='markdown';source.rows=7;source.placeholder='여기에 마크다운을 붙여넣으세요.';label.className='markdown-source-label';label.htmlFor=source.id;
     const picker=doc.createElement('input');picker.id='markdown-file';picker.type='file';picker.accept='.md,.markdown,text/markdown';picker.hidden=true;
     const status=doc.createElement('p');status.id='markdown-status';status.setAttribute('role','status');status.hidden=true;
     const footer=doc.createElement('footer');footer.className='markdown-import-footer';
@@ -49,7 +49,7 @@ export function installMarkdownImport(host:NextHostAdapter,files:FileLifecycle){
         const presentation=new Set(['HEADING_PRESENTATION','LITERAL_LIST_MARKERS','REPORT_PRESENTATION','RULE_LITERAL']);
         if(plan.diagnostics.some(d=>!presentation.has(d.code))){
           choice={source:text,plan};confirm.hidden=false;
-          message('그림·링크·HTML 등 지원하지 않는 요소는 실행하거나 내려받지 않고 원문 표기로 보존합니다. 확인 후 가져오세요.');confirm.focus();return;
+          message('지원하지 않는 그림·링크·HTML은 마크다운 원문으로 남습니다.');confirm.focus();return;
         }
         void create(text,plan);
       }catch(error){message(String(error).replace(/^Error: /,''));}

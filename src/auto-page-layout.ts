@@ -3,7 +3,7 @@ type Anchor={page:number;x:number;y:number;screenX:number;screenY:number};
 /** Layout only: actual page boxes and editor width decide each wrapping row. */
 export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
   let signature='',remembered:Anchor|undefined;
-  const pageStyles=new WeakMap<HTMLElement,string>();
+  const pageStyles=new WeakMap<HTMLElement,{inline:string|null;pending:boolean;layout:string}>();
   // Pending fixed-size ink changes visibility, not page packing. Compare inline
   // layout inputs before asking the browser for computed style/geometry.
   // Keep every other property (including unknown future properties) so their
@@ -13,6 +13,15 @@ export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
       page.dataset.renderPending&&page.style.contentVisibility==='hidden'&&
       /^\d+(?:\.\d+)?px$/.test(page.style.width)&&/^\d+(?:\.\d+)?px$/.test(page.style.height)))
     .map(name=>[name,page.style.getPropertyValue(name),page.style.getPropertyPriority(name)]));
+  function updatePageStyle(page:HTMLElement) {
+    const inline = page.getAttribute('style');
+    const pending = Boolean(page.dataset.renderPending);
+    const previous = pageStyles.get(page);
+    if (previous && previous.inline === inline && previous.pending === pending) return false;
+    const layout = layoutStyle(page);
+    pageStyles.set(page, {inline, pending, layout});
+    return previous?.layout !== layout;
+  }
   const list=()=>Array.from(pages.querySelectorAll<HTMLElement>(':scope>.page'));
   const scale=()=>Number.parseFloat(pages.style.getPropertyValue('zoom'))||1;
   const anchor=():Anchor|undefined=>{
@@ -25,7 +34,7 @@ export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
     return{page:Number(page.dataset.page),x:(x-r.left)/s,y:(y-r.top)/s,screenX:x-v.left,screenY:y-v.top};
   };
   const refresh=(keep?:Anchor)=>{
-    const all=list();for(const page of all)pageStyles.set(page,layoutStyle(page));
+    const all=list();for(const page of all)updatePageStyle(page);
     const s=scale(),vp=getComputedStyle(viewport),box=getComputedStyle(pages);
     const n=(v:string)=>parseFloat(v)||0, widths=all.map(p=>n(p.style.width)),heights=all.map(p=>n(p.style.height));
     const available=(viewport.clientWidth-n(vp.paddingLeft)-n(vp.paddingRight))/s-n(box.paddingLeft)-n(box.paddingRight);
@@ -44,7 +53,7 @@ export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
   // Page/SVG production is owned by render. Geometry is laid out before the
   // next viewport refresh; highlight/caret mutations are not layout inputs.
   const observer=new MutationObserver(records=>{if(records.some(r=>r.target===pages||r.type==='attributes'&&
-    r.target instanceof HTMLElement&&r.target.matches('.page')&&pageStyles.get(r.target)!==layoutStyle(r.target)))refresh();});
+    r.target instanceof HTMLElement&&r.target.matches('.page')&&updatePageStyle(r.target)))refresh();});
   observer.observe(pages,{childList:true,subtree:true,attributes:true,attributeFilter:['style']});
   return{anchor,refresh,dispose(){observer.disconnect();viewport.removeEventListener('scroll',note);}};
 }

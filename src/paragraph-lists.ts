@@ -1,5 +1,4 @@
 import { validateNumberDefinition } from "./numbering-definitions.js";
-import { numberRestartAvailable, restartScope } from "./numbering-restart.js";
 import type { Props, Command } from "./model.js";
 import type { FormatState } from "./formatting.js";
 
@@ -87,11 +86,8 @@ export function mountParagraphLists(root: HTMLElement, state: FormatState, catal
   mode.value = initialMode;
   const note = document.createElement("small");
   note.textContent = catalog
-    ? "변경하지 않은 혼합 값은 유지합니다. 기존 정의와 개요 번호를 사용합니다. 새 7수준 번호·개요 정의는 서식 메뉴의 번호 관리에서 만듭니다. 기존 번호 정의의 직접 편집·삭제는 미지원입니다. " +
-      (numberRestartAvailable()
-        ? "문단별 새 시작·이어가기는 번호 관리에서 지원 범위를 확인하세요. " + restartScope
-        : "문단별 새 시작·이어가기는 설치 Core의 재조회·저장 보존 확인을 통과하지 못해 보류합니다. 기존 값은 유지합니다.")
-    : "NOT_SUPPORTED: 설치 Core의 문단 번호·글머리표 목록 조회가 없어 적용할 수 없습니다. 기존 값은 보존됩니다.";
+    ? "새 번호 정의는 번호 관리에서 만들 수 있습니다."
+    : "이 문단의 번호 정보를 읽을 수 없습니다. 기존 번호는 유지됩니다.";
   const captions = [["종류", mode], ["번호·글머리표 모양", definition], ["번호 수준", level]] as const;
   for (const [text, select] of captions) {
     const label = document.createElement("label"); label.append(document.createTextNode(text), select); group.append(label);

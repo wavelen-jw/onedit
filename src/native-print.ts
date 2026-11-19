@@ -43,7 +43,7 @@ export function mountNativePrint(doc: Document, adapter: RhwpAdapter, done: () =
         const win=prepared.frame.contentWindow!;
         const after=()=>{if(surface===prepared)release();};
         win.addEventListener('afterprint',after);unbind=()=>win.removeEventListener('afterprint',after);
-        cancel.hidden=true;label.textContent='인쇄 창에서 프린터·쪽 범위·매수·PDF 저장을 선택하세요.';
+        cancel.hidden=true;label.textContent='인쇄 창이 열렸습니다.';
         prepared.print();
         // Some browsers return before afterprint; retain the output until that
         // event (or document replacement/disposal), never dispose on a timer.

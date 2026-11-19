@@ -1,5 +1,5 @@
 import { approvedEmbedChrome } from "./approved-embed-chrome.js";
-import { closeEditorDialog, keepDialogFieldFocus, showDocumentEditingDialog, showEditorDialog } from "./editor-popup-focus.js";
+import { closeEditorDialog, keepDialogFieldFocus, showDocumentEditingDialog, showEditorDialog, wrapDialogTab } from "./editor-popup-focus.js";
 import { subscribeWhileOpen } from "./ui-demand-lifetime.js";
 import {activeWorkset} from "./active-workset.js";
 import { withQaReadPhase } from "./cursor-model-memo.js";
@@ -93,8 +93,6 @@ import type { Interaction } from "./interaction.js";
 import type { Command } from "./model.js";
 import { nested } from "./model.js";
 import {
-  keepWithNextHold,
-  lineProtectionBodyUnsupported,
   type FormatKind,
 } from "./formatting.js";
 import type { ParagraphAdjustment } from "./paragraph-adjustments.js";
@@ -114,15 +112,16 @@ import {
   type CatalogCommand,
 } from "./integration/a-format-menu.js";
 
-// Resolve the advertised authoring key to the same existing catalog command.
+const legacyTableControlSelector = '[data-resize],[data-table="row-delete"]';
+
 /** One display-only demand boundary. No selection/protection data is read or
  * reused here. Unknown, rehosted, classic or visible toolbars stay eager. */
-function legacyTableToolbarDemand(doc:Document,current:()=>boolean) {
+function legacyTableToolbarDemand(doc:Document,current:()=>boolean, mountedControls?: readonly Element[]) {
   if(!current())return "stale";
   const root=doc.getElementById("table-tools");
   if(!doc.body.classList.contains("workspace-modern")||!(root instanceof HTMLDetailsElement)||
     root.open||root.contains(doc.activeElement))return "active-or-unknown";
-  const controls=Array.from(doc.querySelectorAll('[data-resize],[data-table="row-delete"]'));
+  const controls = mountedControls ?? Array.from(doc.querySelectorAll(legacyTableControlSelector));
   if(!controls.length||controls.some(control=>!root.contains(control)))return "rehosted-or-missing";
   if(doc.defaultView?.getComputedStyle(root).display!=="none")return "visible-or-unknown";
   return current()?"dormant":"stale";
@@ -154,17 +153,17 @@ export function annotateParagraphFlowSupport(
   container: HTMLElement,
   scope: "body" | "cell" = "body",
 ) {
+  const restriction = "새로 켤 수 없습니다. 기존 설정은 끌 수 있습니다.";
   const keep = container.querySelector<HTMLSelectElement>(
     'select[name="keepWithNext"]',
   );
   if (keep) {
     const activation = [...keep.options].find((o) => o.value === "true");
     if (activation) activation.disabled = true;
-    keep.title = keepWithNextHold;
+    keep.title = restriction;
     const hint = keep.closest("label")?.querySelector("small");
     if (hint)
-      hint.textContent +=
-        " · " + keepWithNextHold + " · 기존 값 유지/명시적 해제 가능";
+      hint.textContent += " · " + restriction;
   }
   for (const name of ["keepLines", "widowOrphan"] as const) {
     const control = container.querySelector<HTMLSelectElement>(
@@ -173,15 +172,13 @@ export function annotateParagraphFlowSupport(
     if (!control) continue;
     const activation = [...control.options].find((o) => o.value === "true");
     if (activation) activation.disabled = scope === "body";
-    const reason =
-      scope === "body"
-        ? lineProtectionBodyUnsupported(name)
-        : "셀 내부의 제한적 적용 경로는 유지합니다. 실제 쪽 경계 배치는 미검증입니다.";
+    const reason = scope === "body"
+      ? "본문에서는 " + restriction
+      : "셀 안의 문단에 적용합니다.";
     control.title = reason;
     const hint = control.closest("label")?.querySelector("small");
     if (hint)
-      hint.textContent +=
-        " · " + reason + " · XML 저장 지원 / 실제 줄 분할 배치 NOT_RUN";
+      hint.textContent += " · " + reason;
   }
 }
 const bindings = new WeakMap<Document, () => void>();
@@ -211,7 +208,7 @@ export function syncWritingFormatDraft(
   guard.close();
   doc.getElementById("fields")!.replaceChildren();
   doc.getElementById("format-note")!.textContent =
-    "대상 문서·리비전·선택이 변경되어 이전 초안을 취소했습니다. 취소 후 다시 여세요.";
+    "문서나 선택이 바뀌었습니다. 닫고 다시 여세요.";
   doc
     .getElementById("format-form")!
     .querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = true;
@@ -259,11 +256,12 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     formatTarget = undefined;
   };
   format.addEventListener("close", closeFormatGuard);
-  const basicParagraphShortcut = (event: KeyboardEvent) => {
+  const formatKeyDown = (event: KeyboardEvent) => {
+    wrapDialogTab(event, format);
     if (format.dataset.formatKind !== "paragraph-basic") return;
     focusParagraphBeforeShortcut(event, format, form.querySelector<HTMLInputElement>('input[name="spacingBefore"]'));
   };
-  format.addEventListener("keydown", basicParagraphShortcut);
+  format.addEventListener("keydown", formatKeyDown);
   let composing = false;
   const focus = () => input.focus({ preventScroll: true });
   // This is a live tag collection, not a cached modal state. Repeated menu
@@ -341,6 +339,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   const shortcutUI=async(event:Event)=>{
     if(unavailable())return;try{const action=(event as CustomEvent<string>).detail;
     if(action==='character-map'){remainingShortcuts?.show('character-map');return;}
+    if (action === 'table-object-pagination') { tableObjectDraft.show('pagination'); return; }
     if(action==='table-transpose'||action==='table-object-line'||action==='table-object-background'){tableObjectDraft.show(action==='table-transpose'?'transpose':action==='table-object-line'?'line':'background');return;}
     if(action==='page-goto'){const page=doc.querySelector<HTMLInputElement>('[name=statusPage]');if(!page||page.disabled)throw Error('현재 쪽 이동 입력을 사용할 수 없습니다.');page.focus();page.select();return;}
     if(action==='paper'){paper.show();return;}
@@ -543,13 +542,11 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       beforeShow?.();
       resetHancomParagraphDialog(doc.getElementById("fields")!);
       resetHancomCellDialog(doc.getElementById("fields")!);
-      format.querySelector<HTMLButtonElement>('button[type="submit"]')!.textContent = kind === "cell" ? "설정" : "확인";
+      format.querySelector<HTMLButtonElement>('button[type="submit"]')!.textContent = "적용";
       format.dataset.formatKind = kind === "paragraph" && nested(capture.selection.focus) ? "paragraph-basic" : kind;
       doc.getElementById("format-title")!.textContent =
         kind === "char" ? "글자 모양" : kind === "cell" ? "표/셀 속성" : "문단 모양";
-      doc.getElementById("format-note")!.textContent = kind === "cell"
-        ? cellBlock ? "선택한 범위의 바깥선과 단색 배경을 바꿉니다." : "선택한 셀에 바꾼 항목만 적용합니다."
-        : "변경한 항목만 선택 영역에 적용합니다. 변경하지 않은 항목은 그대로 유지됩니다.";
+      doc.getElementById("format-note")!.textContent = "";
       // D2 supported nested paragraph delta/path contract is never replaced by A's older rejection.
       const read =
         kind === "paragraph" && nested(capture.selection.focus)
@@ -826,7 +823,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     (item,target) => {
       if (unavailable()) return;
       if(item.id==='range-size'){tableRangeSize.show(target);return;}
-      if(item.id==='table-transpose'||item.id==='table-object-line'||item.id==='table-object-background'){void shortcutUI(new CustomEvent('rhwp:shortcut-ui',{detail:item.id}));return;}
+      if(item.id==='table-transpose'||item.id==='table-object-line'||item.id==='table-object-background'||item.id==='table-object-pagination'){void shortcutUI(new CustomEvent('rhwp:shortcut-ui',{detail:item.id}));return;}
       if(item.id.startsWith('local-')){doc.dispatchEvent(new CustomEvent('rhwp:shortcut-ui',{detail:item.id}));return;}
       if(item.id==='equal-width'||item.id==='equal-height'){void shortcutUI(new CustomEvent('rhwp:shortcut-ui',{detail:item.id}));return;}
       if(item.id==='split-dialog'||item.id==='add-dialog'||item.id==='delete-dialog'){tableKeyDraft.show(item.id==='split-dialog'?'cell-split':item.id==='add-dialog'?'table-add':'table-delete');return;}
@@ -890,6 +887,12 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     revision: number; generation: number } | undefined;
   const displayBatch = new CellDisplayBatch();
   const demandDisposers:(()=>void)[]=[];
+  // The standalone toolbar binds these original buttons once. Workspace layout
+  // moves the same nodes. Check their live containment, focus and visibility
+  // on publication; a detached or rehosted control takes the eager path.
+  const legacyTableControls = activeWorkset(doc)
+    ? Array.from(doc.querySelectorAll(legacyTableControlSelector))
+    : undefined;
   let legacyTableToolsDirty=false;
   const sync = (event?: Event, backgroundCellSelection = false, settleCellPublication = false) => publishEditorDisplay(editor,()=>{
     displayBatch.widenIfPending();
@@ -1003,7 +1006,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     // Modern UI's dormant legacy toolbar has no consumer of these reasons.
     // Its actual Table menu/context commands above retain their own live reads.
     const s6=committedDormantTableTools(event);
-    const dormant=(s6||activeWorkset(doc))&&legacyTableToolbarDemand(doc,s6||(()=>activeWorkset(doc)))==="dormant";
+    const dormant=(s6||activeWorkset(doc))&&legacyTableToolbarDemand(doc,s6||(()=>activeWorkset(doc)),legacyTableControls)==="dormant";
     if(dormant)legacyTableToolsDirty=true;
     if (!deferClosedTable && !dormant) {
     projectLegacyTableTools(width?.("toolbar"));
@@ -1521,7 +1524,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     formatModalObserver.disconnect();
     guard.close();
     format.removeEventListener("close", closeFormatGuard);
-    format.removeEventListener("keydown", basicParagraphShortcut);
+    format.removeEventListener("keydown", formatKeyDown);
     disposeFormatConfirmFocus();
     disposeFormatCancelFocus();
     doc.removeEventListener("rhwp:fonts-updated", fontsChanged);

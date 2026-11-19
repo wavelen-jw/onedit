@@ -6,6 +6,9 @@ import { initializeBlankDocument } from './blank-document-defaults.js';
 import { assertSafeHwpxEntryNames } from "./hwpx-open-boundary.js";
 import { isCheckedExternalSibling, siblingDocument } from "./core-runtime.js";
 import { RhwpAdapter, UnsupportedTableOwner } from "./adapter.js";
+import { finishResponsiveWork } from "./responsive-work.js";
+import { exportCheckedLocalHwpx } from "./adapter-save.js";
+import { projectSemanticParts } from "./adapter-semantic.js";
 import { Interaction } from "./interaction.js";
 import { start } from "./model.js";
 import { connectFileMenu } from "./file-menu-adapter.js";
@@ -46,7 +49,7 @@ type UI = {
   prepareDisplay?: (candidate: RhwpAdapter, localOpen: boolean) => void;
   loadOpenFonts?: (candidate: RhwpAdapter) => Promise<void>;
   tableDragLayout: (page:HTMLElement) => string | undefined;
-  clickTableScope?: (page:HTMLElement,run:()=>void)=>void;
+  clickTableScope?: (page:HTMLElement,at:Pick<PointerEvent,"clientX"|"clientY">,run:()=>void)=>void;
   paintedCellFormats?: () => Readonly<Partial<Record<FormatKind, FormatState>>> | undefined;
   change: (replaced: boolean, changedCellClose?: () => void, committedCellApply?:boolean, dormantTableTools?:()=>boolean) => void;
   error: (error: unknown) => void;
@@ -101,6 +104,8 @@ export class FileLifecycle {
     revision: number;
     action: () => boolean | Promise<boolean>;
   } | null = null;
+  private localOpenPaint = false;
+  get publishingLocalOpen() { return this.localOpenPaint; }
   notice = "";
   constructor(
     readonly adapter: RhwpAdapter,
@@ -170,6 +175,7 @@ export class FileLifecycle {
     message: string,
     action: () => boolean | Promise<boolean>,
     beforeDecision?: () => Promise<void>,
+    beforeDeferredSave?: () => void,
   ) {
     return this.run(async () => {
       if (!this.ui.standalone || this.continuation) return false;
@@ -197,6 +203,7 @@ export class FileLifecycle {
             return documentId === this.adapter.documentId && revision === this.adapter.revision && !this.dirty
               ? action() : false;
           }
+          beforeDeferredSave?.();
           this.continuation = {
             requestId: this.pending.requestId,
             documentId,
@@ -213,36 +220,49 @@ export class FileLifecycle {
       return action();
     });
   }
-  private replacementCandidate(bytes: Uint8Array | undefined, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"], localOpen = false, probe = false) {
+  private classifyReplacement(next: RhwpAdapter) {
+    next.call("getDocumentInfo");
+    next.documentLocked = next.call<any[]>("getControls").some(c => c.props?.Lock);
+    next.scope = next.documentLocked ? "readonly" : "edit";
+  }
+  private enterViewerOnly(next: RhwpAdapter, error: unknown) {
+    if (!(error instanceof UnsupportedTableOwner)) throw error;
+    next.viewerOnlyReason = error.message;
+    next.scope = "readonly";
+  }
+  private validateReplacement(next: RhwpAdapter, admit?: (next: RhwpAdapter)=>void) {
+    this.classifyReplacement(next);
+    try {
+      next.semantic();
+    } catch (error) {
+      this.enterViewerOnly(next, error);
+      next.semantic();
+    }
+    admit?.(next);
+    next.rect(start());
+  }
+  private async validateLocalReplacement(next: RhwpAdapter) {
+    this.classifyReplacement(next);
+    try {
+      await finishResponsiveWork(projectSemanticParts.call(next));
+    } catch (error) {
+      this.enterViewerOnly(next, error);
+      await finishResponsiveWork(projectSemanticParts.call(next));
+    }
+    next.rect(start());
+  }
+  private replacementCandidate(bytes: Uint8Array | undefined, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"], localOpen = false) {
     const doc = prepared ?? siblingDocument(this.adapter.doc, bytes);
     try {
       const next = new RhwpAdapter(doc);
       if (bytes === undefined && !prepared) initializeBlankDocument(next);
-      // Set the current display environment before preflight builds page trees.
-      // The candidate is still isolated; failure frees it and preserves the old document.
-      if (!probe) this.ui.prepareDisplay?.(next, localOpen);
-      // Preflight the projections used by the UI before retiring the old document.
-      next.call("getDocumentInfo");
-      next.documentLocked = next
-        .call<any[]>("getControls")
-        .some((c) => c.props?.Lock);
-      next.scope = next.documentLocked ? "readonly" : "edit";
-      try {
-        next.semantic();
-      } catch (error) {
-        if (!(error instanceof UnsupportedTableOwner)) throw error;
-        // Existing Core can paint this document, but the editor's cell path
-        // cannot address a table below a non-table owner. Keep it viewable with
-        // an explicit restriction; do not skip preservation checks for editing.
-        next.viewerOnlyReason = error.message;
-        next.scope = "readonly";
-        next.semantic();
-      }
-      admit?.(next);
-      next.rect(start());
-      for (let page = 0; !probe && page < next.pageCount; page++) {
+      this.ui.prepareDisplay?.(next, localOpen);
+      this.validateReplacement(next, admit);
+      // Ordinary local opens check page dimensions and render the visible pages
+      // at adoption, while the original document can still be restored.
+      if (!localOpen) for (let page = 0; page < next.pageCount; page++) {
         next.call("getPageInfo", page);
-        next.doc.renderPageSvg(page);
+        doc.renderPageSvg(page);
       }
       return next;
     } catch (error) {
@@ -250,15 +270,19 @@ export class FileLifecycle {
       throw error;
     }
   }
-  private replace(bytes: Uint8Array | undefined, name: string, unsaved = false, prepareCommands?:()=>void, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"], localOpen = false) {
-    const next = this.replacementCandidate(bytes, admit, prepared, localOpen);
+  private replace(bytes: Uint8Array | undefined, name: string, unsaved = false, prepareCommands?:()=>void, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"]) {
+    this.adoptCandidate(this.replacementCandidate(bytes, admit, prepared), name, unsaved, prepareCommands);
+  }
+  private adoptCandidate(next: RhwpAdapter, name: string, unsaved = false, prepareCommands?:()=>void, localOpen = false) {
     let adopted = false;
     try {
       const state = this.captureReplacementState();
       const { old, files, history } = state;
       try {
+        this.localOpenPaint=localOpen;
         this.adoptReplacement(next, name, history, unsaved, prepareCommands);
       } catch (error) {
+        this.localOpenPaint=false;
         this.restoreReplacementState(state);
         throw error;
       }
@@ -273,6 +297,7 @@ export class FileLifecycle {
         this.reportError(error);
       }
     } finally {
+      this.localOpenPaint=false;
       if (!adopted) next.doc.free();
     }
   }
@@ -379,16 +404,21 @@ export class FileLifecycle {
   }
   open(file: Pick<File, "name" | "size" | "arrayBuffer">) {
     let bytes: Uint8Array;
+    let candidate: RhwpAdapter | undefined;
+    const release = () => {
+      const next = candidate;
+      candidate = undefined;
+      next?.doc.free();
+    };
     return this.transition(
       "현재 변경을 닫고 선택한 문서를 여시겠습니까?",
       () => {
-        this.replace(bytes, file.name, false, undefined, undefined, undefined, true);
+        const next = candidate ?? this.replacementCandidate(bytes, undefined, undefined, true);
+        candidate = undefined; // adoptCandidate now owns the handle, including rollback.
+        this.adoptCandidate(next, file.name, false, undefined, true);
         return true;
       },
       async () => {
-        // Reject malformed input BEFORE offering to save/discard the current
-        // dirty document. An invalid drop must not mark the original clean.
-        // Keep bytes, not an extra live Core, across a deferred download save.
         const { documentId, revision } = this.adapter;
         if (file.size > 30 * 1024 * 1024)
           throw Error("PoC 파일 크기 제한은 30 MB입니다.");
@@ -398,16 +428,22 @@ export class FileLifecycle {
         if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
           throw Error("파일을 읽는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
         assertSafeHwpxEntryNames(bytes);
-        const candidate = this.replacementCandidate(bytes, undefined, undefined, false, true);
-        try {
-          await this.ui.loadOpenFonts?.(candidate);
-          if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
-            throw Error("글꼴을 준비하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
-        } finally {
-          candidate.doc.free();
-        }
+        const doc = siblingDocument(this.adapter.doc, bytes);
+        try { candidate = new RhwpAdapter(doc); }
+        catch (error) { doc.free(); throw error; }
+        await this.ui.loadOpenFonts?.(candidate);
+        if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
+          throw Error("글꼴을 준비하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
+        this.ui.prepareDisplay?.(candidate, true);
+        // Reject malformed structure before asking about the old document.
+        await this.validateLocalReplacement(candidate);
+        if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
+          throw Error("문서를 검사하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
       },
-    );
+      // A deferred download confirmation may stay pending indefinitely.
+      // Keep only the imported bytes after handing off to that continuation.
+      release,
+    ).finally(release);
   }
   /** Local generated-file adoption. Reuses the atomic open/History rollback path;
    * never changes the old file's target; dirty replacement uses the same explicit
@@ -512,7 +548,9 @@ export class FileLifecycle {
       if (!current())
         throw Error("저장 창이 열린 동안 문서 또는 저장 요청이 변경되었습니다. 다시 저장하세요.");
       phase = "export";
-      const { bytes, documentId, revision } = this.adapter.exportChecked();
+      const { bytes, documentId, revision } = this.ui.standalone
+        ? await exportCheckedLocalHwpx(this.adapter, current)
+        : this.adapter.exportChecked();
       Object.assign(request, { filename: name, documentId, revision });
       // Keep a private copy of the checked export, independent of the transport.
       this.exported = this.ui.standalone ? new Uint8Array(bytes) : null;

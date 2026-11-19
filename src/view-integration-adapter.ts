@@ -1,9 +1,11 @@
+import {firstPageBelow} from './active-workset.js';
 import { StalePointerTarget } from "./interaction.js";
 import { editorChanged } from "./editor-state-adapter.js";
 import { tableGuideState,setTableGuideMode,type TableGuideMode } from "./table-guides.js";
 import { ViewSequence } from "./view-sequence.js";
 import { TouchIntent } from './touch-intent.js';
-import {mountTouchSelectionHandles,touchTextRange} from './touch-selection.js';
+import {mountTouchSelectionHandles} from './touch-selection.js';
+import {pointerTextRange} from './pointer-text-selection.js';
 import {copy} from './model.js';
 import { setViewMarker, toggleViewMarker, viewMarkerState } from "./view-markers.js";
 import { isPageChrome } from "./page-layers.js";
@@ -88,7 +90,7 @@ export function connectViewIntegration(
     const prepared = f.editor.presentationCursorRect();
     // Only the current synchronous, fully validated F5 presentation can
     // supply a rect. Scroll/modal and unproved paths keep fresh capture.
-    if (!prepared && !f.editor.clickedTableDisplay()) f.editor.capture();
+    if (!prepared && !f.editor.clickedTableDisplay()) f.editor.capture(true);
     const rect = prepared ?? f.editor.cursorRect();
     const page = pages.querySelector<HTMLElement>(
       `.page[data-page="${rect.pageIndex}"]`,
@@ -192,17 +194,16 @@ export function connectViewIntegration(
     gestureZoom = undefined;
   }, {passive: false});
   const publishLocation = (location = readLocation) => connection.files.adapter.withUpdateReads(() => {
-    const list = Array.from(pages.getElementsByClassName("page")) as HTMLElement[];
     const top = viewport.getBoundingClientRect().top + viewport.clientTop + 24;
     // Keep the original first-visible/last-page rule. The selected page's
     // box also supplies the scale in this synchronous, read-only phase.
-    let visibleRect: DOMRect | undefined;
-    const visible = list.find(p => (visibleRect = p.getBoundingClientRect()).bottom > top) ?? list.at(-1);
+    const first = firstPageBelow(pages, top);
+    const visible = first?.page, visibleRect = first?.rect;
     const selected = location()?.selectionPage ?? null;
     const state = JSON.stringify({
       documentId: connection.files.adapter.documentId,
       pageCount: connection.files.adapter.pageCount,
-      renderedPages: list.length,
+      renderedPages: pages.children.length,
       visiblePage: visible ? Number(visible.dataset.page) : null,
       selectionPage: selected,
       scale: visible ? pageScale(visible, visibleRect) : null,
@@ -233,7 +234,14 @@ export function connectViewIntegration(
   new MutationObserver(refresh).observe(document.body, {
     subtree: true, attributes: true, attributeFilter: ["open"],
   });
-  document.addEventListener("rhwp:reveal-selection", () => { inputPosition(true); publish(); });
+  // Scroll and the IME anchor use viewport geometry, while the status needs
+  // the selection page. One native location suffices within this callback.
+  const revealAndPublish = () => {
+    const current = readLocation();
+    inputPosition(true, () => current);
+    publishLocation(() => current);
+  };
+  document.addEventListener("rhwp:reveal-selection", revealAndPublish);
   viewport.addEventListener("scroll", publish, { passive: true });
   pageObserver = new MutationObserver((records) => {
     // Caret/highlight and owner-registered absolute page chrome do not change
@@ -267,7 +275,7 @@ export function connectViewIntegration(
     };
     try {
       try {
-        if(scopedClick&&connection.files.ui.clickTableScope)connection.files.ui.clickTableScope(target,()=>select(target));
+        if(scopedClick&&connection.files.ui.clickTableScope)connection.files.ui.clickTableScope(target,e,()=>select(target));
         else select(target);
       } catch(error) {
         if(!(error instanceof StalePointerTarget))throw error;
@@ -357,13 +365,15 @@ export function connectViewIntegration(
   window.addEventListener('pointerdown',e=>{
     lastPagePointerWasTouch=e.pointerType==='touch'&&e.target instanceof Node&&pages.contains(e.target);
   },true);
-  window.addEventListener('dblclick',e=>{
+  const blockTouchCompatibilityClick = (e: MouseEvent) => {
     // Compatibility mouse events cannot re-enter body/table double-click
     // editing after a touch zoom. A real mouse pointerdown clears this latch.
     if(lastPagePointerWasTouch&&e.target instanceof Node&&pages.contains(e.target)){
       e.preventDefault();e.stopImmediatePropagation();
     }
-  },true);
+  };
+  window.addEventListener('dblclick', blockTouchCompatibilityClick, true);
+  window.addEventListener('click', e => { if (e.detail === 3) blockTouchCompatibilityClick(e); }, true);
   const handles = mountTouchSelectionHandles(document,connection.files.editor,viewport,pages,{
     active:()=>touch.selecting,blocked,changed:()=>connection.files.ui.change(false),error:e=>connection.files.ui.error(e),
   });
@@ -392,7 +402,7 @@ export function connectViewIntegration(
       try {
         const page=document.elementFromPoint(x,y)?.closest<HTMLElement>('.page');
         if(!page||!pages.contains(page)||page.hasAttribute('data-render-pending')){touch.rejectHold();return;}
-        const at=pagePoint(page,x,y),range=touchTextRange(connection.files.editor,Number(page.dataset.page),at.x,at.y);
+        const at=pagePoint(page,x,y),range=pointerTextRange(connection.files.adapter,Number(page.dataset.page),at.x,at.y,'word');
         if(!range){touch.rejectHold();return;}
         const f=connection.files;f.editor.point(range[0]);f.editor.point(range[1],true);f.editor.block=false;
         touchMode();f.ui.change(false);inputPosition();handles.refresh();
@@ -588,20 +598,14 @@ export function connectViewIntegration(
       const nativeTextKey = (selection.kind === "caret" || selection.kind === "text") &&
         e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey &&
         !e.isComposing && e.keyCode !== 229 && !e.getModifierState("AltGraph");
-      if (target === input && !nativeTextKey && !blocked())
-        queueMicrotask(() => {
-          inputPosition(true);
-          publish();
-        });
+      // Modifier-only keydown must not reveal the anchor before Shift-click.
+      const modifierKey = ["Shift", "Control", "Alt", "Meta", "AltGraph"].includes(e.key);
+      if (target === input && !nativeTextKey && !modifierKey && !blocked())
+        queueMicrotask(revealAndPublish);
     },
     true,
   );
-  input.addEventListener("input", () =>
-    queueMicrotask(() => {
-      inputPosition(true);
-      publish();
-    }),
-  );
+  input.addEventListener("input", () => queueMicrotask(revealAndPublish));
   refresh();
 }
 

@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {captionTarget} from './captions.js';
 import {registerPopupLifetime} from './menu-lifetime.js';
 import {prepareControlKey} from './control-shortcuts.js';
@@ -11,8 +12,8 @@ import { tableContextKey } from "./table-context.js";
 import { bodyContextAppShortcut } from "./body-context.js";
 import { objectContextItems, renderObjectContextItems } from "./object-context-menu.js";
 import { controlPoint, onControlOutline,controlClientPoint,type ControlPointer } from "./object-hit-point.js";
-import type { Selection } from "./model.js";
-import { inlineCellPictureBoxes } from "./inline-cell-picture.js";
+import type { CellPathEntry, Selection } from "./model.js";
+import { inlineCellPictureBoxes, selectedCellPicture } from "./inline-cell-picture.js";
 
 // A view of existing single-body-picture commands and the shared OS copy entry.
 export function mountPictureContext(doc: Document, editor: Interaction, actions: {
@@ -33,14 +34,14 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
     } catch { return false; }
   };
   const reason = (id: string) => {
-    if(id==='caption'){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');captionTarget(editor.adapter,editor.selection);return '';}catch(error){return String(error);}}
-    if(['front','back','inFrontOfText','behindText'].includes(id)){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');prepareControlKey(editor.adapter,editor.selection,id as 'front'|'back'|'inFrontOfText'|'behindText');return '';}catch(error){return String(error);}}
+    if(id==='caption'){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');captionTarget(editor.adapter,editor.selection);return '';}catch(error){return editorFeedbackText(error);}}
+    if(['front','back','inFrontOfText','behindText'].includes(id)){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');prepareControlKey(editor.adapter,editor.selection,id as 'front'|'back'|'inFrontOfText'|'behindText');return '';}catch(error){return editorFeedbackText(error);}}
     if(id==='line')return actions.busy()?'현재 작업을 마친 후 사용하세요.':'';
     if (!["properties","description","delete","copy","cut"].includes(id)) return id==="placement" ? "개체 속성 기본 탭에서 지원하는 본문 배치를 변경하세요. 이 하위 메뉴는 미연결입니다." : "이 그림 명령의 UI 연결은 미지원입니다. 원본 개체를 유지합니다.";
     if (id === "copy" || id === "cut" || id === "paste") return clipboardSupport(editor, id).reason ?? "";
     if (actions.busy()) return "입력·저장·대화상자를 마친 후 사용하세요.";
     try { editor.adapter.assertEditable(editor.selection.focus); const p=selectedPicture(editor.adapter, editor.selection);if(id==='description'&&typeof p.props.description!=='string')return '개체 설명문을 조회할 수 없습니다. 원본을 유지합니다.'; }
-    catch (error) { return String(error); }
+    catch (error) { return editorFeedbackText(error); }
     return "";
   };
   const sync = () => {
@@ -48,7 +49,14 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
     if (actions.busy() || !valid()) { close(); return; }
     for (const [id, label] of items) {
       const button = buttons.get(id)!, why = reason(id);
-      button.disabled = !!why; button.title = why || label;
+      button.disabled = !!why;
+      button.title = why || label;
+      if (why && (id === "inFrontOfText" || id === "behindText")) {
+        const message = why;
+        button.title = message.includes("글자처럼 취급")
+          ? "개체 속성에서 ‘글자처럼 취급’을 해제하세요."
+          : message;
+      }
       button.setAttribute("aria-disabled", String(button.disabled));
     }
   };
@@ -56,7 +64,7 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
     editor.execute({type:"picture",change:{action:"delete"}},target);actions.changed();actions.focus();
   };
   const activate = (id: string) => {
-    if (!valid()) { close(true); actions.error("문서·리비전·선택한 그림이 바뀌었습니다. 그림 메뉴를 다시 여세요."); return; }
+    if (!valid()) { close(true); actions.error("문서나 선택한 그림이 바뀌었습니다. 그림 메뉴를 다시 여세요."); return; }
     const why = reason(id); if (why) { actions.error(why); sync(); return; }
     const target = captured!; close();
     try {
@@ -88,19 +96,34 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
     if(!page.querySelector(":scope > svg"))return; // Existing IME/resize surface restores SVG before hit testing.
     const point=controlPoint(page,x,y), controls=editor.adapter.call("getPageControlLayout",Number(page.dataset.page)).controls??[];
     const contains=(c:any)=>[c.x,c.y,c.w,c.h].every(Number.isFinite)&&point.x>=c.x&&point.x<=c.x+c.w&&point.y>=c.y&&point.y<=c.y+c.h;
-    const hits=controls.filter((c:any)=>c.type==="image"&&c.stableIndex?.length===6&&(contains(c)||onControlOutline(page,c,x,y)));
+    const hits=controls.filter((c:any)=>c.type==="image"&&c.cellPath?.length&&!c.headerFooter&&
+      (contains(c)||onControlOutline(page,c,x,y)));
     if(hits.length!==1)return;
-    const box=hits[0],s=box.stableIndex;
-    const focus=editor.adapter.fromPath(s[0],s[1],[{controlIndex:s[2],cellIndex:s[3],cellParaIndex:s[4]}],0);
-    const selection:Selection={kind:"object",focus,control:s[5]};
-    let row;try{row=selectedPicture(editor.adapter,selection);}catch{return;}
+    const box=hits[0],s=box.stableIndex,path:CellPathEntry[]=box.cellPath;
+    const root=box.parentParaIdx??box.paraIdx;
+    const address=[box.secIdx,root,...path.flatMap(h=>[h.controlIndex,h.cellIndex,h.cellParaIndex]),box.controlIdx];
+    if(!Array.isArray(s)||s.length!==address.length||
+      address.some((v,i)=>!Number.isSafeInteger(v)||v<0||v!==s[i]))return;
+    const focus=editor.adapter.fromPath(box.secIdx,root,path,0);
+    const row=selectedCellPicture(editor.adapter,{kind:"object",focus,control:box.controlIdx});
+    if(!row)return;
     const p=row.props;
-    if(!row.cellPath||p.rotationAngle||p.horzFlip||p.vertFlip||p.cropLeft||p.cropTop||p.cropRight||p.cropBottom||
+    if((!p.treatAsChar&&box.wrap==="behindText")||p.rotationAngle||p.horzFlip||p.vertFlip||p.cropLeft||p.cropTop||p.cropRight||p.cropBottom||
       Math.abs(box.w-p.width/75)>.11||Math.abs(box.h-p.height/75)>.11)return;
-    // Only the validated owning table may enclose this picture. Other overlap
-    // has no inferred z-order. Nested/mixed/multiple owners are not admitted.
-    if(controls.some((c:any)=>c!==box&&contains(c)&&!(c.type==="table"&&Array.isArray(c.stableIndex)&&c.stableIndex.length<s.length&&c.stableIndex.every((v:number,i:number)=>v===s[i]))))return;
-    return {box,selection,outline:onControlOutline(page,box,x,y)};
+    // Core represents a nested table node with a placeholder (0,0) cell
+    // address followed by its control index. Normalize that table address
+    // before comparing with the image's actual ancestor tables.
+    const owners = new Set(path.flatMap((h,i)=>{
+      const prefix=address.slice(0,2+i*3);
+      const table=[...prefix,h.controlIndex];
+      return i===0?[JSON.stringify(table)]:[
+        JSON.stringify(table),JSON.stringify([...table,0,0,h.controlIndex]),
+      ];
+    }));
+    if(controls.some((c:any)=>c!==box&&contains(c)&&
+      !(c.type==="table"&&owners.has(JSON.stringify(c.stableIndex)))))return;
+    const selection:Selection={kind:"object",focus:row.focus,control:row.control};
+    return {selection,outline:onControlOutline(page,box,x,y)};
   };
   const context = (e: MouseEvent, properties = false) => {
     const page = (e.target as Element).closest<HTMLElement>(".page"); if (!page || !pages.contains(page)) return;
@@ -109,9 +132,13 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
       const cell=cellHit(page,client.x,client.y);
       const point = pagePoint(page, e.clientX, e.clientY), hit = cell?undefined:pictureCanvasHit(editor, Number(page.dataset.page), point.x, point.y);
       if (!hit&&!cell) return;
-      e.preventDefault(); e.stopImmediatePropagation(); if (actions.busy()) return;
       const next = cell?.selection ?? { kind: "object" as const, focus: { kind: "body" as const, sec: hit!.sec, para: hit!.para, offset: 0 }, control: hit!.control };
-      selectedPicture(editor.adapter, next); editor.adapter.assertEditable(next.focus);
+      // Selection is based on the visible owner. The dialog still uses its
+      // existing stricter mutation scope.
+      if(cell){try{selectedPicture(editor.adapter,next);}catch{return;}}
+      e.preventDefault(); e.stopImmediatePropagation(); if (actions.busy()) return;
+      if(!cell)selectedPicture(editor.adapter, next);
+      editor.adapter.assertEditable(next.focus);
       if (JSON.stringify(next) !== JSON.stringify(editor.selection)) { editor.selection = next; (cell?actions.selectionChanged??actions.changed:actions.changed)(); }
       // Native's eight stream units are not eight Unicode scalar characters.
       // Reuse the accepted whole-cell-picture object block at the exact edge.

@@ -11,7 +11,7 @@ export function mountPictures(host:HTMLElement,editor:Interaction,actions:{execu
   insert.textContent='그림 넣기…';properties.textContent='그림 속성…';properties.id='picture-properties';list.setAttribute('aria-label','본문 그림 선택');
   menu.append(summary,insert,list,properties,status);host.append(menu);
   const dialog=document.createElement('dialog'),form=document.createElement('form');form.id='picture-form';dialog.id='picture-dialog';dialog.setAttribute('aria-label','그림 속성');
-  const title=document.createElement('h2');title.textContent='그림 넣기 / 속성';
+  const title=document.createElement('h2');title.textContent='그림 넣기';
   const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg';file.setAttribute('aria-label','PNG 또는 JPEG 그림');
   const label=(text:string,control:HTMLElement)=>{const l=document.createElement('label');l.textContent=text;l.append(control);return l;};
   const width=document.createElement('input'),height=document.createElement('input');for(const c of [width,height]){c.type='number';c.min='1';c.max='720';c.step='0.01';}
@@ -20,11 +20,11 @@ export function mountPictures(host:HTMLElement,editor:Interaction,actions:{execu
   const description=document.createElement('textarea');description.rows=2;description.dataset.pictureDescription='true';description.setAttribute('aria-label','개체 설명문');
   const descriptionRow=label('개체 설명문',description);descriptionRow.hidden=true;
   const message=document.createElement('p');message.setAttribute('role','status');
-  const note=document.createElement('p');note.textContent='본문 그림 한 개를 편집합니다. PNG/JPEG 20MB·4천만 화소 이하. 교체는 같은 픽셀 크기·자르기 없는 그림만 지원합니다. 셀·중첩·그룹과 회전·자르기는 이 창에서 편집하지 않습니다. 본문 그림의 ⋮⋮ 손잡이는 전체 선택과 지원 위치 이동에 사용합니다. 크기는 pt 단위이며 비율 유지는 현재 틀 기준입니다. 캔버스는 좌표가 확인된 글자처럼/문단 기준 배치만 지원합니다. 글 뒤로는 글 선택을 위해 목록에서 선택한 후 핸들을 사용하세요.';
+  const note=document.createElement('p');note.textContent='PNG·JPEG를 선택하세요. 교체할 그림은 픽셀 크기가 같아야 합니다.';
   const bodyNote=note.textContent;
   const ok=document.createElement('button');ok.type='submit';ok.textContent='적용';
   const remove=document.createElement('button');remove.type='button';remove.textContent='그림 삭제';
-  const cancel=document.createElement('button');cancel.type='button';cancel.textContent='닫기 / 취소';
+  const cancel=document.createElement('button');cancel.type='button';cancel.textContent='취소';
   form.append(title,file,label('너비(pt)',width),label('높이(pt)',height),label('가로 세로 비율 유지',ratio),label('배치',placement),descriptionRow,message,note,ok,remove,cancel);dialog.append(form);document.body.append(dialog);
   const guard=formatInputGuard(form);let target:ReturnType<Interaction['capture']>|undefined,mode:'insert'|'edit'='insert',draft:PictureFile|undefined,initial={width:0,height:0,placement:''},initialDescription='',factor=1,reading=false,generation=0;
   const current=()=>{if(!target||!sameFormatTarget(target,editor.capture()))throw Error('문서·선택이 변경되었습니다. 닫고 다시 여세요.');if(actions.busy())throw Error('다른 작업을 마친 후 사용하세요.');return target;};

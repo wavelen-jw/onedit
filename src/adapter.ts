@@ -1,7 +1,7 @@
 import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
-import { coreRuntimeDispatchEpoch } from "./core-runtime.js";
+import { coreRuntimeDispatchEpoch, coreRuntimeScreenInputEpoch } from "./core-runtime.js";
 import { isB338OwnerTrialDigest } from "./b338-focused-owner-trial.js";
-import { cursorModelMemoEnabled, cursorModelMemoEpoch, cursorModelReadWitness, readCursorModelMemo, screenInputDispatchEpoch, withCursorModelReadTransaction, type CursorModelView } from "./cursor-model-memo.js";
+import { cursorModelMemoEnabled, cursorModelMemoEpoch, cursorModelReadWitness, readCursorModelMemo, screenInputDispatchEpoch, withCursorModelReadTransaction, type CursorModelView, type CursorListRow } from "./cursor-model-memo.js";
 import {focusedSelectionKey,withFocusedCellDisplay,type Port as FocusedCellPort,type Request as FocusedRequest,type Stamp as FocusedStamp} from './focused-cell-wire.js';
 import {readTablePropertyProjection, type TablePropertyRequest, type TablePropertyProjection} from "./table-property-projection.js";
 import { UpdateReads } from './update-reads.js';
@@ -37,11 +37,18 @@ import {
   samePosition,
 } from "./model.js";
 type RootCell=Extract<Position,{kind:"cell"}>;
+type CellPageUpdate = { pages: number[]; pageCount: number; cursor: NavigationRect };
+type CellInsertResult = {
+  charOffset?: number; logicalOffset?: number;
+  cellPageUpdate?: Pick<CellPageUpdate, "pages" | "pageCount">;
+  cellCursor?: NavigationRect;
+};
 type DisplayGridRead=(p:RootCell)=>CellBox[];
 type TableDisplayOwner={close:()=>void;validate:(p:Position)=>void;check:(p:Position)=>void;cells?:DisplayGridRead};
 type FocusedGrid={target:ParagraphTarget; reference:SelectionReference; generation:number; view:string;
   grid:readonly CellBox[]; history:Readonly<{undoStack:readonly unknown[];redoStack:readonly unknown[]}>};
 export { result } from "./adapter-core.js";
+export type BodyLayoutControl = {list:number;para:number;ctrlId:string;ctrlCh?:number};
 export type BodyLine = { lineIndex: number; lineCount: number; charStart: number; charEnd: number };
 export type NavigationRect = { pageIndex: number; x: number; y: number; height: number };
 // A table path cannot encode a non-table ancestor (e.g. a shape's text list).
@@ -68,7 +75,7 @@ const viewQueryMethods = new Set<string>([
 // Existing Adapter/SDK readers that promise current whole-layout information.
 // A local BODY result does not authenticate a focused-page patch for them.
 const localLayoutReads = new Set<string>([
-  "getDocumentInfo", "getPageInfo", "getPageTextLayout", "getPageControlLayout",
+  "getDocumentInfo", "getPageInfo", "getPageSizeRuns", "getPageTextLayout", "getPageControlLayout",
   "getCursorModel", "getTableCellBboxes", "getTableCellBboxesByPath",
   "getCursorRect", "getCursorRectInCell", "getCursorRectInCellByPath",
   "getLineInfo", "getCursorRectOnLine",
@@ -589,6 +596,19 @@ export class RhwpAdapter {
       this.completeLocalBodyFlow();
     if(method==="getCursorModel"&&args.length===0&&coreRuntimeOwnsCursorMemo(this.doc))
       return this.readCursorMemo(this.doc,false);
+    if (method === "getCursorRectInCell" || method === "getTableCellBboxes") {
+      const reads = this.currentCellReads();
+      if (reads) {
+        const key = JSON.stringify(args);
+        const cached = reads.geometry.get(method);
+        if (cached?.key === key) return result<T>(cached.raw);
+        const raw = invokeCore(this.doc, method, args);
+        const value = result<T>(raw);
+        if (raw.length <= 65536 && reads === this.currentCellReads())
+          reads.geometry.set(method, {key, raw});
+        return value;
+      }
+    }
     const queries = this.currentViewQueries();
     const cacheable = typeof method === 'string' && viewQueryMethods.has(method) &&
       (!updateReadMethods.has(method) || this.heightCandidateIdentified && coreRuntimeHasUpdateReadProvenance(this.doc));
@@ -642,11 +662,89 @@ export class RhwpAdapter {
   resolveSelection(ref: SelectionReference, observeFocus?: (target:ParagraphTarget)=>void): Selection {
     return positions.resolveSelection.call(this, ref, observeFocus);
   }
-  // Resolve transient Core list IDs from the full path on every query.
-  // List IDs are never persisted in Studio selections/history.
+  // Resolve only the active cell during an ordinary typing event. The row
+  // expires on every native write and at the end of the synchronous event.
+  private typingCellOwner?: {
+    doc: HwpDocument; key: string; epoch?: number; row?: CursorListRow;
+  };
+  withTypingCellOwner<T>(p: RootCell, read: () => T): T {
+    const doc=this.doc;
+    if (this.typingCellOwner || this.scope!=="edit" || this.transientEdit ||
+        this.documentLocked || this.viewerOnlyReason ||
+        coreRuntimeIdentity(doc)?.sha256!==rootEditorCoreSha256 ||
+        typeof doc.oneditCursorOwnerRowsBatchV1!=="function" || this.nativeMutationGeneration()===undefined)
+      return read();
+    this.typingCellOwner={doc,key:JSON.stringify([p.sec,p.para,cellPath(p)])};
+    try { return read(); }
+    finally { this.typingCellOwner=undefined; }
+  }
+  private readTypingCellOwner(p: Position): CursorListRow | undefined {
+    const scope=this.typingCellOwner;
+    if (!scope || p.kind!=="cell" || scope.doc!==this.doc || this.pendingLocalBody || this.transientEdit ||
+        this.scope!=="edit" || this.documentLocked || this.viewerOnlyReason) return;
+    const path=cellPath(p);
+    if (scope.key!==JSON.stringify([p.sec,p.para,path])) return;
+    const epoch=this.nativeMutationGeneration();
+    if (epoch===undefined) return;
+    if (scope.epoch===epoch) return scope.row;
+    scope.epoch=epoch;
+    scope.row=undefined;
+    try {
+      const reply=JSON.parse(scope.doc.oneditCursorOwnerRowsBatchV1(
+        JSON.stringify({targets:[{section:p.sec,paragraph:p.para,path}]})));
+      const row=reply.status==="ok" && reply.rows?.length===1 ? reply.rows[0] : undefined;
+      const hop=path.at(-1)!;
+      const hostPara=path.at(-2)?.cellParaIndex ?? p.para;
+      if (this.nativeMutationGeneration()===epoch && row?.isCell===true &&
+          row.sectionIndex===p.sec && row.hostPara===hostPara &&
+          row.controlIndex===hop.controlIndex && row.cellIndex===hop.cellIndex &&
+          [row.listId,row.hostListId,row.paraCount,row.row,row.col,row.rowSpan,row.colSpan,row.cellCount]
+            .every(v=>Number.isSafeInteger(v)&&v>=0) &&
+          row.listId>0 && (path.length===1 ? row.hostListId===0 : row.hostListId>0) &&
+          row.paraCount>hop.cellParaIndex && row.cellCount>hop.cellIndex &&
+          row.rowSpan>0 && row.colSpan>0) scope.row=row;
+    } catch { /* Keep the existing owner lookup for unsupported paths. */ }
+    return scope.row;
+  }
+  // Repeated live validation and presentation often address exactly the same
+  // cell. Retain one canonical row and one raw answer per geometry reader.
+  // The root native dispatch fence observes writes through other JS aliases.
+  private cellReads?: {
+    doc: HwpDocument; generation: number; id: string; revision: number;
+    environment: string | number; dpi: number;
+    owner?: {key: string; row: CursorListRow};
+    geometry: Map<string, {key: string; raw: string}>;
+  };
+  private currentCellReads(): RhwpAdapter["cellReads"] {
+    const generation = coreRuntimeDispatchEpoch(this.doc);
+    const environment = this.localBodyEnvironment?.();
+    if (generation === undefined || environment === undefined || this.pendingLocalBody ||
+        this.transientEdit || this.documentLocked || this.viewerOnlyReason || this.scope !== "edit" ||
+        coreRuntimeIdentity(this.doc)?.sha256 !== rootEditorCoreSha256) {
+      this.cellReads = undefined;
+      return;
+    }
+    const prior = this.cellReads;
+    if (prior && prior.doc === this.doc && prior.generation === generation &&
+        prior.id === this.documentId && prior.revision === this.revision &&
+        prior.environment === environment && prior.dpi === this.updateReadDpi) return prior;
+    return this.cellReads = {
+      doc: this.doc, generation, id: this.documentId, revision: this.revision,
+      environment, dpi: this.updateReadDpi, geometry: new Map(),
+    };
+  }
   list(p: Position, allowOwnerRead = true) {
     const scope = this.ownerReadScope;
-    return positions.list.call(this, p, allowOwnerRead ? scope?.projection : undefined, !!scope);
+    if (p.kind !== "cell" || scope || !allowOwnerRead)
+      return positions.list.call(this, p, allowOwnerRead ? scope?.projection : undefined, !!scope);
+    const reads = this.currentCellReads();
+    const key = reads && JSON.stringify([p.sec, p.para, cellPath(p)]);
+    if (key && reads?.owner?.key === key) return {...reads.owner.row};
+    const typed = this.readTypingCellOwner(p);
+    if (typed) return {...typed};
+    const row = positions.list.call(this, p);
+    if (reads && key && reads === this.currentCellReads()) reads.owner = {key, row: {...row}};
+    return row;
   }
   listPosition(entry: any, lists: readonly any[]): Position {
     return positions.listPosition.call(this, entry, lists);
@@ -1015,10 +1113,27 @@ export class RhwpAdapter {
       JSON.stringify(patch),
     );
   }
-  insert(p: Position, text: string): Position {
+  private cellInsertDisplay?: {
+    position: Position; doc: HwpDocument; epoch: number; revision: number;
+    update: CellPageUpdate; presented: boolean;
+  };
+  private currentCellInsertDisplay(p: Position) {
+    const display = this.cellInsertDisplay;
+    return display && display.doc === this.doc && display.revision === this.revision &&
+      coreRuntimeScreenInputEpoch(this.doc) === display.epoch &&
+      !this.transientEdit && samePosition(p, display.position) ? display : undefined;
+  }
+  consumeCellPageUpdate(p: Position): CellPageUpdate | undefined {
+    const display = this.currentCellInsertDisplay(p);
+    if (!display || display.presented) return;
+    display.presented = true;
+    return display.update;
+  }
+  insert(p: Position, text: string, publishCell = false): Position {
+    this.cellInsertDisplay = undefined;
     this.validate(p);
     this.assertTextOnly(p);
-    const r = nested(p)
+    const r: CellInsertResult = nested(p)
       ? this.call(
           "insertTextInCellByPath",
           p.sec,
@@ -1039,7 +1154,19 @@ export class RhwpAdapter {
             p.offset,
             text,
           );
-    return { ...p, offset: r.logicalOffset ?? r.charOffset };
+    const position = { ...p, offset: (r.logicalOffset ?? r.charOffset)! };
+    const update = r.cellPageUpdate, cursor = r.cellCursor;
+    if (publishCell && update && cursor && !this.transientEdit) {
+      const epoch = coreRuntimeScreenInputEpoch(this.doc);
+      if (epoch !== undefined && Number.isSafeInteger(cursor.pageIndex) && update.pages.includes(cursor.pageIndex) &&
+          [cursor.x, cursor.y, cursor.height].every(Number.isFinite) && cursor.height > 0) {
+        this.cellInsertDisplay = {
+          position, doc: this.doc, epoch, revision: this.revision + 1,
+          update: { ...update, cursor }, presented: false,
+        };
+      }
+    }
+    return position;
   }
   inheritCharacterShape(p: Position, end: number, shapeId: number) {
     this.validate(p);
@@ -1128,10 +1255,10 @@ export class RhwpAdapter {
   }
   // Layout objects use extended control slots; the plain-text line API's
   // offsets cannot be assumed to share that domain. Keep established hit/rect.
-  hasBodyLayoutObject(p: Position): boolean {
+  hasBodyLayoutObject(p: Position, controls?: readonly BodyLayoutControl[]): boolean {
     if(p.kind !== "body") return false;
     const para=p.para+Array.from({length:p.sec},(_,s)=>this.readStructural('getParagraphCount',s)).reduce((x,y)=>x+y,0);
-    return this.call<any[]>("getControls").some(c=>c.list===0&&c.para===para&&(c.ctrlId==="gso"||c.ctrlId==="tbl"||c.ctrlCh===11));
+    return (controls ?? this.call<BodyLayoutControl[]>("getControls")).some(c=>c.list===0&&c.para===para&&(c.ctrlId==="gso"||c.ctrlId==="tbl"||c.ctrlCh===11));
   }
   // Consume existing Core visual-line APIs; never change logical document offsets.
   bodyLine(p: Position): BodyLine {
@@ -1176,6 +1303,8 @@ export class RhwpAdapter {
     return { position, rect: this.navigationRect(raw), preferredX: raw.preferredX };
   }
   rect(p: Position): any {
+    const display = this.currentCellInsertDisplay(p);
+    if (display) return display.update.cursor;
     if (nested(p))
       return this.call(
         "getCursorRectByPath",
@@ -1203,9 +1332,23 @@ export class RhwpAdapter {
         kind: "cell";
       }
     >,
+    start?: "owner-page",
   ): CellBox[] {
     this.list({ ...p, cellPara: 0, offset: 0 });
-    if (!nested(p)) return this.call("getTableCellBboxes", p.sec, p.para, p.control);
+    if (!nested(p)) {
+      if (start === "owner-page") {
+        // Pagination includes both the paragraph and its table fragments.
+        // Start at its first page, even when the caret is in a later fragment.
+        try {
+          const {ok,page} = this.call("getPageOfPosition", p.sec, p.para);
+          if (ok && Number.isSafeInteger(page) && page > 0) {
+            const boxes = this.call<CellBox[]>("getTableCellBboxes", p.sec, p.para, p.control, page);
+            if (boxes.length && boxes[0].pageIndex === page) return boxes;
+          }
+        } catch { /* Keep the ordinary lookup when the hint is unavailable. */ }
+      }
+      return this.call("getTableCellBboxes", p.sec, p.para, p.control);
+    }
     const boxes = this.call<CellBox[]>("getTableCellBboxesByPath", p.sec, p.para, this.path(p));
     // 9aab may paint the last row of a complete 2×2 child on the following
     // physical page. Its bbox cellIdx is local to each fragment, while the

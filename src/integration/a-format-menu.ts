@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "../editor-feedback-text.js";
 import {menuTargetReader} from '../menu-input-projection.js';
 import type {OwnerProjection} from '../owner-projection.js';
 import { scriptCycleFromState } from '../hancom-key-links.js';
@@ -189,7 +190,7 @@ export function formatMenuState(
         checkEditable(target.p);
       states[kind] = readDisplay(kind);
     } catch (error) {
-      errors[kind] = String(error);
+      errors[kind] = editorFeedbackText(error);
     }
   }
   return new Map(
@@ -205,22 +206,22 @@ export function formatMenuState(
           if (readTargets().some(target => target.p.kind === "cell" && !!target.p.ancestors?.length))
             throw Error("NOT_SUPPORTED: 중첩 셀 문단 번호 변경은 지원하지 않습니다.");
           editor.adapter.paragraphListCatalog();
-        } catch (error) { reason = String(error); }
+        } catch (error) { reason = editorFeedbackText(error); }
       }
       if (!reason && item.id === "numbers-manage") {
         try {
           if (editor.selection.focus.kind === "cell" && editor.selection.focus.ancestors?.length)
             throw Error("NOT_SUPPORTED: 중첩 셀 문단 번호 변경은 지원하지 않습니다.");
           editor.adapter.paragraphListCatalog();
-        } catch (error) { reason = String(error); }
+        } catch (error) { reason = editorFeedbackText(error); }
       }
       if (!reason && item.command?.type === "paragraph-relative") {
-        try { editor.paragraphAdjustmentPlan(item.command.change,editor.selection,owners,owners?.isCurrent(editor.adapter)?readTargets():undefined, structuralDisplay?checkEditable:undefined); } catch(error) { reason=String(error); }
+        try { editor.paragraphAdjustmentPlan(item.command.change,editor.selection,owners,owners?.isCurrent(editor.adapter)?readTargets():undefined, structuralDisplay?checkEditable:undefined); } catch(error) { reason=editorFeedbackText(error); }
       }
       if (!reason && item.id === "paragraph-adjustments" && readTargets().some(t => t.p.kind === "cell" && !!t.p.ancestors?.length)) reason = "중첩 셀 상대 여백 조절은 미검증입니다.";
-      if(!reason&&(item.command?.type==='list-level'||item.command?.type==='line-spacing-step'))try{editor.paragraphStepPlan(item.command.type,item.command.direction,editor.selection,owners,owners?.isCurrent(editor.adapter)?readTargets():undefined, structuralDisplay?checkEditable:undefined);}catch(error){reason=String(error);}
+      if(!reason&&(item.command?.type==='list-level'||item.command?.type==='line-spacing-step'))try{editor.paragraphStepPlan(item.command.type,item.command.direction,editor.selection,owners,owners?.isCurrent(editor.adapter)?readTargets():undefined, structuralDisplay?checkEditable:undefined);}catch(error){reason=editorFeedbackText(error);}
       const state = states[item.kind] ?? {};
-      if(!reason&&item.command?.type==='script-cycle'){try{scriptCycleFromState(state);}catch(error){reason=String(error);}}
+      if(!reason&&item.command?.type==='script-cycle'){try{scriptCycleFromState(state);}catch(error){reason=editorFeedbackText(error);}}
       const toggle=item.property?formatToggleState(state,item.property,item.value):undefined;
       return [
         item.id,

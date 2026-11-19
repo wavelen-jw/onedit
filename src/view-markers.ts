@@ -50,11 +50,11 @@ export function toggleViewMarker(a: RhwpAdapter, id: ViewMarker) {
   else setViewMarker(a, id, !current);
 }
 // Called before the existing SVG renderer, including Undo/Redo/cold document swaps.
-export function applyViewMarkers(a: RhwpAdapter) {
+export function applyViewMarkers(a: RhwpAdapter, target = a) {
   if (!choices.has(a)) choices.set(a, new Map([["paragraph-marks", true]]));
   for (const [id, enabled] of choices.get(a) ?? []) {
     const item = definition(id);
-    if (viewMarkerState(a, id) !== enabled) { a.invalidateUpdateReads();a.doc[item.set](enabled); }
+    if (viewMarkerState(target, id) !== enabled) { target.invalidateUpdateReads();target.doc[item.set](enabled); }
   }
 }
 // Print keeps its existing SVG path. Suspend only these screen flags during the

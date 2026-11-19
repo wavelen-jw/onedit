@@ -35,7 +35,11 @@ function tableHandleObject(a:RhwpAdapter,p:Extract<Position,{kind:'cell'}>,scope
   for(const page of new Set(cells.map(c=>c.pageIndex))){const cs=cells.filter(c=>c.pageIndex===page);
     const x=Math.min(...cs.map(c=>c.x)),y=Math.min(...cs.map(c=>c.y));
     boxes.push({page,x,y,w:Math.max(...cs.map(c=>c.x+c.w))-x,h:Math.max(...cs.map(c=>c.y+c.h))-y});}
-  const inline=!nested(p)&&a.inline(p).some(t=>t.controlIndex===p.control);
+  const inline = !nested(p) && (
+    typeof a.doc.getBodyInlineTableOffsets === 'function'
+      ? a.call<{controlIndex: number}[]>('getBodyInlineTableOffsets', p.sec, p.para)
+      : a.inline(p)
+  ).some(table => table.controlIndex === p.control);
   if(boxes.length&&boxes.every(b=>[b.x,b.y,b.w,b.h].every(Number.isFinite)&&b.w>0&&b.h>0))
     return{id:tableKey(p),name:nested(p)?'중첩 표':'표',selection:{kind:'table',focus:p},inline,boxes};
 }
@@ -71,7 +75,9 @@ function handleTarget(selection:Selection):Selection|undefined{
 export function activeHandleObjects(editor:Interaction):Item[]{
   const target=handleTarget(editor.selection);if(!target)return[];
   if(target.kind==='table'&&target.focus.kind==='cell'){
-    const item=tableHandleObject(editor.adapter,target.focus,editor.clickedTableDisplayGrid(target.focus,"grip"));return item?[item]:[];
+    const p=target.focus;
+    const cells=editor.clickedTableDisplayGrid(p,"grip")??editor.adapter.cells(p,"owner-page");
+    const item=tableHandleObject(editor.adapter,p,cells);return item?[item]:[];
   }
   return pictureHandleObjects(editor,key(target));
 }

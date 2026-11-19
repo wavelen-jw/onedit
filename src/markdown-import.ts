@@ -144,7 +144,9 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
           const first=blocks[before];
           if(!first || first.kind!=='paragraph')diagnostic('LIST_STRUCTURE',offset,item.raw,'첫 내용이 문단이 아닌 목록은 지원하지 않습니다.','error','차단');
           else {
-            first.role=quote&&mode==='report'?'quote':'list';first.level=depth+1+(depth===0&&mode==='report'?Math.ceil((/^ */.exec(t.raw)?.[0].length??0)/2):0);if(quoteGroup!==undefined)first.quoteGroup=quoteGroup;first.prefix=rawMarker+' '+(item.task?(item.tokens.find((token:any)=>token.type==='checkbox')?.raw??`[${item.checked?'x':' '}] `):'');
+            const orderedChild=mode==='report'&&!quote&&!item.task&&rawMarker==='-'&&first.role==='list'&&/^\d+[.)] /u.test(first.prefix??'')
+              ? first.prefix : undefined;
+            first.role=quote&&mode==='report'?'quote':'list';first.level=depth+1+(depth===0&&mode==='report'?Math.ceil((/^ */.exec(t.raw)?.[0].length??0)/2):0);if(quoteGroup!==undefined)first.quoteGroup=quoteGroup;first.prefix=orderedChild??(rawMarker+' '+(item.task?(item.tokens.find((token:any)=>token.type==='checkbox')?.raw??`[${item.checked?'x':' '}] `):''));
             // Native numbering is intentionally not synthesized. Literal marker
             // preserves authored numbers; diagnostic discloses no auto-renumber.
           }
@@ -179,8 +181,11 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
   visit(tokens);
   if(mode==='report'){
     let informalParent=false;
+    let numberedSection:string|undefined;
+    const textOf=(runs:MarkdownRun[])=>runs.map(r=>r.text).join('');
+    const beginsWithDigit=(runs:MarkdownRun[])=>/^\s*\d/u.test(textOf(runs));
     const stripPrefix=(runs:MarkdownRun[],pattern:RegExp)=>{
-      const match=pattern.exec(runs.map(r=>r.text).join(''));if(!match)return undefined;
+      const match=pattern.exec(textOf(runs));if(!match)return undefined;
       let length=match[0].length;
       while(length&&runs.length){const n=Math.min(length,runs[0].text.length);runs[0]={...runs[0],text:runs[0].text.slice(n)};length-=n;if(!runs[0].text)runs.shift();}
       return match[0].trim();
@@ -200,19 +205,36 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
           ? /^(?:[□■ㅁㅇ○◦●*※-]|\d+[.)]|[IVXLCDM]+[.)]|[\u2160-\u217f]+[.)])\s+/u
           : /^(?:[□■ㅁㅇ○◦●*※-]|\d+[.)]|[IVXLCDM]+[.)])\s+/u;
         for(let n=0;n<markdownLimits.depth;n++){
-          const next=stripPrefix(b.runs,headingMarker);
+          // Read compound ordinals before the single-number rule, including
+          // headings that consist entirely of the marker.
+          const numeric=b.reportRole==='subtitle'
+            ? stripPrefix(b.runs,/^\d+(?:\.\d+)+(?:[.)])?(?:\s+|$)/u)
+              ??stripPrefix(b.runs,/^\d+[.)](?:\s+|$)/u)
+            : undefined;
+          const next=numeric??stripPrefix(b.runs,headingMarker);
           if(!next)break;marker=next;
         }
-        if(marker&&b.reportRole==='subtitle')b.prefix=/^[□■ㅁㅇ○◦●*※-]$/.test(marker)?'□ ':marker+' ';
+        const section=marker&&/^(\d+)\.$/u.exec(marker);
+        const child=marker&&/^(\d+)\.(\d+)[.)]?$/u.exec(marker);
+        if((b.level??1)<=2)numberedSection=b.level===2&&section?section[1]:undefined;
+        if(b.level===3&&child&&child[1]===numberedSection){
+          b.reportRole='subsection';
+          b.prefix=' '+child[2]+') ';
+        }else if(b.reportRole==='subtitle'){
+          if(marker&&!/^[□■ㅁㅇ○◦●*※-]$/u.test(marker))b.prefix=marker+' ';
+          else if(beginsWithDigit(b.runs))b.prefix='';
+          else if(marker)b.prefix='□ ';
+        }
       }else if(b.role==='list'){
         const marker=b.prefix?.trim()??'-';
         const level=Math.min(4,(b.level??1)+(informalParent&&(b.level??1)===1?1:0));
         b.reportRole=marker==='*'?'reference1':marker==='※'?'reference2':level===1?'body1':level===2?'body2':level===3?'reference1':'reference2';
-        if(/^\d+[.)]/.test(marker))b.prefix=b.prefix?.trimStart();
+        if(/^\d+[.)]/u.test(marker))b.prefix=b.prefix?.trimStart();
+        else if((b.reportRole==='body1'||b.reportRole==='body2')&&beginsWithDigit(b.runs))b.prefix='';
         else delete b.prefix;
       }else if(b.role==='body'){
-        const marker=stripPrefix(b.runs,/^\s*(?:([○◦●※□])\s*|([ㅇㅁ*])\s+)/u);
-        if(marker){b.reportRole=/^[ㅇ○◦●]$/.test(marker)?'body1':marker==='*'?'reference1':marker==='※'?'reference2':'subtitle';informalParent=b.reportRole==='body1';}
+        const marker=stripPrefix(b.runs,/^\s*(?:[○◦●※□]\s*|[ㅇㅁ](?:\s+|(?=\d))|\*\s+)/u);
+        if(marker){b.reportRole=/^[ㅇ○◦●]$/.test(marker)?'body1':marker==='*'?'reference1':marker==='※'?'reference2':'subtitle';informalParent=b.reportRole==='body1'; if((b.reportRole==='subtitle'||b.reportRole==='body1')&&beginsWithDigit(b.runs))b.prefix='';}
         else{b.reportRole='text';informalParent=false;}
       }
     }

@@ -16,6 +16,19 @@ const matchesKey = (key: DismissKey | undefined, event: KeyboardEvent) =>
   key?.key === event.key && key.code === event.code && key.location === event.location;
 const keyboardForms = new WeakSet<HTMLFormElement>();
 
+export function wrapDialogTab(event: KeyboardEvent, dialog: HTMLDialogElement) {
+  if (event.key !== 'Tab' || event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
+      event.altKey || event.ctrlKey || event.metaKey || !dialog.open) return;
+  const controls = [...dialog.querySelectorAll<HTMLElement>('button, input, select, textarea, summary, a[href]')]
+    .filter(control => control.tabIndex >= 0 && !control.matches(':disabled') &&
+      !control.closest('[hidden], [inert]') && control.getClientRects().length > 0);
+  const active = dialog.ownerDocument.activeElement;
+  const edge = controls[event.shiftKey ? 0 : controls.length - 1];
+  if (active !== edge) return;
+  event.preventDefault();
+  controls[event.shiftKey ? controls.length - 1 : 0].focus();
+}
+
 /** A single-line draft field's Enter submits the modal, not its native text editor. */
 export function bindEditorDialogFormSubmit(form: HTMLFormElement | null) {
   if (!form || keyboardForms.has(form)) return;
@@ -229,5 +242,6 @@ export function showEditorDialog(dialog: HTMLDialogElement, returnOnCancel = tru
     composing.delete(dialog);
     openers.set(dialog, dialog.ownerDocument.activeElement);
   }
+  dialog.classList.toggle("compact-dialog", dialog.id !== "slash-menu");
   dialog.showModal();
 }

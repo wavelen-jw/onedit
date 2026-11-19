@@ -1,3 +1,4 @@
+import { mountReportMenuEntry } from "./diagnostics/report-ui.js";
 import { mountProductInfo } from "./product-info.js";
 import {activeWorkset} from './active-workset.js';
 import {subscribeWhileOpen} from './ui-demand-lifetime.js';
@@ -212,8 +213,6 @@ export function mountWorkspaceUI(
   fileHeld("CCL 넣기(Q)…", heldFile, "", false, "F17"); fileHeld("공공누리 넣기(K)…", heldFile, "", false, "F17");
   fileSeparator(); fileHeld("점자로 바꾸기(L)", heldFile, "", true, "F18"); fileHeld("보내기(E)", heldFile, "", true, "F19");
   fileSeparator();
-  const paperEntry=doc.createElement("button");paperEntry.type="button";paperEntry.textContent="편집 용지…";paperEntry.dataset.fileEntry="paper";paperEntry.setAttribute("role","menuitem");const paperKey=doc.createElement("kbd");paperKey.textContent="F7";paperEntry.append(paperKey);paperEntry.onclick=()=>{if(busy()||doc.querySelector("dialog[open]"))return;file.d.open=false;doc.dispatchEvent(new CustomEvent("rhwp:shortcut-ui",{detail:"paper"}));};file.p.append(paperEntry);
-  file.d.addEventListener("toggle",()=>{const source=doc.querySelector<HTMLButtonElement>('[data-page-entry="j"]');paperEntry.disabled=busy()||!!source?.disabled;paperEntry.setAttribute("aria-disabled",String(paperEntry.disabled));});
   fileLive("p", "인쇄(P)…", "#print-button", "Ctrl+P / Alt+P");
   fileSeparator(); fileHeld("최근 문서 목록", "로컬 경로·최근 문서 목록을 수집하거나 재현하지 않습니다.").dataset.fileEntry = 'recent';
   // Later approved UI: hide titlebar X, retain the real File Close entrance.
@@ -221,6 +220,7 @@ export function mountWorkspaceUI(
   fileSeparator(); fileLive("close", "문서 닫기(C)", "#close-document");
   fileHeld("끝(X)", "브라우저 창 종료 명령은 제공하지 않습니다.", "Alt+X", false, "HK041");
   mountProductInfo(doc,file.p,busy);
+  mountReportMenuEntry(file.p,busy);
   mountDropdownKeys(file.d, () => busy() || !!doc.querySelector("dialog[open]"));
   if(onDemand){
     const refresh=()=>{for(const button of file.p.querySelectorAll<HTMLButtonElement>('button[data-command-proxy]'))proxyRefresh.get(button)?.();};

@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { bindEditorDialogFormSubmit, bindEditorPopupFocus, closeEditorDialog, showDocumentEditingDialog, showEditorDialog } from "./editor-popup-focus.js";
 import {coreRuntimeScreenInputEpoch as screenInputDispatchEpoch} from "./core-runtime.js";
 import {activeWorkset, activePageRange} from "./active-workset.js";
@@ -26,8 +27,8 @@ import { characterStatistics } from "./document-statistics.js";
 import { specialEditingStatus } from "./status-statistics.js";
 import {startupMark} from './startup-timing.js';
 import { applyUserMenuDecisions } from './user-menu-decisions.js';
-import {bodyWordAtPoint} from "./body-word-selection.js";
-import {paintBodyCorners} from './body-corner-guides.js';
+import {pointerTextRange} from "./pointer-text-selection.js";
+import {paintBodyCorners, type BodyPageInfo} from './body-corner-guides.js';
 import {captureParentTableCut} from './parent-table-cut.js';
 import {captureCellBlockObjectCut} from './cell-block-cut.js';
 import {UnsupportedTableOperation,recordTableRefusal,tableOperationNotice} from './table-capability.js';
@@ -38,7 +39,7 @@ import { pasteCompletion } from "./external-text-format.js";
 import { mountPasteResult } from "./paste-result-ui.js";
 import { offerPlainPaste, PasteFormatUnavailable } from "./paste-format-fallback.js";
 import { clipboardMarkdownTable } from "./clipboard-markdown-table.js";
-import { selectionPaintBoxes } from "./selection-display.js";
+import { invalidatePaintedGlyphs, selectionPaintBoxes } from "./selection-display.js";
 import { viewportPoint,pagePoint } from "./integration/a-view-menu.js";
 import { paintTableGuides } from "./table-guides.js";
 import { applyViewMarkers } from "./view-markers.js";
@@ -67,13 +68,14 @@ import { RhwpAdapter } from "./adapter.js";
 import { ClippedTextEdit, Interaction } from "./interaction.js";
 import { mountShortcutResults } from "./shortcut-results.js";
 import { mountMenuSettings } from "./menu-settings.js";
+import {localFontState} from './local-font-access.js';
 import {mountLocalFontSettings} from './local-font-settings.js';
 import { mountHeaderFooter } from "./header-footer-ui.js";
 import { mountPageNumber } from "./page-number-ui.js";
 import { mountColumns } from "./columns-ui.js";
 import { formatMenuState as settingsCommandState } from "./integration/a-format-menu.js";
-import { type Props, type Run, copy, nested, samePosition } from "./model.js";
-import { startFontSupply, loadOpenFonts, prepareLocalOpenDisplay, refreshLocalOpenDisplay, requestPageFonts, hasPendingFontSupply, applyFontEnvironment, requestedFontDescriptions, requestedFontFailures, fontSupplyRevision } from "./font-provider.js";
+import { type Props, type Run, copy, nested, sameContainer, samePosition } from "./model.js";
+import { startFontSupply, loadOpenFonts, prepareLocalOpenDisplay, refreshLocalOpenDisplay, requestPageFonts, hasPendingFontSupply, applyFontEnvironment, requestedFontDescriptions, requestedFontFailures, fontSupplyRevision, unverifiedSymbolFonts } from "./font-provider.js";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const input = $<HTMLTextAreaElement>("input"),
@@ -119,11 +121,14 @@ const files = new FileLifecycle(adapter, editor, {
   download: downloadHwpx,
   loadOpenFonts,
   prepareDisplay: (candidate, localOpen) => {
-    if (localOpen) prepareLocalOpenDisplay(candidate);
+    if (localOpen) {
+      prepareLocalOpenDisplay(candidate);
+      applyViewMarkers(adapter,candidate);
+    }
     else applyFontEnvironment(candidate);
   },
   tableDragLayout: stableTableDragLayout,
-  clickTableScope: (page,run) => withStudioTableClick(page,run),
+  clickTableScope: withStudioTableClick,
   paintedCellFormats: () => {
     const painted = paintedCellSelection;
     if (!painted?.formats || painted.native !== adapter.doc || files.busy || clipboardBusy ||
@@ -133,12 +138,14 @@ const files = new FileLifecycle(adapter, editor, {
   },
   change: (replaced, changedCellClose, committedCellApply) => {
     clearStaleTableNotice();
-    return replaced ? render(false, bodyPastePresentation, resizePresentation, changedCellClose, undefined, committedCellApply) : paint();
+    if (!replaced) return paint();
+    if (!committedCellApply && publishCellInsert()) return;
+    return render(false, bodyPastePresentation, resizePresentation, changedCellClose, undefined, committedCellApply);
   },
   error: (error) => {
     if(showTableNotice(error))return;
     knownDiagnosticError(error);
-    $("error").textContent = String(error);
+    $("error").textContent = editorFeedbackText(error);
     $("error").hidden = false;
   },
 });
@@ -208,17 +215,25 @@ const compositionKeys = compositionCommitKey(input, () => JSON.stringify([
   adapter.documentId, adapter.revision, editor.selection,
 ]), () => { if (!composing && !files.busy && !clipboardBusy && !document.querySelector("dialog[open]")) safe(() => editor.execute({type:"break"}), true); });
 let bodyPastePresentation = false;
+let textEditPresentation = false;
 let resizePresentation = false;
 let resizeCompletion: number | undefined;
-function publishBodyPaste(before: ReturnType<Interaction["capture"]>, eligible: boolean) {
+type PresentationTarget = Pick<ReturnType<Interaction["capture"]>, "documentId" | "revision" | "selection">;
+function presentationTarget(): PresentationTarget {
+  // Reveal compares the selection and revision only. Commands capture and
+  // validate their own native paths before editing.
+  return { documentId: adapter.documentId, revision: adapter.revision, selection: structuredClone(editor.selection) };
+}
+function publishBodyPaste(before: PresentationTarget, eligible: boolean) {
   // Only a completed body edit may defer offscreen presentation. Admission,
   // Core mutation, rollback and History have already run synchronously.
-  bodyPastePresentation = eligible && before.documentId === adapter.documentId &&
-    before.revision !== adapter.revision && before.selection.focus.kind === "body" &&
+  textEditPresentation = eligible && before.documentId === adapter.documentId &&
+    before.revision !== adapter.revision && editor.selection.kind === "caret";
+  bodyPastePresentation = textEditPresentation && before.selection.focus.kind === "body" &&
     (before.selection.kind === "caret" || before.selection.kind === "text") &&
     editor.selection.kind === "caret" && editor.selection.focus.kind === "body";
   try { files.ui.change(true); }
-  finally { bodyPastePresentation = false; }
+  finally { bodyPastePresentation = false; textEditPresentation = false; }
 }
 function cancelComposition() {
   compositionKeys.cancel();
@@ -229,7 +244,7 @@ function cancelComposition() {
 function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
   try {
     $("error").hidden = true;
-    const before = editor.capture();
+    const before = presentationTarget();
     action();
     if (adapter.revision !== before.revision) qaInputBoundary?.("native-command-committed");
     // A resize at its content floor restored the entire snapshot/selection.
@@ -242,7 +257,7 @@ function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
       try { files.ui.change(true); }
       finally { resizePresentation = false; }
     }
-    revealCommandSelection(document, before, editor.capture());
+    revealCommandSelection(document, before, presentationTarget());
   } catch (e) {
     if (e instanceof ClippedTextEdit) {
       $("error").textContent = e.message;
@@ -252,7 +267,7 @@ function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
     if(showTableNotice(e))return;
     if(e instanceof UnsupportedTableOperation){recordTableRefusal(document,e,editor.selection);$("error").hidden=true;$("clipboard-status").textContent=e.message;return;}
     knownDiagnosticError(e);
-    $("error").textContent = String(e);
+    $("error").textContent = editorFeedbackText(e);
     $("error").hidden = false;
     files.ui.change(false);
   }
@@ -317,6 +332,31 @@ function fontViewportActive() {
   const owner = fontViewportDocument;
   return owner !== undefined && owner.doc === adapter.doc && owner.id === adapter.documentId;
 }
+const fontNoticeVisibleMs = 8000;
+let fontNoticeOwner: string | undefined;
+let fontNoticeTimer: number | undefined;
+function syncFontNotice() {
+  const families=files.ui.standalone?unverifiedSymbolFonts(adapter):[];
+  const names=families.slice(0,3).join(", ")+(families.length>3?` 외 ${families.length-3}개`:"");
+  const notice=$("font-notice"), text=$("font-notice-text"), button=$("font-notice-settings");
+  const supported=localFontState().supported;
+  const message=names
+    ? `일부 문서 글꼴을 불러오지 못했습니다 (${names}). 기호 배치가 원본과 다를 수 있습니다.`
+    : "";
+  if(fontNoticeOwner===adapter.documentId && text.textContent===message) {
+    button.hidden=!message||!supported;
+    return; // Repaints and font callbacks must not reopen an expired notice.
+  }
+  window.clearTimeout(fontNoticeTimer);
+  fontNoticeOwner=adapter.documentId;
+  text.textContent=message;
+  notice.hidden=!message;
+  button.hidden=!message||!supported;
+  fontNoticeTimer=message ? window.setTimeout(()=>{
+    notice.hidden=true;
+    fontNoticeTimer=undefined;
+  },fontNoticeVisibleMs) : undefined;
+}
 function scheduleFontRefresh(source: FontRefreshSource) {
   if (fontRefreshTask !== undefined) { qaRenderCause?.("font-coalesced", source); return; }
   qaRenderCause?.("font-queued", source);
@@ -333,6 +373,7 @@ function scheduleFontRefresh(source: FontRefreshSource) {
     try {
       const revision = fontSupplyRevision(), doc = adapter.doc;
       const changed = refreshLocalOpenDisplay(adapter, () => scheduleFontRefresh("font-event"));
+      syncFontNotice();
       qaRenderCause?.("font-result", source, changed);
       if (changed) {
         editor.refreshFontGeometry(); formatViewKey = "";
@@ -410,6 +451,21 @@ function prepareBodySelectionSurfaces():boolean {
   requestPageFonts(adapter,pages);scheduleFontRefresh("selection-surfaces");
   return true;
 }
+// Only the physical paper rectangle is needed to reserve an offscreen page.
+// Core enumerates the current pagination; equal total page counts alone do
+// not guarantee that a portrait/landscape section boundary stayed in place.
+function readPaperSizes(count: number): Pick<BodyPageInfo, "width" | "height">[] | undefined {
+  if (typeof adapter.doc.getPageSizeRuns !== "function") return;
+  const sizes = new Array<Pick<BodyPageInfo, "width" | "height">>(count);
+  let start = 0;
+  for (const [end, width, height] of adapter.call<number[][]>("getPageSizeRuns")) {
+    if (!Number.isInteger(end) || end <= start || end > count ||
+        !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) return;
+    sizes.fill({width, height}, start, end);
+    start = end;
+  }
+  return start === count ? sizes : undefined;
+}
 function render(visibleComposition = false, visibleBodyEdit = false, visibleResize = false,
     changedCellClose?: () => void, fontSource?: FontRefreshSource, committedCellApply=false, repairCellFrame=false):void {
   qaRenderCause?.(fontSource ? "font-render-entry" : "render-entry", fontSource);
@@ -432,7 +488,8 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const fontRevision = fontSupplyRevision();
   // The measured benefit is unchanged siblings of an edited page. Avoid
   // observer/cache bookkeeping for single-page documents with no siblings.
-  const reusePages = viewAdapter.pageCount > 1;
+  const pageCount = viewAdapter.pageCount;
+  const reusePages = pageCount > 1;
   if (fontViewportDocument && !fontViewportActive()) fontViewportDocument = undefined;
   // Ordinary input must not immediately drain the offscreen work left by a
   // font update. Keep the current document in this demand presentation mode.
@@ -445,21 +502,37 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const resize = visibleResize && !composing && document.fonts.status !== "loading" &&
     (editor.selection.kind === "cells" || editor.selection.kind === "table") && reusePages;
   const selection=editor.selection;
+  const sameBodyParagraph = selection.kind === "text" && selection.anchor.kind === "body" &&
+    selection.focus.kind === "body" && selection.anchor.sec === selection.focus.sec &&
+    selection.anchor.para === selection.focus.para;
+  // An empty preedit restores the original paragraph selection. It needs
+  // current SVG for the highlight, but no offscreen ink.
+  const compositionSurface = visibleComposition && composing &&
+    (selection.kind === "caret" || composition?.text === "" && sameBodyParagraph);
   // Exact local BODY range display is viewport-driven too. Whole Core flow
   // already completed above; cells, mixed/cross-paragraph, unknown/transient,
   // loading fonts and first-document presentation retain the full path.
   let localTextScreen=reusePages&&!composing&&!adapter.transientEdit&&!files.busy&&document.fonts.status!=="loading"&&
     !document.querySelector("dialog[open]")&&adapter.localBodyTextIdentified&&renderedDocument===adapter.documentId&&
-    selection.kind==="text"&&selection.anchor.kind==="body"&&selection.focus.kind==="body"&&
-    selection.anchor.sec===selection.focus.sec&&selection.anchor.para===selection.focus.para;
+    sameBodyParagraph;
   if(localTextScreen)try{editor.capture();}catch{localTextScreen=false;}
-  const worksetPresentation=activeWorkset(document)&&reusePages&&!composing&&!adapter.transientEdit&&
-    !visibleResize&&!visibleComposition&&!files.busy&&document.fonts.status==='loaded'&&
-    editor.selection.kind==='caret';
-  const prioritize = worksetPresentation || fontPresentation || resize || localTextScreen || (visibleComposition && composing || visibleBodyEdit && !composing) &&
-    editor.selection.kind === "caret" && reusePages;
-  const infos = prioritize ? Array.from({ length: viewAdapter.pageCount }, (_, page) => viewAdapter.call("getPageInfo", page)) : undefined;
+  const openingWorkset=replaced&&files.publishingLocalOpen&&activeWorkset(document)&&reusePages;
+  // Core has completed layout above. A caret or live composition requires
+  // fresh ink for the viewport and focused page, including while fonts load.
+  // Font and scroll listeners republish current ink when their inputs change.
+  const textRange = selection.kind === "text" && sameContainer(selection.anchor, selection.focus);
+  const standaloneText = activeWorkset(document) && reusePages && !visibleResize && !files.busy &&
+    ((!composing && !adapter.transientEdit && (selection.kind === "caret" || textRange)) ||
+      (selection.kind === "caret" && composing && !!composition));
+  const worksetPresentation=openingWorkset || standaloneText;
+  const prioritize = worksetPresentation || fontPresentation || resize || localTextScreen ||
+    reusePages && (compositionSurface || visibleBodyEdit && !composing && selection.kind === "caret");
+  const paperSizes = worksetPresentation ? readPaperSizes(pageCount) : undefined;
+  const fullInfos = prioritize && !paperSizes
+    ? Array.from({length: pageCount}, (_, page) => viewAdapter.call<BodyPageInfo>("getPageInfo", page)) : undefined;
+  const infos = paperSizes ?? fullInfos;
   let needed: Set<number> | undefined;
+  let editedFocusPage: number | undefined;
   if (infos) {
     for (let page = 0; page < infos.length; page++) {
       let div = previousPages[page];
@@ -478,16 +551,20 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
         bounds.width <= 0 || bounds.height <= 0)) {
       fontViewportDocument = undefined; render(visibleComposition,visibleBodyEdit,visibleResize); return;
     }
-    needed = new Set([editor.cursorRect().pageIndex]);
-    if (resize) for (const r of editor.rectangles()) needed.add(r.pageIndex);
-    for (let page = 0; page < infos.length; page++) {
-      const rect = previousPages[page].getBoundingClientRect();
-      if (rect.bottom > bounds.top && rect.top < bounds.bottom && rect.right > bounds.left && rect.left < bounds.right)
-        needed.add(page);
-    }
-    if(worksetPresentation){
-      const active=activePageRange(pages,viewport,editor.cursorRect().pageIndex);
-      if(active)needed=active;else needed=new Set(infos.map((_,i)=>i));
+    const focusPage = editor.cursorRect().pageIndex;
+    if (visibleBodyEdit) editedFocusPage = focusPage;
+    if (worksetPresentation) {
+      // An edit only needs the visible viewport and caret. Scroll retains
+      // the adjacent-page buffer and fills pending pages on demand.
+      needed = activePageRange(pages, viewport, focusPage, bounds, openingWorkset || textEditPresentation || compositionSurface ? 0 : 1) ?? new Set(infos.map((_, i) => i));
+    } else {
+      needed = new Set([focusPage]);
+      if (resize) for (const r of editor.rectangles()) needed.add(r.pageIndex);
+      for (let page = 0; page < infos.length; page++) {
+        const rect = previousPages[page].getBoundingClientRect();
+        if (rect.bottom > bounds.top && rect.top < bounds.bottom && rect.right > bounds.left && rect.left < bounds.right)
+          needed.add(page);
+      }
     }
     // Canvas is already supported for current-document screen composition.
     // Restrict resize use to table/text pages, with exact Core cell boxes on
@@ -511,7 +588,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const receiptPages = !repairCellFrame && reusePages && !replaced && (!prioritize || fontPresentation) &&
     !resize && !visibleComposition && !composing && !adapter.transientEdit && document.fonts.status === "loaded"
     ? (needed ?? visibleSelectionPages()) : undefined;
-  const pageCount = viewAdapter.pageCount, renderDoc = adapter.doc, renderId = adapter.documentId,
+  const renderDoc = adapter.doc, renderId = adapter.documentId,
     revision = adapter.revision, generation = renderGeneration, selectionGeneration = editor.currentSelectionGeneration,
     zoom = pages.style.zoom;
   const receiptView: ScreenReceiptView = {pageCount, current: () =>
@@ -524,32 +601,36 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const frameCurrent=()=>screenInputs?.()===true && generation===renderGeneration &&
     document.fonts.status===fontStatus && fontRevision===fontSupplyRevision() && dpr===devicePixelRatio &&
     zoom===pages.style.zoom && renderedDocument===renderId;
-  for (let page = 0; page < viewAdapter.pageCount; page++) {
-    const info = infos?.[page] ?? viewAdapter.call("getPageInfo", page);
+  for (let page = 0; page < pageCount; page++) {
     let div = previousPages[page];
     if (needed && !needed.has(page)) {
       // Keep the validated DOM for byte comparison at flush, but do not expose
       // stale ink/geometry as the current page. Scroll/resize flush before use.
       // Only the already-hidden, fixed-size pending surface may skip its
       // descendant style/layout/paint. Fresh visible pages never retain this.
-      if (div.style.contentVisibility !== "hidden") div.style.contentVisibility = "hidden";
-      if (div.style.visibility !== "hidden") div.style.visibility = "hidden";
-      const pending = worksetPresentation ? "workset" : fontPresentation ? "font" : resize ? "resize" : visibleBodyEdit || localTextScreen ? "body-edit" : "composition";
-      if (div.dataset.renderPending !== pending) div.dataset.renderPending = pending;
-      if(worksetPresentation)pagePresenter.release(div);
+      if(worksetPresentation)hideWorksetPage(div);
+      else {
+        if (div.style.contentVisibility !== "hidden") div.style.contentVisibility = "hidden";
+        if (div.style.visibility !== "hidden") div.style.visibility = "hidden";
+        const pending = fontPresentation ? "font" : resize ? "resize" : visibleBodyEdit || localTextScreen ? "body-edit" : "composition";
+        if (div.dataset.renderPending !== pending) div.dataset.renderPending = pending;
+      }
       deferredCompositionPages = true;
       continue;
     }
     try {
-      renderPage(page, info, div, fontRevision, reusePages, prioritize && visibleComposition, resize,
-        receiptPages?.has(page) ? receiptView : undefined);
+      // Render the edited page directly. Compare only neighboring pages.
+      const compare = receiptPages?.has(page) && page !== editedFocusPage;
+      const info = fullInfos?.[page] ?? viewAdapter.call<BodyPageInfo>("getPageInfo", page);
+      renderPage(page, info, div, fontRevision, reusePages, prioritize && visibleComposition && !!composition?.text, resize,
+        compare ? receiptView : undefined);
     } catch (error) {
       // Presentation fallback only: never replay the already committed command.
       if (resize) { render(); return; }
       throw error;
     }
   }
-  while (pages.children.length > viewAdapter.pageCount) pages.lastElementChild!.remove();
+  while (pages.children.length > pageCount) pages.lastElementChild!.remove();
   viewport.scrollTop = previous;
   viewport.scrollLeft = previousLeft;
   renderedDocument = adapter.documentId;
@@ -561,9 +642,19 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
       revision:adapter.revision,generation:renderGeneration,environment,epoch,fonts:fontRevision,dpr:devicePixelRatio,
       dimensions:infos.map(info=>({width:info.width,height:info.height}))};
   }
-  requestPageFonts(adapter, pages);
-  const fontNotice = $("font-notice");
-  fontNotice.textContent = ''; fontNotice.hidden = true;
+  requestPageFonts(adapter, pages, textEditPresentation && !files.busy);
+  // A standalone file open has now validated and published every page and
+  // collected its font demand. Retire offscreen ink before accepting input.
+  if(replaced && files.busy && !prioritize && reusePages && activeWorkset(document) &&
+      editor.selection.kind==='caret' && adapter.scope==='edit' && !adapter.transientEdit && !composing){
+    const visible=activePageRange(pages,viewport,editor.cursorRect().pageIndex);
+    if(visible)for(const div of Array.from(pages.children) as HTMLElement[]){
+      if(visible.has(Number(div.dataset.page)))continue;
+      hideWorksetPage(div);
+      deferredCompositionPages=true;
+    }
+  }
+  syncFontNotice();
   scheduleFontRefresh("render-tail");
   if (replaced) $("error").hidden = true;
   // Page finalization ends above. Hold only live scalar/identity witnesses,
@@ -585,7 +676,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
     renderedDocument=undefined;
     throw Error("Current cell display could not be verified after rerender");
   }
-  const display=()=>paint(replaced ? undefined : changedCellClose);
+  const display=()=>paint(replaced ? undefined : changedCellClose, (!!infos && compositionSurface && sameBodyParagraph) || (standaloneText && textRange));
   const fence=split?adapter.cellApplyDisplayFence(current):undefined;
   withQaReadPhase(adapter.doc,"ui-display",()=>split?adapter.withUpdateReads(display,fence??(()=>false)):display());
   if (resize) {
@@ -615,6 +706,13 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
 type ActivePageProof={doc:typeof adapter.doc;id:string;revision:number;generation:number;
   native:number;fonts:number;environment:string;dpi:number;zoom:string;svg:Element};
 const activePageProofs=new WeakMap<HTMLElement,ActivePageProof>();
+function hideWorksetPage(div:HTMLElement){
+  if(div.style.contentVisibility!=='hidden')div.style.contentVisibility='hidden';
+  if(div.style.visibility!=='hidden')div.style.visibility='hidden';
+  if(div.dataset.renderPending!=='workset')div.dataset.renderPending='workset';
+  activePageProofs.delete(div);
+  pagePresenter.release(div);
+}
 function activePageReady(page:HTMLElement):boolean {
   const p=activePageProofs.get(page);
   return !!p&&p.doc===adapter.doc&&p.id===adapter.documentId&&p.revision===adapter.revision&&
@@ -624,10 +722,11 @@ function activePageReady(page:HTMLElement):boolean {
     !page.matches('[data-render-pending],[data-ime-canvas],[data-resize-canvas]')&&
     !adapter.hasPendingLocalBodyFlow()&&!adapter.transientEdit&&document.fonts.status==='loaded';
 }
-function renderPage(page: number, info: { width: number; height: number }, div: HTMLElement | undefined, fontRevision: number, reusePages: boolean, hangulUpdate = false, resizeCanvas = false, receiptView?: ScreenReceiptView) {
+function renderPage(page: number, info: BodyPageInfo, div: HTMLElement | undefined, fontRevision: number, reusePages: boolean, hangulUpdate = false, resizeCanvas = false, receiptView?: ScreenReceiptView) {
   const native=screenInputDispatchEpoch(adapter.doc),environment=adapter.observedLocalBodyEnvironment();
   pagePresenter.renderPage(page, info, div, fontRevision, reusePages, hangulUpdate, resizeCanvas, receiptView);
   const mounted=pages.children[page] as HTMLElement|undefined,svg=mounted?.querySelector(':scope > svg');
+  if (mounted) paintBodyCorners(mounted, info);
   if(activeWorkset(document)&&mounted&&svg&&native!==undefined&&native===screenInputDispatchEpoch(adapter.doc)&&
     environment!==undefined&&environment===adapter.observedLocalBodyEnvironment()&&!adapter.hasPendingLocalBodyFlow())
     activePageProofs.set(mounted,{doc:adapter.doc,id:adapter.documentId,revision:adapter.revision,
@@ -684,10 +783,10 @@ function flushCompositionPages() {
       adapter.withUpdateReads(()=>{for(const n of needed){const div=visible[n];
         if(div?.hasAttribute('data-render-pending'))renderPage(n,adapter.call('getPageInfo',n),div,fontSupplyRevision(),true);}});
       for(const div of visible)if(!needed.has(Number(div.dataset.page))&&!div.contains(document.activeElement)){
-        div.style.contentVisibility='hidden';div.style.visibility='hidden';div.dataset.renderPending='workset';pagePresenter.release(div);
+        hideWorksetPage(div);
       }
       deferredCompositionPages=!!pages.querySelector('[data-render-pending]');
-      requestPageFonts(adapter,pages);scheduleFontRefresh('deferred-drain');return;
+      requestPageFonts(adapter,pages,true);scheduleFontRefresh('deferred-drain');return;
     }
     if(prepareBodySelectionSurfaces())return;
     if (fontViewportActive() && editor.selection.kind === 'caret' &&
@@ -714,7 +813,7 @@ function flushCompositionPages() {
         }
       });
       deferredCompositionPages = !!pages.querySelector('[data-render-pending]');
-      requestPageFonts(adapter,pages); scheduleFontRefresh("deferred-drain");
+      requestPageFonts(adapter,pages,true); scheduleFontRefresh("deferred-drain");
       return;
     }
     render();
@@ -803,7 +902,43 @@ function syncFormatView(owners?: OwnerProjection) {
       markFormatToggle($(name) as HTMLButtonElement,formatToggleState({},name),String(error));
   }
 }
-function paint(changedCellClose?: () => void) {
+/** A Core text edit with identical pagination keeps existing page surfaces. */
+function publishCellInsert(): boolean {
+  const selection = editor.selection;
+  if (!activeWorkset(document) || renderedDocument !== adapter.documentId ||
+      selection.kind !== "caret" || selection.focus.kind !== "cell" || composing ||
+      adapter.transientEdit || files.busy || clipboardBusy || document.fonts.status !== "loaded" ||
+      pages.querySelector("[data-ime-canvas],[data-resize-canvas]")) return false;
+  const update = adapter.consumeCellPageUpdate(selection.focus);
+  if (!update || update.pageCount !== pages.children.length) return false;
+  const caretPage = pages.children[update.cursor.pageIndex] as HTMLElement | undefined;
+  if (!caretPage || caretPage.hasAttribute("data-render-pending") || !caretPage.querySelector(":scope > svg"))
+    return false;
+  const changed: HTMLElement[] = [];
+  stopDeferredPages();
+  bodyPresentation = undefined;
+  renderGeneration++;
+  try {
+    adapter.withUpdateReads(() => {
+      for (const page of update.pages) {
+        const node = pages.children[page] as HTMLElement | undefined;
+        if (!node || node.hasAttribute("data-render-pending")) continue;
+        renderPage(page, adapter.call("getPageInfo", page), node, fontSupplyRevision(), true);
+        changed.push(pages.children[page] as HTMLElement);
+      }
+    });
+  } catch {
+    return false; // Retry presentation with the committed document.
+  }
+  requestPageFonts(adapter, pages, true, changed);
+  syncFontNotice();
+  scheduleFontRefresh("render-tail");
+  qaInputBoundary?.("screen-published");
+  paint();
+  return true;
+}
+
+function paint(changedCellClose?: () => void, rangeRendered = false) {
   adapter.completeLocalBodyFlow();
   return adapter.withUpdateReads(() => {
   // The zoom-aware pointer capture path can bypass the legacy handler. Restore
@@ -816,10 +951,20 @@ function paint(changedCellClose?: () => void) {
   if (pages.querySelector("[data-resize-canvas]") && !cellSelection) { render(); return; }
   // Selection geometry must never measure stale hidden SVG. Normal caret moves
   // into an unprepared page and any range selection synchronously finish it.
-  if (deferredCompositionPages && (!cellSelection && editor.selection.kind !== "caret" ||
+  // A restored IME range already has current SVG for the viewport and caret
+  // when paint is called directly by its render pass.
+  if (deferredCompositionPages && (!cellSelection && editor.selection.kind !== "caret" && !rangeRendered ||
       cellSelection && editor.rectangles().some(r => pages.querySelector(`[data-page="${r.pageIndex}"]`)?.hasAttribute("data-render-pending")) ||
       pages.querySelector(`[data-page="${editor.cursorRect().pageIndex}"]`)?.hasAttribute("data-render-pending"))) {
-    if(!prepareBodySelectionSurfaces()){render();return;}
+    const range = editor.selection;
+    const workset = range.kind === "text" && sameContainer(range.anchor, range.focus) &&
+      activeWorkset(document) && !composing && !adapter.transientEdit && !files.busy &&
+      !pages.querySelector('[data-render-pending]:not([data-render-pending="workset"])')
+      ? activePageRange(pages, viewport, editor.cursorRect().pageIndex, undefined, 0) : undefined;
+    if (!(workset && [...workset].every(i => {
+      const node = pages.children[i] as HTMLElement | undefined;
+      return node && activePageReady(node);
+    })) && !prepareBodySelectionSurfaces()) { render(); return; }
   }
   const synchronousClose = pages.children.length>1&&editor.selection.kind==="caret"&&
     editor.selection.focus.kind==="cell"&&!nested(editor.selection.focus)&&!composing&&
@@ -836,7 +981,7 @@ const selectionLayouts = new WeakMap<SVGSVGElement, {
 }>();
 const pagePresenter = createPagePresenter({
   adapter, document, pages,
-  invalidateSelectionSvg: svg => { selectionLayouts.delete(svg); },
+  invalidateSelectionSvg: svg => { selectionLayouts.delete(svg); invalidatePaintedGlyphs(svg); },
 });
 function selectionRuns(viewEditor: Interaction, page: number): readonly Run[] {
   const a = viewEditor.adapter;
@@ -955,10 +1100,13 @@ function paintSelectionGeometry(owners?:OwnerProjection) {
   const compositionBoxes = composing ? compositionCursorBoxes(viewEditor, composition) : [];
   const page = pages.querySelector<HTMLElement>(`[data-page="${r.pageIndex}"]`);
   const point = page ? viewportPoint(page, viewport, r.x, r.y) : undefined;
-  for (const overlay of Array.from(pages.getElementsByClassName("overlay")))
-    overlay.replaceChildren();
+  // Page margin marks belong to the displayed page. Only selection decorations
+  // (caret, guides and highlights) are replaced on a selection-only update.
+  for (const overlay of pages.getElementsByClassName("overlay")) {
+    while (overlay.lastElementChild && !overlay.lastElementChild.classList.contains("body-corner-guides"))
+      overlay.lastElementChild.remove();
+  }
   paintTableGuides(viewEditor,pages);
-  paintBodyCorners(viewEditor,pages);
   let f5Overlay:SVGSVGElement|undefined;
   for (const pageIndex of new Set(rects.map(r => r.pageIndex))) {
     const bands = rects.filter(r => r.pageIndex === pageIndex && r.width > 0 && r.height > 0);
@@ -1032,7 +1180,7 @@ const coordinatorTrace=configureEditorDisplay(editor,()=>{
   return `${renderGeneration}:${fontSupplyRevision()}:${devicePixelRatio}:${pages.style.zoom}:${pages.children.length}`;
 },location.href,window.parent===window);
 if(coordinatorTrace)Object.defineProperty(window,"__oneditQaEditorCoordinator",{value:coordinatorTrace});
-function paintSelection(owners?:OwnerProjection, changedCellClose?:()=>void) {
+function paintSelection(owners?:OwnerProjection, changedCellClose?:()=>void, projectGeometry = true) {
   return publishEditorDisplay(editor,()=>withFormatPresentationRead(editor, () => {
   menuSettings?.sync();
   headerFooter?.sync();
@@ -1047,7 +1195,7 @@ function paintSelection(owners?:OwnerProjection, changedCellClose?:()=>void) {
     !!document.getElementById("integration-menus") && !!pages.querySelector("[data-resize-canvas]");
   const keepFormat = !reason && keepTypingFormatPresentation(editor);
   if (!changedCellClose && !resizeFormatsUnchanged && !keepFormat) syncFormatView(owners);
-  paintSelectionGeometry(owners);
+  if (projectGeometry) paintSelectionGeometry(owners);
   projectText("status",specialEditingStatus(document,editor));
   $("status").title = adapter.viewerOnlyReason ?? "";
   const statistics=characterStatistics(editor);statistics.sync();
@@ -1087,7 +1235,11 @@ function paintSelection(owners?:OwnerProjection, changedCellClose?:()=>void) {
       }
     }
   }
-  if (!keepFormat) { if (!activeWorkset(document)) syncFormatAdditions(); checkpointFormatPresentation(editor); }
+  // Standalone menu publication owns its deferred quick-format checkpoint.
+  if (!keepFormat && !activeWorkset(document)) {
+    syncFormatAdditions();
+    checkpointFormatPresentation(editor);
+  }
   publishHostState?.();
   if(f5Visual)f5Render.commitVisual();
   }),!!changedCellClose);
@@ -1146,7 +1298,7 @@ function updateView(action: () => void, afterF5?: () => void, trustedF5=false) {
     files.ui.change(false);
   } catch (e) {
     knownDiagnosticError(e);
-    $("error").textContent = String(e);
+    $("error").textContent = editorFeedbackText(e);
     $("error").hidden = false;
   }
   if (!revealed) afterF5?.();
@@ -1185,7 +1337,7 @@ function format(kind: FormatKind) {
     };
   } catch (e) {
     knownDiagnosticError(e);
-    $("error").textContent = String(e);
+    $("error").textContent = editorFeedbackText(e);
     $("error").hidden = false;
     focus();
   }
@@ -1373,9 +1525,12 @@ function studioS6ClickRoute(){
   return window.parent===window&&u.protocol==="http:"&&u.hostname==="127.0.0.1"&&
     u.searchParams.get("studioS6DormantTableTools")==="1";
 }
-function withStudioTableClick(page:HTMLElement,run:()=>void) {
+function withStudioTableClick(page:HTMLElement,_at:Pick<PointerEvent,"clientX"|"clientY">,run:()=>void) {
   if(!activeWorkset(document)&&!studioTableClickScopedEnabled(window,coreRuntimeIdentity(adapter.doc)?.sha256))return run();
   const note=(reason:string)=>{if(studioClickTrace)studioClickCounts[reason]=(studioClickCounts[reason]??0)+1;};
+  // With deferred pages, native hit testing can retire the visible page's
+  // dispatch proof during this same click. Use the ordinary validated path.
+  if(deferredCompositionPages)return run();
   const a=adapter,native=a.doc,docId=a.documentId,revision=a.revision,svg=page.querySelector(":scope > svg"),
     view=renderGeneration,fonts=fontSupplyRevision(),environment=a.observedLocalBodyEnvironment(),zoom=pages.style.zoom,
     index=Number(page.dataset.page);
@@ -1384,17 +1539,10 @@ function withStudioTableClick(page:HTMLElement,run:()=>void) {
     environment!==undefined&&a.observedLocalBodyEnvironment()===environment&&pages.style.zoom===zoom&&
     document.fonts.status==="loaded"&&!composing&&!files.busy&&!clipboardBusy&&!a.transientEdit&&
     !a.hasPendingLocalBodyFlow()&&!document.querySelector("dialog[open]")&&
-    (!deferredCompositionPages||activeWorkset(document)&&activePageReady(page))&&!page.matches("[data-render-pending],[data-ime-canvas],[data-resize-canvas]")&&
+    !deferredCompositionPages&&!page.matches("[data-render-pending],[data-ime-canvas],[data-resize-canvas]")&&
     !!svg&&svg===page.querySelector(":scope > svg")&&page.isConnected&&page.parentElement===pages&&
     Number.isSafeInteger(index)&&index>=0&&page.dataset.page===String(index);
-  const pending=[...pages.querySelectorAll<HTMLElement>('[data-render-pending],[data-ime-canvas],[data-resize-canvas]')];
-  const active=activeWorkset(document)?activePageRange(pages,viewport,index):undefined;
-  const pendingSafe=activeWorkset(document)&&activePageReady(page)&&!!active&&pending.every(p=>
-    !active.has(Number(p.dataset.page))&&p.parentElement===pages&&
-    ['font','workset'].includes(p.dataset.renderPending??'')&&p.style.visibility==='hidden'&&
-    p.style.contentVisibility==='hidden'&&!p.matches('[data-ime-canvas],[data-resize-canvas]'));
-  if(!current()||(pending.length>0&&!pendingSafe)){
-    note(!current()?"current-input-fence":!activePageReady(page)?"page-native-proof-unavailable":"active-page-pending");
+  if(!current()||pages.querySelector('[data-render-pending],[data-ime-canvas],[data-resize-canvas]')){
     note("view-pending-or-stale");return run();
   }
   note("pointer-scope");
@@ -1422,7 +1570,7 @@ pages.onpointerdown = (e) => {
     );
     dragging = true;
   });
-  if(e.isTrusted&&e.button===0&&e.isPrimary&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey)withStudioTableClick(page,select);
+  if(e.isTrusted&&e.button===0&&e.isPrimary&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey)withStudioTableClick(page,e,select);
   else select();
   focus();
 };
@@ -1444,17 +1592,17 @@ window.addEventListener("pointermove", (e) => {
     );
 });
 window.addEventListener("pointerup", () => (dragging = false));
-// Separate double-click admission; single pointer/drag/paint performance paths
-// remain unchanged. The existing Selection boundary drives copy/edit/card.
-pages.addEventListener('dblclick',e=>{
+function selectPointerText(e: MouseEvent, unit: 'word' | 'sentence') {
   if(e.defaultPrevented||e.button!==0||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||composing||adapter.transientEdit||files.busy||clipboardBusy||document.querySelector('dialog[open]'))return;
   const page=(e.target as Element).closest<HTMLElement>('.page');if(!page||!pages.contains(page))return;
   try{
-    const captured=editor.capture(),point=pagePoint(page,e.clientX,e.clientY),range=bodyWordAtPoint(adapter,Number(page.dataset.page),point.x,point.y);
+    const captured=editor.capture(),point=pagePoint(page,e.clientX,e.clientY),range=pointerTextRange(adapter,Number(page.dataset.page),point.x,point.y,unit);
     if(!range||!page.isConnected||captured.documentId!==adapter.documentId||captured.revision!==adapter.revision||JSON.stringify(captured.selection)!==JSON.stringify(editor.selection))return;
     e.preventDefault();updateView(()=>{editor.point(range[0]);editor.point(range[1],true);editor.block=false;});focus();
   }catch(error){files.ui.error(error);}
-});
+}
+pages.addEventListener('dblclick', e => selectPointerText(e, 'word'));
+pages.addEventListener('click', e => { if (e.detail === 3) selectPointerText(e, 'sentence'); });
 qaInputBoundary = mountQaInputBoundary(window, input, () => ({
   revision: adapter.revision, selectionGeneration: editor.currentSelectionGeneration, renderGeneration,
   composing, fileBusy: files.busy, clipboardBusy, transientEdit: adapter.transientEdit, selectionKind: editor.selection.kind,
@@ -1484,9 +1632,23 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
   let osWriteCompleted = false;
   let pasteApplied = false;
   let restoreTarget: ReturnType<Interaction["capture"]> | undefined;
+  // A read-only copy transitions the command controls to busy and back.
+  // Its source text and overlay are already displayed. Edits, scrolls and
+  // font changes publish through their own normal render paths while waiting.
+  const copyDoc = adapter.doc, copyRevision = adapter.revision, copySelection = editor.currentSelectionGeneration;
+  const showClipboardState = () => {
+    if (kind === "copy" && activeWorkset(document) && adapter.doc === copyDoc &&
+        adapter.revision === copyRevision && editor.currentSelectionGeneration === copySelection &&
+        !files.busy && !composing && !adapter.transientEdit) {
+      adapter.withUpdateReads(() => editor.withCellBlockPresentation(owners =>
+        paintSelection(owners, undefined, false)));
+    } else {
+      paint();
+    }
+  };
   clipboardBusy = true;
-  paint();
   try {
+    showClipboardState();
     if (kind === "paste" || kind === "paste-text") pasteResult.start(kind === "paste-text");
     const captured = editor.capture();
     restoreTarget = captured;
@@ -1623,7 +1785,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
       $("error").hidden = !(e instanceof ClippedTextEdit);
       if (e instanceof ClippedTextEdit) $("error").textContent = e.message;
     } else {
-      $("error").textContent = `클립보드 작업 실패: ${String(e)}`;
+      $("error").textContent = `클립보드 작업 실패: ${editorFeedbackText(e)}`;
       $("error").hidden = false;
     }
     $("clipboard-status").textContent = kind === 'cut' && osWriteCompleted
@@ -1631,7 +1793,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
       : pasteApplied ? "붙여넣기 명령 이후 오류 · 결과 확인 필요" : "클립보드 작업 취소";
   } finally {
     clipboardBusy = false;
-    paint();
+    showClipboardState();
     if (
       mayRestoreClipboardFocus(document, fallbackDialog && document.activeElement === viewport ? viewport : initiator, restoreTarget, () =>
         editor.capture(),
@@ -1685,7 +1847,7 @@ queueMicrotask(() => {
     },
     capture: () => editor.capture(),
   });
-  mountTextboxEditor(document,editor,{busy:()=>composing||clipboardBusy||files.busy,changed:render,focus,error:e=>{$("error").textContent=String(e);$("error").hidden=false;}});
+  mountTextboxEditor(document,editor,{busy:()=>composing||clipboardBusy||files.busy,changed:render,focus,error:e=>{$("error").textContent=editorFeedbackText(e);$("error").hidden=false;}});
   mountShortcutResults(document,{blocked:()=>composing||clipboardBusy||files.busy||!!document.querySelector('dialog[open]'),preferences:()=>menuSettings?.read()??[]});
   // Embedded Host has no standalone page-menu launchers. Do not partially
   // mount their dialogs or abort the remaining UI bootstrap on a null button.
@@ -1693,18 +1855,18 @@ queueMicrotask(() => {
     busy: () => composing || clipboardBusy || files.busy,
     page: () => Math.max(0, Number($("view-status").dataset.viewPage ?? 1) - 1),
     changed: render, focus,
-    error: error => { $("error").textContent = String(error); $("error").hidden = false; },
+    error: error => { $("error").textContent = editorFeedbackText(error); $("error").hidden = false; },
   });
   if (document.getElementById("page-number-open")) pageNumber = mountPageNumber(document, editor, {
     busy: () => composing || clipboardBusy || files.busy,
     page: () => Math.max(0, Number($("view-status").dataset.viewPage ?? 1) - 1),
     changed: render, focus,
-    error: error => { $("error").textContent = String(error); $("error").hidden = false; },
+    error: error => { $("error").textContent = editorFeedbackText(error); $("error").hidden = false; },
   });
   if (document.getElementById("columns-open")) columns = mountColumns(document, editor, {
     busy: () => composing || clipboardBusy || files.busy,
     changed: render, focus,
-    error: error => { $("error").textContent = String(error); $("error").hidden = false; },
+    error: error => { $("error").textContent = editorFeedbackText(error); $("error").hidden = false; },
   });
   // Presentation only, after shared sources, settings and late textbox entries
   // are connected. Other entrances and the closed command catalog stay intact.
