@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {activeWorkset} from './active-workset.js';
 import { browserShortcutScope } from "./browser-shortcut-scope.js";
 import type { Interaction } from "./interaction.js";
@@ -132,11 +133,11 @@ export function mountInsertMenuUI1(doc: Document, editor: Interaction, actions: 
   held(panel,"a","덧말 넣기(A)…",unavailable); held(panel,"f","문서 끼워 넣기(F)…",unavailable,"Ctrl+O"); separator();
   const nbsp=doc.createElement('button');nbsp.type='button';nbsp.dataset.insertEntry='nbsp';nbsp.setAttribute('role','menuitem');nbsp.textContent='묶음 빈칸';const nbspKey=doc.createElement('kbd');nbspKey.textContent='Ctrl+Alt+Space';nbsp.append(nbspKey);panel.append(nbsp);
   const nbspReason=()=>{try{if(actions.busy())throw Error('입력 처리 중');const s=editor.selection;if(s.kind!=='caret'&&s.kind!=='text')throw Error('본문 또는 셀의 문자 위치를 선택하세요.');for(const t of editor.targets()){editor.adapter.assertEditable(t.p);editor.adapter.assertTextOnly(t.p);}return '';}catch(e){return String(e);}};
-  const syncNbsp=()=>{const why=nbspReason();nbsp.disabled=!!why;nbsp.title=why||'기존 문자 삽입 · NBSP 앞뒤는 자동 줄나눔하지 않습니다.';};
+  const syncNbsp=()=>{const why=nbspReason();nbsp.disabled=!!why;nbsp.title=why?editorFeedbackText(why):'기존 문자 삽입 · NBSP 앞뒤는 자동 줄나눔하지 않습니다.';};
   const nbspOpening=()=>syncNbsp();root.addEventListener('rhwp:menu-opening',nbspOpening);disposers.push(()=>root.removeEventListener('rhwp:menu-opening',nbspOpening));
   nbsp.onclick=()=>{syncNbsp();if(nbsp.disabled||!admit())return;const target=captured!;close();root.open=false;try{editor.execute({type:'insert',text:'\u00a0'},target);actions.changed();}catch(e){actions.feedback(String(e));}actions.focus();};syncNbsp();
   const shy=doc.createElement('button');shy.type='button';shy.dataset.insertEntry='soft-hyphen';shy.setAttribute('role','menuitem');shy.textContent='무른 하이픈';const shyKey=doc.createElement('kbd');shyKey.textContent='Ctrl+Shift+-';shy.append(shyKey);panel.append(shy);
-  const syncShy=()=>{const why=nbspReason();shy.disabled=!!why;shy.setAttribute('aria-disabled',String(!!why));shy.title=why||'U+00AD 삽입 · 평소에는 폭 없이 숨기고 선택된 자동 줄끝에서만 하이픈을 표시합니다.';shy.setAttribute('aria-description',shy.title);};
+  const syncShy=()=>{const why=nbspReason();shy.disabled=!!why;shy.setAttribute('aria-disabled',String(!!why));shy.title=why?editorFeedbackText(why):'U+00AD 삽입 · 평소에는 폭 없이 숨기고 선택된 자동 줄끝에서만 하이픈을 표시합니다.';shy.setAttribute('aria-description',shy.title);};
   const shyOpening=()=>syncShy();root.addEventListener('rhwp:menu-opening',shyOpening);disposers.push(()=>root.removeEventListener('rhwp:menu-opening',shyOpening));
   shy.onclick=()=>{syncShy();if(shy.disabled||!admit())return;const target=captured!;close();root.open=false;try{editor.execute({type:'insert',text:'\u00ad'},target);actions.changed();}catch(e){actions.feedback(String(e));}actions.focus();};syncShy();
   held(panel,"c","문자표(C)…",unavailable,"Ctrl+F10"); held(panel,"h","한자 입력(H)",unavailable,"",true); separator();

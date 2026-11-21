@@ -24,7 +24,7 @@
   "sideEffects": false,
   "type": "module",
   "types": "./dist/index.d.ts",
-  "version": "1.0.0-rc5",
+  "version": "1.0.0-rc6",
   "files": [
     "src",
     "dist",
@@ -42,6 +42,7 @@
     "fixtures",
     "tsconfig.json",
     "verify-release-dist.mjs",
-    "SDK-DIST-SHA256.json"
+    "SDK-DIST-SHA256.json",
+    "EXTERNAL-HOST.md"
   ]
 }

@@ -366,16 +366,7 @@ function inspect(a: RhwpAdapter, selection: Selection): CapturedRange {
     [...text].length <= limits.selection && paragraph.length <= 200_000,
     "CONTENT_LIMIT_EXCEEDED",
   );
-  need(
-    segments.every((p) =>
-      equal(
-        (effectiveProperties(p.properties) as any).character,
-        (effectiveProperties(first.properties) as any).character,
-      ),
-    ),
-    "UNSUPPORTED_RANGE",
-    "MIXED_CHARACTER_STYLES",
-  );
+  // Each replacement line is applied with its own captured character style.
   return {
     ...first,
     end: copy(end),

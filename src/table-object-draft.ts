@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { bindEditorDialogFormSubmit, closeEditorDialog, showDocumentEditingDialog } from "./editor-popup-focus.js";
 import type {Interaction} from './interaction.js';
 import {selectedTableObject} from './table-object-command.js';
@@ -21,7 +22,7 @@ export function mountTableObjectDraft(doc:Document,editor:Interaction,actions:{b
     else delete props.pageBreak;
   }
   editor.execute({type:'table-object',action:mode==='transpose' || mode==='pagination' ? mode : 'format',props},target);guard.consume();closeEditorDialog(dialog);actions.changed();
- }catch(e){status.textContent=e instanceof Error?e.message:String(e);}};
+ }catch(e){status.textContent=editorFeedbackText(e);}};
  dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();target=undefined;});
  form.addEventListener('keydown',e=>{e.stopPropagation();if(e.isComposing||e.keyCode===229)return;if(e.key==='Escape'){e.preventDefault();closeEditorDialog(dialog);}if(e.key==='Tab'){const a=[...form.querySelectorAll<HTMLElement>('input,select,button')].filter(c=>c.getClientRects().length&&!(c as HTMLInputElement).disabled),i=a.indexOf(doc.activeElement as HTMLElement);if(e.shiftKey&&i<=0||!e.shiftKey&&i===a.length-1){e.preventDefault();a[e.shiftKey?a.length-1:0]?.focus();}}});
  return {show(next:typeof mode){if(actions.blocked()||dialog.open)return;const {raw} = selectedTableObject(editor.adapter,editor.selection,next==='transpose',undefined,next==='pagination');target=editor.capture();mode=next;values.clear();pages.clear();tabs.replaceChildren();body.replaceChildren();status.textContent='';title.textContent=next==='transpose'?'표의 줄·칸 바꾸기':next==='pagination'?'표 쪽 나누기':'표 전체의 테두리·배경';dialog.setAttribute('aria-label',title.textContent);

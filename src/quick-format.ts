@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {selectNumericDraftOnClick} from "./numeric-draft-selection.js";
 import { activeWorkset } from "./active-workset.js";
 import { publishEditorDisplay, readEditorDisplay } from "./editor-state-coordinator.js";
@@ -140,7 +141,7 @@ export function bindQuickDraft(form: HTMLFormElement, editor: Interaction, busy:
     if (!captured && !invalidated) reset(state);
     // Admission's busy flag also covers file/modal work. Do not diagnose IME
     // from that aggregate flag; only the displayed reason changes here.
-    const displayWhy = why ? blockedReason() || why : "";
+    const displayWhy = why ? editorFeedbackText(blockedReason() || why) : "";
     for (const control of controls) { control.disabled = !!why; control.title = displayWhy || control.dataset.hint || "Enter 적용 / Esc 취소"; }
     if (why) { note.textContent = displayWhy; note.title = displayWhy; }
   };
@@ -152,7 +153,7 @@ export function bindQuickDraft(form: HTMLFormElement, editor: Interaction, busy:
     if (owns(event.relatedTarget) && !independent(event.relatedTarget)) return;
     form.dataset.uiDraftActive = '';
     sync(); if (busy() || controls[0].disabled) return;
-    try { captured = editor.capture(); invalidated = false; guard.open(); } catch (error) { invalidated = true; note.textContent = String(error); }
+    try { captured = editor.capture(); invalidated = false; guard.open(); } catch (error) { invalidated = true; note.textContent = editorFeedbackText(error); }
   });
   on("focusout", event => {
     if (event.target instanceof Element && event.target.closest("[data-ui-relocating]")) return;
@@ -189,7 +190,7 @@ export function bindQuickDraft(form: HTMLFormElement, editor: Interaction, busy:
       const props = read();
       if (Object.keys(props).length) execute(props, captured);
       guard.consume(); captured = undefined; invalidated = false; sync(); restoreFocus();
-    } catch (error) { note.textContent = String(error); note.title = String(error); }
+    } catch (error) { note.title = note.textContent = editorFeedbackText(error); }
   };
   return {sync, project, close: () => { guard.close(); guard.dispose(); life.abort(); delete form.dataset.uiDraftActive; }};
 }
@@ -370,7 +371,7 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
           if (state.disabled) throw Error(state.reason);
           const target = editor.capture();
           execute(item.command!, target); restoreFocus();
-        } catch (error) { note.textContent = String(error); note.title = String(error); }
+        } catch (error) { note.title = note.textContent = editorFeedbackText(error); }
       };
       catalogButtons.push({button, id});
     } else if (button) {
@@ -482,7 +483,7 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
     }
   }));
   retry.onclick=()=>{if(readBusy()||doc.querySelector('dialog[open]'))return;retry.disabled=true;
-    void retryFailedFontSupply().catch(error=>{note.textContent=String(error);}).finally(sync);};
+    void retryFailedFontSupply().catch(error=>{note.textContent=editorFeedbackText(error);}).finally(sync);};
   let mounted = true;
   const modalObserver = new MutationObserver(records => {
     if (records.some(record => record.target instanceof HTMLDialogElement)) sync();

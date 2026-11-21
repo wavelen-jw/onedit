@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {activeWorkset, withMenuDemand} from "./active-workset.js";
 import { cellDialogFor, cellDialogMode } from "./cell-dialog-command.js";
 import {readFormatPresentation} from './typing-format-presentation.js';
@@ -127,7 +128,8 @@ export function mountTableContext(doc: Document, editor: Interaction, busy: () =
       const source=entry.source();let why=entry.held|| (entry.table?tableStates.get(entry.table):entry.edit?editStates.get(entry.edit):entry.format?formatStates.get(entry.format)?.reason:"")||"";
       if(!why)why=!source?"기존 메뉴 연결이 없습니다":
         activeWorkset(doc)&&(entry.table||entry.edit||entry.format)?"":source.disabled?source.title||"현재 선택에서는 사용할 수 없습니다":"";
-      entry.button.disabled=!!why;entry.button.title=why||(activeWorkset(doc)&&(entry.table||entry.edit||entry.format)?entry.button.textContent:source?.title)||entry.button.textContent||"";entry.button.setAttribute("aria-disabled",String(!!why));entry.button.setAttribute("aria-description",why);
+      const feedback = why ? editorFeedbackText(why) : "";
+      entry.button.disabled=!!why;entry.button.title=feedback||(activeWorkset(doc)&&(entry.table||entry.edit||entry.format)?entry.button.textContent:source?.title)||entry.button.textContent||"";entry.button.setAttribute("aria-disabled",String(!!why));entry.button.setAttribute("aria-description",feedback);
       // Caret has nothing to cut/copy/delete. Block and object keep their own
       // real clipboard/edit verdicts rather than pretending to be cell text.
       entry.button.hidden=(!source||!!entry.held)|| (entry.edit?["cut","copy","delete"].includes(entry.edit)&&editor.selection.kind==="caret"||entry.edit==="delete"&&editor.selection.kind==="cells"||entry.edit==="clear"&&editor.selection.kind!=="cells":false);

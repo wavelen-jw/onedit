@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {activeWorkset} from './active-workset.js';
 import {subscribeWhileOpen} from './ui-demand-lifetime.js';
 import type {EditAction} from './integration/a-edit-menu.js';
@@ -124,7 +125,10 @@ export function mountStudioMenus(doc:Document,busy:()=>boolean,focus:()=>void,op
  if(main&&tools)for(const id of ['file-menu','edit-menu','view-menu','insert-menu','format-menu','page-menu','table-menu','workspace-7','workspace-8']){const root=doc.getElementById(id);if(root&&root.parentElement===main)main.append(root);}
  function refresh(rows:Binding[]){let edits:ReturnType<CommandPorts['edit']>|undefined,tables:ReturnType<CommandPorts['table']>|undefined,paragraph:FormatState|undefined;
  for(const{button,source,command}of rows){const action=nativeAction(source);
- const reason=action?(action.kind==='edit'?(edits??=ports!.edit()).get(action.id):(tables??=ports!.table()).get(action.id))||'':!source?(command==='insert:shape'?'Studio는 도형 그리기를 지원하지만 현재 Edit에는 연결되어 있지 않습니다. 글상자는 별도 메뉴를 사용하세요.':'현재 Edit에서 지원하지 않는 명령입니다.'):source.disabled?source.title||'현재 선택에서 사용할 수 없습니다.':busy()?'열린 작업을 마친 뒤 사용하세요.':'';const disabled=!!reason;if(button.disabled!==disabled)button.disabled=disabled;if(button.getAttribute('aria-disabled')!==String(disabled))button.setAttribute('aria-disabled',String(disabled));if(button.title!==reason)button.title=reason;const alignment = active && ports && command.startsWith('format:align-') ? command.slice('format:align-'.length) : undefined;
+ const reason=action?(action.kind==='edit'?(edits??=ports!.edit()).get(action.id):(tables??=ports!.table()).get(action.id))||'':!source?(command==='insert:shape'?'Studio는 도형 그리기를 지원하지만 현재 Edit에는 연결되어 있지 않습니다. 글상자는 별도 메뉴를 사용하세요.':'현재 Edit에서 지원하지 않는 명령입니다.'):source.disabled?source.title||'현재 선택에서 사용할 수 없습니다.':busy()?'열린 작업을 마친 뒤 사용하세요.':'';const disabled=!!reason;if(button.disabled!==disabled)button.disabled=disabled;if(button.getAttribute('aria-disabled')!==String(disabled))button.setAttribute('aria-disabled',String(disabled));
+   const title = reason ? editorFeedbackText(reason) : '';
+   if (button.title !== title) button.title = title;
+   const alignment = active && ports && command.startsWith('format:align-') ? command.slice('format:align-'.length) : undefined;
    if (alignment && paragraph === undefined) {
      try { paragraph = ports!.paragraphDisplay(); } catch { paragraph = {}; }
    }

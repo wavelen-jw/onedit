@@ -73,21 +73,21 @@ function textRange(a: RhwpAdapter, p: Position, from: number, to: number, contro
 }
 
 /** Deliberate text gestures only. A click on an object or a cell border has its own owner. */
-export function pointerTextRange(a: RhwpAdapter, page: number, x: number, y: number, unit: 'word' | 'sentence'): [Position,Position] | undefined {
+export function pointerTextRange(a: RhwpAdapter, page: number, x: number, y: number, unit: 'word' | 'sentence' | 'touch-word'): [Position,Position] | undefined {
   const p = glyphAtPoint(a, page, x, y);
   if (!p) return;
   const controls = controlsAt(a, p);
   if (controls.some(c => p.kind === 'cell' || !['secd', 'cold', 'tbl', 'gso'].includes(c.ctrlId))) return;
-  if (unit === 'word' && p.kind === 'body') return bodyWordRange(a, p, controls);
+  if (unit !== 'sentence' && p.kind === 'body') return bodyWordRange(a, p, controls, unit === 'word');
 
   const text = a.text(p);
   const chars = [...text];
   const clicked = chars.slice(0, a.textOffset(p)).join('').length;
-  const sentence = new Intl.Segmenter('ko', {granularity:'sentence'}).segment(text).containing(clicked);
-  if (!sentence) return;
-  const first = [...text.slice(0, sentence.index)].length;
+  const segment = new Intl.Segmenter('ko', {granularity:unit === 'touch-word' ? 'word' : 'sentence'}).segment(text).containing(clicked);
+  if (!segment) return;
+  const first = [...text.slice(0, segment.index)].length;
   let from = a.logical(p, first);
-  const to = a.logical(p, first + [...sentence.segment.trimEnd()].length);
+  const to = a.logical(p, first + [...segment.segment.trimEnd()].length);
   // Skip object slots immediately before the selected text. Never carry
   // an object inside a text-only selection.
   while (from < to && a.textOffset(p, from + 1) === first) from++;
@@ -96,7 +96,7 @@ export function pointerTextRange(a: RhwpAdapter, page: number, x: number, y: num
   return textRange(a, p, from, to, controls);
 }
 
-function bodyWordRange(a: RhwpAdapter, p: Position, controls: ControlOwner[]): [Position,Position] | undefined {
+function bodyWordRange(a: RhwpAdapter, p: Position, controls: ControlOwner[], includeFollowingSpace: boolean): [Position,Position] | undefined {
   const [begin,end]=wordRangeAtGlyph(a,p),chars=[...a.text(p)],length=a.length(p);
   let from=begin.offset,to=end.offset;
   // Zero scalar advance is an existing logical control slot. Clip around the
@@ -107,7 +107,7 @@ function bodyWordRange(a: RhwpAdapter, p: Position, controls: ControlOwner[]): [
   let text=a.textOffset(p,to);
   // Only literal ordinary spaces are newly included. Tabs, NBSP, punctuation,
   // paragraph boundaries and visual empty area retain the existing policy.
-  while(to<length&&chars[text]===' '&&a.textOffset(p,to+1)===text+1){to++;text++;}
+  while(includeFollowingSpace&&to<length&&chars[text]===' '&&a.textOffset(p,to+1)===text+1){to++;text++;}
   if(from>=to)return;
   return textRange(a, p, from, to, controls);
 }

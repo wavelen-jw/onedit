@@ -13,6 +13,7 @@ import { cellBlockMasks } from '../cell-block-scope.js';
 import { cellColumnBlock, cellRowBlock } from '../cell-row-block.js';
 import { tableRangeSizeReason } from '../table-range-size-ui.js';
 import { hasNativeTrackResize } from '../table-track-resize.js';
+import { editorFeedbackText } from "../editor-feedback-text.js";
 type Item = {
   id: string;
   label: string;
@@ -138,8 +139,8 @@ export function tableMenuState(editor: Interaction, busy = false, inspectEqual =
       if(e instanceof PassiveOwnerBatchRetired)try{
         selectedTableObject(editor.adapter,editor.selection,transpose,undefined,pagination);
         return '';
-      }catch(error){return String(error);}
-      return String(e);
+      }catch(error){return editorFeedbackText(error);}
+      return editorFeedbackText(e);
     }
   };
   const read=(reason:Interaction["tableCommandReason"])=>new Map(
@@ -191,8 +192,9 @@ export function mountTableMenu(
       const b = buttons.get(item.id)!;
       if(item.id==='range-size')b.hidden=!hasNativeTrackResize(editor.adapter);
       if (!command || !cellDialogMode(item.id)) {
-        b.disabled = !!states.get(item.id);
-        b.title = states.get(item.id) || item.key || item.label;
+        const reason = states.get(item.id);
+        b.disabled = !!reason;
+        b.title = reason ? editorFeedbackText(reason) : item.key || item.label;
       }
       if (!presentation?.owns(item.id)) b.textContent =
         (item.id === "split"

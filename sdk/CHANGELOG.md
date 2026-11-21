@@ -1,3 +1,9 @@
+# Onedit Host SDK changelog
+
+## 1.0.0-rc6
+
+- Pair with the RC6 browser runtime and wider bounded GFM preparation. The 20 methods, eight events and wire version are retained.
+
 ## 1.0.0-rc4
 
 ## v1.0.0-rc5
@@ -7,8 +13,6 @@
 - Checked HWPX opening with the supplied browser runtime.
 - Continuous multi-paragraph selections in the body or one top-level cell, including merged cells, with preview and one Undo/Redo per apply.
 - The existing 20 methods, 8 events and transport remain compatible.
-
-# Onedit Host SDK changelog
 
 ## 1.0.0-rc3
 

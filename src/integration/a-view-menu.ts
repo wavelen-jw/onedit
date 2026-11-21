@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "../editor-feedback-text.js";
 import {firstPageBelow, activeMenuDemand} from '../active-workset.js';
 import {mountEditorFullscreen} from '../fullscreen-view.js';
 import {mountAutoPageLayout} from '../auto-page-layout.js';
@@ -86,7 +87,7 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
   const label = document.createElement("label"); label.textContent = "쪽 번호 ";
   const number = document.createElement("input"); number.type = "number"; number.min = "1"; number.step = "1";
   number.setAttribute("aria-label", "이동할 쪽 번호"); label.append(number); panel.append(label);
-  const submitPage = () => { try { go(viewNumber(number.value,1,pageList().length,"쪽 번호") - 1); number.setCustomValidity(""); } catch(error) { number.setCustomValidity(String(error)); } number.reportValidity(); };
+  const submitPage = () => { try { go(viewNumber(number.value,1,pageList().length,"쪽 번호") - 1); number.setCustomValidity(""); } catch(error) { number.setCustomValidity(editorFeedbackText(error)); } number.reportValidity(); };
   const goButton = button("지정 쪽으로 이동", "go", submitPage);
   const enter = (field: HTMLInputElement, action: () => void) => field.addEventListener("keydown", e => {
     if (e.key !== "Enter" || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
@@ -100,7 +101,7 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
   percent.setAttribute("aria-label", "문서 배율 (%)"); percentLabel.append(percent); panel.append(percentLabel);
   const submitZoom = () => {
     try { zoom(viewNumber(percent.value,25,300,"확대율") / 100); percent.setCustomValidity(""); }
-    catch(error) { percent.setCustomValidity(String(error)); }
+    catch(error) { percent.setCustomValidity(editorFeedbackText(error)); }
     percent.reportValidity();
   };
   const zoomButton = button("배율 적용", "zoom-go", submitZoom); enter(percent, submitZoom);
@@ -188,7 +189,7 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
       let value: boolean | undefined, error = "";
       try { value = markers?.read(item.id); } catch (e) { error = String(e); }
       const reason = error || (value === undefined ? "현재 Core/SVG 표시 연결 미지원" : isBusy ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : !count ? "문서를 먼저 여세요." : "");
-      button.disabled = !!reason; button.title = reason || (item.id === "transparent-borders" ? "선 없음 표·셀 경계를 화면에 점선으로 표시 · 저장/인쇄 제외" : item.id === "paragraph-marks" ? "문단 끝·기존 줄바꿈 표시 · 공백 표시는 조판 부호로 제어합니다." : "공백·조판 부호와 기존 문단 부호를 화면에 표시 · 저장/인쇄 제외");
+      button.disabled = !!reason; button.title = reason ? editorFeedbackText(reason) : (item.id === "transparent-borders" ? "선 없음 표·셀 경계를 화면에 점선으로 표시 · 저장/인쇄 제외" : item.id === "paragraph-marks" ? "문단 끝·기존 줄바꿈 표시 · 공백 표시는 조판 부호로 제어합니다." : "공백·조판 부호와 기존 문단 부호를 화면에 표시 · 저장/인쇄 제외");
       const shortcut = viewSequenceItems.find(([, action]) => action === item.id);
       if (!reason && shortcut) button.title += ` · 본문에서 Ctrl+G를 누른 뒤 ${shortcut[2]}`;
       button.setAttribute("aria-pressed", String(value === true));
@@ -198,7 +199,7 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
     if (ruler && (activeMenuDemand(root) || ruler.state().shown)) {
       ruler.refresh();
       const rulerState = ruler.state(), rulerReason = rulerState?.reason || (!rulerState ? "현재 Core 쪽 눈금 조회 미지원" : busy() ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : "");
-      rulerButton.disabled = !!rulerReason; rulerButton.title = rulerReason || "가로 눈금자 표시/숨기기 · mm · 조회 전용 · 저장/인쇄 제외";
+      rulerButton.disabled = !!rulerReason; rulerButton.title = rulerReason ? editorFeedbackText(rulerReason) : "가로 눈금자 표시/숨기기 · mm · 조회 전용 · 저장/인쇄 제외";
       rulerButton.setAttribute("aria-pressed", String(rulerState?.shown === true));
       rulerButton.setAttribute("aria-disabled", String(!!rulerReason));
     }

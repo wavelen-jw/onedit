@@ -206,6 +206,8 @@ export function mountWorkspaceUI(
   fileSeparator(); fileHeld("XML 문서(M)", heldFile, "", true, "F13"); fileSeparator();
   fileLive("s", "저장하기(S)", "#save", fileAccessShortcuts[2].shortcut);
   fileLive("a", "다른 이름으로 저장하기(A)…", "#save-as", fileAccessShortcuts[3].shortcut);
+  if (doc.querySelector("[data-download-save-copy]"))
+    fileLive("", "HWPX 사본 다운로드", "[data-download-save-copy]");
   fileLive("f", "PDF로 저장하기(F)… (인쇄 창)", "#print-button");
   fileHeld("모바일 최적화 문서로 저장하기(B)…", heldFile, "", false, "F12");
   fileSeparator(); fileLive("i","문서 정보(I)… · 지원 조회","#document-info-open","Ctrl+Q,I / Ctrl+Q,D");

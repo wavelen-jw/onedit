@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type {Interaction} from './interaction.js';
 import {copy,nested,ordered,sameContainer,paraIndex,type Command} from './model.js';
 import {toCoreCharacter,toCoreParagraph} from './formatting.js';
@@ -17,9 +18,9 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
     if(!actions.valid()||actions.blocked())return;
     commandNotice = note.textContent = '';
     try{const c=factory();if(c){actions.execute(c);sync();actions.focus();}}
-    catch(e){commandNotice = note.textContent = e instanceof Error ? e.message : String(e);}
+    catch(e){commandNotice = note.textContent = editorFeedbackText(e);}
   };
-  const button=(parent:HTMLElement,text:string,label:string,factory:()=>Command|undefined)=>{const b=doc.createElement('button');b.type='button';b.className='selection-icon-button';b.textContent=text;b.setAttribute('aria-label',label);b.title=label;b.dataset.hint=label;parent.append(b);b.addEventListener('pointerenter',()=>{if(b.disabled||!actions.valid()||actions.blocked())return;try{projections.clear();const c=factory(),target=actions.target();if(c&&target)preview.show(c,target);}catch(e){note.textContent=String(e);}},{signal});b.addEventListener('pointerleave',preview.clear,{signal});b.addEventListener('click',()=>run(factory),{signal});return b;};
+  const button=(parent:HTMLElement,text:string,label:string,factory:()=>Command|undefined)=>{const b=doc.createElement('button');b.type='button';b.className='selection-icon-button';b.textContent=text;b.setAttribute('aria-label',label);b.title=label;b.dataset.hint=label;parent.append(b);b.addEventListener('pointerenter',()=>{if(b.disabled||!actions.valid()||actions.blocked())return;try{projections.clear();const c=factory(),target=actions.target();if(c&&target)preview.show(c,target);}catch(e){note.textContent=editorFeedbackText(e);}},{signal});b.addEventListener('pointerleave',preview.clear,{signal});b.addEventListener('click',()=>run(factory),{signal});return b;};
   const readState=(kind:'char'|'paragraph')=>{
     const result=editor.formatState(kind);if(kind!=='paragraph')return result;
     const a=editor.adapter,s=editor.selection,end=s.kind==='text'?ordered(s.anchor,s.focus)[1]:undefined;

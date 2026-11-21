@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import { managerTabs, visibleManagerControls } from "./manager-layout.js";
 import { numberRestartReason } from './numbering-restart.js';
@@ -43,12 +44,13 @@ export function mountNumberManager(host:HTMLElement,editor:Interaction,actions:{
     add.disabled=typeof editor.adapter.doc.createNumbering!=='function';existing.disabled=!creating;
     const reason=creating?'새 정의를 먼저 적용한 뒤 문단 번호 연결을 변경하세요.':numberRestartReason(editor);
     restart.disabled=restartButton.disabled=continueButton.disabled=!!reason;
-    restart.title=restartButton.title=continueButton.title=reason;
+    const feedback = reason ? editorFeedbackText(reason) : '';
+    restart.title=restartButton.title=continueButton.title=feedback;
     start.disabled=!!reason||restart.value!=='2';
     const observed=reason?undefined:editor.adapter.paraProps(editor.selection.focus);
     const connection=observed?`현재 연결: ${observed.numberingRestartMode===2?'새 번호 시작 '+observed.numberingStartNum:observed.numberingRestartMode===1?'이전 번호 목록 이어':'앞 번호 이어'}. `:'';
 
-    status.textContent=creating?'7수준의 새 정의 초안입니다. 적용 시에만 생성하며 선택 밖 문단은 기존 정의를 유지합니다.':`현재 선택: ${initialMode||'혼합 / 번호 없음'} · 정의 ${initialId||'혼합 / 없음'} · 수준 ${initialLevel===''?'혼합':Number(initialLevel)+1}. 기존 수준별 문자 종류는 조회 미지원입니다. ${connection}${reason||'선택한 한 문단의 목록 연결만 바뀌고 다른 문단의 연결은 유지됩니다. 앞 목록과 이미 같으면 이어가기는 같은 연결로 정규화됩니다.'}`;
+    status.textContent=creating?'7수준의 새 정의 초안입니다. 적용 시에만 생성하며 선택 밖 문단은 기존 정의를 유지합니다.':`현재 선택: ${initialMode||'혼합 / 번호 없음'} · 정의 ${initialId||'혼합 / 없음'} · 수준 ${initialLevel===''?'혼합':Number(initialLevel)+1}. 기존 수준별 문자 종류는 조회 미지원입니다. ${connection}${feedback||'선택한 한 문단의 목록 연결만 바뀌고 다른 문단의 연결은 유지됩니다. 앞 목록과 이미 같으면 이어가기는 같은 연결로 정규화됩니다.'}`;
   };
   // close events are queued by the browser. Restore the input synchronously
   // so a following Undo cannot be routed to a now-hidden modal field.
@@ -57,9 +59,9 @@ export function mountNumberManager(host:HTMLElement,editor:Interaction,actions:{
   restart.addEventListener('change',()=>{start.disabled=restart.disabled||restart.value!=='2';});
   restartButton.onclick=()=>{if(restartButton.disabled)return;restart.value='2';start.disabled=false;tabState.activate('connection');start.focus();};
   continueButton.onclick=()=>{if(continueButton.disabled)return;restart.value='1';start.disabled=true;};
-  add.onclick=()=>{try{current();if(add.disabled)return;creating=true;if(!mode.value)mode.value='Number';paint();tabState.activate('definition');controls.get('numberFormat0')?.focus();}catch(e){status.textContent=String(e);}};
-  existing.onclick=()=>{try{current();creating=false;paint();tabState.activate('selection');}catch(e){status.textContent=String(e);}};
-  list.addEventListener('change',()=>{try{current();paint();}catch(e){status.textContent=String(e);}});
+  add.onclick=()=>{try{current();if(add.disabled)return;creating=true;if(!mode.value)mode.value='Number';paint();tabState.activate('definition');controls.get('numberFormat0')?.focus();}catch(e){status.textContent=editorFeedbackText(e);}};
+  existing.onclick=()=>{try{current();creating=false;paint();tabState.activate('selection');}catch(e){status.textContent=editorFeedbackText(e);}};
+  list.addEventListener('change',()=>{try{current();paint();}catch(e){status.textContent=editorFeedbackText(e);}});
   const touched = new Set<string>();
   for (const [field, control] of [['mode',mode],['definition',list],['level',level]] as const)
     control.addEventListener('change',()=>touched.add(field));
@@ -79,7 +81,7 @@ export function mountNumberManager(host:HTMLElement,editor:Interaction,actions:{
     }
     if(Object.keys(change).length&&touched.size)change.explicit=true;
     guard.consume();if(Object.keys(change).length)actions.execute({type:'paragraph-list',list:change},target);close();actions.changed();
-  }catch(error){status.textContent=error instanceof Error?error.message:String(error);guard.open();}});
+  }catch(error){status.textContent=editorFeedbackText(error);guard.open();}});
   cancel.onclick=close;dialog.addEventListener('cancel',e=>{e.preventDefault();close();});dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();captured=undefined;restoreFocus();});
   form.addEventListener('keydown',e=>{if(e.key==='Tab'){const active=visibleManagerControls(form),at=active.indexOf(document.activeElement as HTMLElement);if(active.length&&(at<0||(e.shiftKey?at===0:at===active.length-1))){e.preventDefault();active[e.shiftKey?active.length-1:0].focus();}}e.stopPropagation();});
   return {get open(){return dialog.open;},show(){if(dialog.open)return;if(actions.busy())throw Error('입력·저장을 마친 후 사용하세요.');touched.clear();captured=editor.capture();editor.adapter.assertEditable(captured.selection.focus);catalog=editor.adapter.paragraphListCatalog();const state=editor.formatState('paragraph');initialMode=['Number','Outline'].includes(String(state.headType))?String(state.headType):'';initialLevel=state.paraLevel===undefined?'':String(state.paraLevel);initialId=initialMode&&catalog.numbers.some(r=>r.id===state.numberingId)?String(state.numberingId):'';mode.value=initialMode;level.value=initialLevel;list.replaceChildren(new Option('혼합 / 유지',''));for(const row of catalog.numbers)list.add(new Option(`정의 ${row.id}: ${row.levelFormats.join(' / ')} · 시작 ${row.startNumber??'조회 미지원'}`,String(row.id)));list.value=initialId;creating=false;restart.value='';start.value=String(editor.adapter.paraProps(editor.selection.focus).numberingStartNum??1);paint();tabState.activate('selection');guard.open();focusPending=true;showEditorDialog(dialog);mode.focus();},sync(){if(dialog.open&&captured&&!sameFormatTarget(captured,editor.capture())){guard.consume();for(const b of [add,existing,ok,restartButton,continueButton,restart,start])b.disabled=true;status.textContent='문서·리비전·선택이 변경되었습니다. 취소 후 다시 여세요.';}}};

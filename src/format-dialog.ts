@@ -4,6 +4,7 @@ import {
   type FormatKind,
   type FormatState,
   sides,
+  borderLineOptions,
   toCoreCharacter,
   toCoreParagraph,
 } from "./formatting.js";
@@ -109,12 +110,7 @@ export function fields(kind: FormatKind): Field[] {
       {
         name: `border${side}.type`,
         label: `${["왼쪽", "오른쪽", "위", "아래"][n]} 테두리`,
-        options: [
-          ["0", "없음"],
-          ["1", "실선"],
-          ["2", "점선"],
-          ["3", "파선"],
-        ] as [string, string][],
+        options: borderLineOptions,
       },
       {
         name: `border${side}.width`,

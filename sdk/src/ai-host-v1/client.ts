@@ -1,4 +1,4 @@
-import {AIError,isId,isObject,limits,type Approval,type Binding,type ErrorBody} from '../ai-integration/contract.js';
+import {AIError,isId,isObject,limits,reportBudget,type Approval,type Binding,type ErrorBody} from '../ai-integration/contract.js';
 import {check,connectSchema,connectedSchema,eventSchema,mutatingReceipt,replies,requests,version,versionMatches,
  type Input,type Output,type Method,type Scope,type Prepared,type Proposal,type State,type Snapshot} from './wire.js';
 
@@ -55,7 +55,7 @@ export class OneditHostClient {
    const timer=setTimeout(()=>{
     this.pending.delete(requestId);
     reject(operationId?new OutcomeUnknown(operationId):new AIError('TIMEOUT','응답을 받지 못했습니다.'));
-   },10000);
+   },method==='prepareDocument'?reportBudget.longMarkdownLayoutMs+15000:10000);
    this.pending.set(requestId,{method,operationId,resolve:resolve as Waiting['resolve'],reject,timer});
    try{post();}catch(e){clearTimeout(timer);this.pending.delete(requestId);reject(e);}
   });

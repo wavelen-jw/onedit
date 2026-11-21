@@ -1,7 +1,16 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {activeWorkset} from "./active-workset.js";
 import { formatInputGuard } from './integration/a-format-input-guard.js';
 
-export function viewNumber(text:string,min:number,max:number,label:string){const value=Number(text);if(!text.trim()||!Number.isInteger(value)||value<min||value>max)throw Error(`${label}: ${min}~${max} 사이 정수를 입력하세요.`);return value;}
+export function viewNumber(text: string, min: number, max: number, label: "쪽 번호" | "확대율"): number {
+  const value = Number(text);
+  if (!text.trim() || !Number.isInteger(value) || value < min || value > max) {
+    throw Error(label === "쪽 번호" && min === 1 && max === 1
+      ? "이 문서는 1쪽만 있습니다."
+      : `${label}: ${min}~${max} 사이 정수를 입력하세요.`);
+  }
+  return value;
+}
 
 /** Projection of the existing View controller. No document/Selection writes. */
 export function mountStatusNavigation(doc:Document,focusEditor:()=>void,busy:()=>boolean){
@@ -43,7 +52,7 @@ export function mountStatusNavigation(doc:Document,focusEditor:()=>void,busy:()=
   form.onsubmit=e=>{e.preventDefault();try{if(!draft||!guard.ready()||captured!==token()||capturedPage!==pages.querySelector('.page')||reason())throw Error('문서·입력 상태가 바뀌었습니다. 닫고 다시 선택하세요.');
     const kind=draft,n=viewNumber(input.value,Number(input.min),Number(input.max),kind==='page'?'쪽 번호':'확대율');
     const target=kind==='page'?sourcePage!:sourceZoom!;target.value=String(n);source(kind==='page'?'go':'zoom-go')!.click();close(true);
-  }catch(error){note.textContent=String(error);}};
+  }catch(error){note.textContent=editorFeedbackText(error);}};
   form.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Escape'&&!e.isComposing&&e.keyCode!==229){e.preventDefault();close(true);}if(e.key==='Enter'&&(e.isComposing||e.keyCode===229||e.repeat||e.ctrlKey||e.altKey||e.metaKey||e.shiftKey)){e.preventDefault();}});
   for(const [b,action]of [[minus,'out'],[plus,'in'],[fitPage,'page'],[fitWidth,'width']]as const){b.onpointerdown=e=>e.preventDefault();b.onclick=()=>{if(reason())return;source(action)?.click();focusEditor();};}
   let sliderToken='';slider.addEventListener('focus',()=>{sliderToken=token();});slider.addEventListener('pointerdown',()=>{sliderToken=token();});

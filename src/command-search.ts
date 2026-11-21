@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import { activeWorkset } from "./active-workset.js";
 import type { Interaction } from "./interaction.js";
@@ -57,7 +58,7 @@ export function mountCommandSearch(doc:Document,editor:Interaction,actions:{
       if(!sameFormatTarget(target,editor.capture()))throw Error("실행 직전 선택이 바뀌었습니다.");
       {const row=choice.row,why=row.unavailable||actions.reasons().get(row.id)||"";if(why)throw Error(why);actions.invoke(row,target);recent.splice(0,recent.length,row.id,...recent.filter(id=>id!==row.id).slice(0,2));}
       disposeRows();if(!doc.querySelector("dialog[open]"))actions.focus();
-    }catch(error){captured=original;status.textContent=error instanceof Error?error.message:String(error);if(!dialog.open){if(activeWorkset(doc)){admission=actions.reasons();render();}showEditorDialog(dialog);query.focus();}guard.open();}
+    }catch(error){captured=original;status.textContent=editorFeedbackText(error);if(!dialog.open){if(activeWorkset(doc)){admission=actions.reasons();render();}showEditorDialog(dialog);query.focus();}guard.open();}
     finally{running=false;}
   }
   function show(){

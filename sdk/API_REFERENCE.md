@@ -1,8 +1,8 @@
-# 온편집 외부 Host API 1.0 — RC4
+# 온편집 외부 Host API 1.0 — 공개 RC6
 
-패키지 버전은 `1.0.0-rc2`이며 wire 버전은 `onedit-host / 2 / 1.0`입니다. [METADATA.json](METADATA.json)에 정확한 온편집·WASM과 빌드 지문이 있습니다.
+패키지 버전은 `1.0.0-rc6`이며 wire 버전은 `onedit-host / 2 / 1.0`입니다. 릴리스 SDK 설치 파일의 `METADATA.json`에 편집기와 WASM 빌드 지문이 있습니다.
 
-- ESM: `import { OneditHostClient, openApprovalDigest } from 'onedit-ai-host-sdk'`. [공개 선언](dist/index.d.ts)에서 `Input`, `Output`, `Binding`, `Snapshot`, `Prepared`, `Proposal` 등을 제공합니다. `createFromChat`과 `revisePinnedSelection`은 SDK 편의 함수입니다.
+- ESM: `import { OneditHostClient, openApprovalDigest } from 'onedit-ai-host-sdk'`. 릴리스 SDK의 `dist/index.d.ts`에서 `Input`, `Output`, `Binding`, `Snapshot`, `Prepared`, `Proposal` 등을 제공합니다. `createFromChat`과 `revisePinnedSelection`은 SDK 편의 함수입니다.
 - JSON Schema 2020-12: [요청](schema/request.schema.json), [응답·이벤트](schema/response.schema.json), [scope·오류·한도](schema/surface.json). `x-transferable`은 구조화 복제의 `ArrayBuffer`를 뜻합니다. 파일 길이·SHA·네이티브 검사와 승인은 스키마 외에 실제 코드에서 확인합니다.
 
 ## 연결과 상태
@@ -45,5 +45,6 @@ Binding은 `documentId, documentInstanceId, workingCopyId, mutationRevision, hos
 - 생성: Markdown의 제목·본문·목록·일반 표 및 `DocumentSpec`의 등록 스타일과 검증된 병합 격자. Markdown은 보고서 서식 경고를 검토 화면에 올립니다. 복합 HTML, 외부 자원, 인용 객체·코드 블록 등 이 경로가 받지 않는 구조는 `INVALID_SPEC` 등으로 거부합니다. 병합 격자 **생성**과 기존 병합 셀 **선택 수정**은 다릅니다.
 - 선택: 역방향 선택은 정규화합니다. 반개구간 code point 오프셋과 grapheme 경계를 검증하며 원문을 정규화하지 않습니다. 한 본문 영역 또는 같은 최상위 셀(병합 포함)의 연속 문단을 지원합니다. 반환 text의 LF는 기존 문단 경계이며 replacement는 같은 수의 LF로 대응해야 합니다. 최대 64문단, 전체 선택 4,000 code point이며 빈 문단 구간은 거부합니다. 선택 범위의 문자 서식이 같아야 하며 범위 밖 혼합 서식과 각 문단 속성은 보존합니다. 캐럿만, 다중 셀·중첩 표·필드/컨트롤 혼합·선택 안의 혼합 문자 서식·문단 수 변경은 UNSUPPORTED_SELECTION 등으로 거부합니다. snapshot의 start/end는 캡처한 문단들을 LF로 연결한 문자열의 code point 반개구간이며 native 주소가 아닙니다. 문서 변경 후 자동 rebase하지 않습니다. IME 조합 중에는 완료까지 기다립니다.
 - 외부 파일: 바이트 길이·해시·실제 서명·요청 형식 일치를 확인하고, HWP5/CFB 또는 HWPX/ZIP 네이티브 검사로 실제 구조와 자원 한도를 확인합니다. 확인된 범위는 [지원표](SUPPORT_MATRIX.md)의 합성 HWP5 본문과 HWPX 일반/병합 셀 및 해당 거부군입니다. 정상 서명도 전 파일 호환을 뜻하지 않습니다. 암호/배포용·DRM·스크립트·위험한 경로/리소스, 불량 미리보기 등은 해당 검사기가 허용하지 않습니다. `UNSUPPORTED_CAPABILITY`는 기능이 연결되지 않은 상태, `UNSUPPORTED_UNSAFE_FILE`은 검사에서 구조·지원 범위·한도·내용을 승인할 수 없는 상태, `FORMAT_MISMATCH`는 초기 서명과 요청 형식 불일치입니다. `fileName`은 승인에 묶이는 선택 표시 이름이며 경로가 아닙니다. `hwpOverwrite:false`; **HWP 원본을 덮어쓰지 않으며 HWPX만 내보냅니다**. SWP는 지원하지 않습니다.
-- 숫자 한도: JSON 2 MiB, 파일 30 MiB, 생성 20,000 code point·200 blocks·20 tables·1,000 cells·12 columns, 선택 4,000 code point, 문맥 각 500. TTL은 선택 5분, 제안 3분 이내, 초안 10분. 최신 값은 `getCapabilities().limits`. 컨테이너/자원/조판 조건은 이 수치보다 좁게 허용할 수 있습니다.
+- 보고서 작성 후보에서 `prepareDocument`는 GFM과 DocumentSpec에 같은 512 KiB UTF-8·16,000 조판 작업 단위 예산을 적용합니다. 작업량에는 블록·문자 서식 조각·표 슬롯이 포함됩니다. GFM 미리보기는 최대 1,200블록, DocumentSpec은 변환 후 최대 1,000블록을 지원합니다. 미리보기 응답은 기존 JSON 바이트·노드 한도도 적용받습니다. 표 하나의 구조와 문서 조판·시간 안전 검사는 별도로 적용됩니다. 자원 한도를 넘으면 원본 문서와 받은 GFM이 유지됩니다. 장문은 호환되는 최신 클라이언트와 편집기를 함께 사용하세요.
+- v1 `getCapabilities().limits`는 기존 클라이언트의 wire 검증을 위해 기존 값을 담습니다. JSON 2 MiB, 파일 30 MiB, 선택 4,000 code point, 문맥 각 500자와 기존 스냅샷·제안·승인 만료 규칙은 유지합니다. 보고서 준비 중 조판은 최대 150초이며 1,000블록을 넘는 GFM에만 최대 720초가 적용됩니다. SDK 응답 대기는 위 최대치에 15초를 더한 값입니다.
 - 오류는 `code/message/retryable/recovery`. 오류 분기는 한국어 메시지가 아니라 [정본 코드](schema/surface.json) 기준으로 하세요. 충돌(`STALE_DOCUMENT`, `SOURCE_MISMATCH`)은 재선택·검토, 권한·승인(`PERMISSION_DENIED`, `APPROVAL_REQUIRED`, `INVALID_APPROVAL`)은 신뢰된 승인 경로 재확인, `RECOVERY_REQUIRED`는 복구용 사본 안내. 미지원 인자는 wire에서 `INVALID_REQUEST`로 먼저 거부될 수 있습니다(예: `format:'hwp'` 내보내기). 어떠한 거부도 빈 문서로 폴백하지 않습니다.

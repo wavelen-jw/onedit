@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {bindEditorDialogFormSubmit, closeEditorDialog, showEditorDialog, wrapDialogTab} from './editor-popup-focus.js';
 import {formatInputGuard, sameFormatTarget} from './integration/a-format-input-guard.js';
 import type {Interaction} from './interaction.js';
@@ -66,7 +67,7 @@ export function mountTableRangeSize(doc: Document, editor: Interaction,
     } catch(error) {
       status.textContent=error instanceof UnsupportedTableOperation&&error.code==='resize-track-postLayoutTrackMismatch'
         ? '이 값으로 조절하면 표의 배치가 요청과 달라 적용하지 않았습니다. 다른 값을 입력해 보세요.'
-        : error instanceof Error?error.message:String(error);
+        : editorFeedbackText(error);
     }
   };
   dialog.addEventListener('close',()=>{

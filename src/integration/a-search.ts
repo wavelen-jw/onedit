@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "../editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "../editor-popup-focus.js";
 import { assertPictureFreeTextEdit } from "../search-object-safety.js";
 import { formatInputGuard } from "./a-format-input-guard.js";
@@ -291,6 +292,7 @@ export function mountSearch(
     if (focus) get(focus).focus();
   };
   let signature = "";
+  let lastSearchOptions: string | undefined;
   let scopeError = "";
   let dialogTarget = editor.capture();
   let scopeSelection = structuredClone(editor.selection);
@@ -327,14 +329,13 @@ export function mountSearch(
       sync();
       if (expired) throw Error(expired);
       if (scopeError) throw Error(scopeError);
-      const key = JSON.stringify([
+      const options = JSON.stringify([
         get("scope").value,
         get("query").value,
         get("case").checked,
         get("cells").checked,
-        editor.adapter.documentId,
-        editor.adapter.revision,
       ]);
+      const key = JSON.stringify([options, editor.adapter.documentId, editor.adapter.revision]);
       if (action === "all") {
         if (
           dialogTarget.documentId !== editor.adapter.documentId ||
@@ -349,11 +350,15 @@ export function mountSearch(
           get("cells").checked,
         );
         const count = search.replaceAll(get("replacement").value);
+        lastSearchOptions = options;
         signature = "";
         status.textContent = `${count}개 바꾸기 완료 (지정 범위)`;
       } else if (action === "replace") {
-        if (key !== signature)
-          throw Error("검색 조건이 변경되었습니다. 다시 찾으세요.");
+        if (key !== signature) {
+          if (lastSearchOptions === undefined) throw Error("먼저 찾을 내용을 검색하세요.");
+          if (lastSearchOptions !== options) throw Error("검색 조건이 바뀌었습니다. 다시 찾으세요.");
+          throw Error("바꿀 항목을 다시 찾으세요.");
+        }
         search.replace(get("replacement").value);
         signature = "";
         status.textContent = "바꾸기 완료. 다음 찾기를 선택하세요.";
@@ -365,6 +370,7 @@ export function mountSearch(
             get("cells").checked,
           );
           signature = key;
+          lastSearchOptions = options;
         }
         status.textContent = search.move(action === "previous");
       }
@@ -374,7 +380,7 @@ export function mountSearch(
       if (action === "next" || action === "previous")
         revealCommandSelection(root.ownerDocument, prior, dialogTarget);
     } catch (e) {
-      status.textContent = String(e);
+      status.textContent = editorFeedbackText(e);
     }
   }
   root
@@ -434,7 +440,7 @@ export function mountSearch(
     )!;
     const reason = expired || scopeError || search.allReason();
     button.disabled = !!reason;
-    button.title = reason || "선택한 검색 범위의 일치 항목을 한 번에 바꿉니다.";
+    button.title = reason ? editorFeedbackText(reason) : "선택한 검색 범위의 일치 항목을 한 번에 바꿉니다.";
   }
   get("cells").addEventListener("change", syncAll);
   get("query").addEventListener("input", () => {
@@ -459,7 +465,7 @@ export function mountSearch(
       syncAll();
     } catch (e) {
       scopeError = String(e);
-      status.textContent = scopeError;
+      status.textContent = editorFeedbackText(scopeError);
       signature = "";
       syncAll();
     }
@@ -486,6 +492,7 @@ export function mountSearch(
       for (const action of ["next", "previous", "replace", "all"])
         root.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!.disabled = false;
       signature = "";
+      lastSearchOptions = undefined;
       scopeError = "";
       status.textContent = "";
       dialogTarget = editor.capture();

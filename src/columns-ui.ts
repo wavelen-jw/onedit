@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import {menuControlDemanded} from './menu-lifetime.js';
 import type { Interaction } from './interaction.js';
@@ -26,7 +27,7 @@ export function mountColumns(doc:Document,editor:Interaction,actions:{busy:()=>b
   const sync=()=>{launch.disabled=busy();launch.title=launch.disabled?'입력·저장·열린 대화상자를 먼저 마치세요.':columnLimit;
     if(!dialog.open&&!presets.some(menuControlDemanded)&&!menuControlDemanded(launch))return;
     let why='';try{why=busy()?'열린 작업을 마친 뒤 사용하세요.':columnEditReason(editor.adapter,editor.selection,columnView(editor.adapter,editor.selection.focus.sec));}catch(e){why=String(e);}
-    for(const b of presets){b.disabled=!!why;b.setAttribute('aria-disabled',String(!!why));b.title=why;}
+    for(const b of presets){b.disabled=!!why;b.setAttribute('aria-disabled',String(!!why));b.title=why?editorFeedbackText(why):'';}
     if(!dialog.open)return;const r=reason();ok.disabled=count.disabled=spacing.disabled=!!r;status.textContent=r;ok.title=r;};
   for(const b of presets)b.onclick=()=>{try{if(busy())return;const target=editor.capture(),current=columnView(editor.adapter,target.selection.focus.sec),why=columnEditReason(editor.adapter,target.selection,current);if(why)throw Error(why);
     const count=Number(b.dataset.columnPreset);if(count!==1&&count!==2)throw Error('지원하지 않는 단 수입니다.');

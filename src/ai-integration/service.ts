@@ -1,9 +1,10 @@
-import {AIError,need,exact,isBinding,isApproval,isNewBinding,isId,sameBinding,limits,methods,digest,validateValue,contractVersion,
+import {documentWork} from './document-budget.js';
+import {AIError,need,exact,isBinding,isApproval,isNewBinding,isId,sameBinding,limits,reportBudget,methods,digest,validateValue,contractVersion,
  type Approval,type Binding,type NewBinding,type Envelope,type Method,type Permission,type ErrorBody} from './contract.js';
 import {compileDocumentSpec,catalog} from './document-spec.js';
 import {captureRange,readRange,replacementText,current,type Capture} from './selection.js';
 import {ExternalHost,HostError,sha256} from '../host-v2.js';
-import {composeDocumentPlan} from '../markdown-compose.js';
+import {composeDocumentPlan,composeSdkDocument} from '../markdown-compose.js';
 import {AiNativeRange,AiNativeError} from '../ai-native-range.js';
 import {assertSafeHwpxEntryNames} from '../hwpx-open-boundary.js';
 import {analyzeMarkdown} from '../markdown-import.js';
@@ -350,28 +351,40 @@ export class AIService {
     need(this.drafts.size<2,'BUSY','준비된 문서가 이미 있습니다.');
     let plan,markdownWarnings:string[]=[];
     if(markdown){
-     need(typeof p.markdown==='string'&&[...p.markdown].length<=limits.characters,'INVALID_SPEC','지원되는 Markdown 범위를 확인하세요.');
+     need(typeof p.markdown==='string','INVALID_SPEC','지원되는 Markdown 범위를 확인하세요.');
      const source=p.markdown as string;
      try{
-      const analysis=analyzeMarkdown({source,mode:'report'});
+      const analysis=analyzeMarkdown({source,mode:'report'},true);
       // These three notes describe the registered report presentation itself.
       // Surface them in the reviewed preview, but never accept content/structure diagnostics.
       const presentation=new Set(['HEADING_PRESENTATION','LITERAL_LIST_MARKERS','REPORT_PRESENTATION']);
       need(analysis.diagnostics.every(d=>d.severity==='confirm'&&presentation.has(d.code)),
        'INVALID_SPEC','지원하지 않는 Markdown 구조가 있습니다.');
       markdownWarnings=analysis.diagnostics.map(d=>d.code);
-      plan=analyzeMarkdown({source,mode:'report',acceptedDiagnostics:analysis.diagnostics.map(d=>d.id)});
+      plan={...analysis,ready:true};
      }
-     catch{throw new AIError('INVALID_SPEC','Markdown 형식을 확인하세요.')}
-     const tables=plan.blocks.filter(b=>b.kind==='table');
+     catch(error){if(error instanceof AIError)throw error;throw new AIError('INVALID_SPEC','Markdown 형식을 확인하세요.')}
      need(plan.ready&&plan.blocks.every(b=>b.kind==='table'||!['quote','code'].includes(b.role)),
       'INVALID_SPEC','제목·문단·목록·일반 표를 사용하세요.');
-     need(plan.blocks.length<=limits.blocks&&tables.length<=limits.tables&&tables.reduce((n,b)=>n+b.rows.reduce((m,row)=>m+row.length,0),0)<=limits.cells,
-      'CONTENT_LIMIT_EXCEEDED','공공문서 생성 한도를 넘었습니다.');
     }else plan=compileDocumentSpec(p.spec,this.hostV1);
+    const work=documentWork(plan);
+    const large=this.hostV1&&(plan.blocks.length>limits.blocks||work>1600);
+    const layoutMs=markdown&&plan.blocks.length>reportBudget.blocks
+     ?reportBudget.longMarkdownLayoutMs:reportBudget.layoutMs;
+    const deadline=performance.now()+layoutMs;
+    const checkpoint=()=>{
+     this.ready(b);
+     need(performance.now()<deadline,'TIMEOUT','보고서 조판 작업 시간을 넘었습니다. 원문을 보존했습니다.');
+    };
     let out;
-    try{out=composeDocumentPlan(h.a.doc,plan);assertSafeHwpxEntryNames(out.bytes)}
-    catch{throw new AIError('INVALID_SPEC','지원 범위 내에서 문서를 안전하게 생성하지 못했습니다.')}
+    try{
+     const fit=undefined;
+     out=large?await composeSdkDocument(h.a.doc,plan,fit,checkpoint):composeDocumentPlan(h.a.doc,plan,fit);
+     assertSafeHwpxEntryNames(out.bytes);
+    }catch(error){
+     if(error instanceof AIError)throw error;
+     throw new AIError('INVALID_SPEC','페이지와 표가 안전하게 배치되지 않아 문서를 만들지 못했습니다. 원문을 보존했습니다.');
+    }
     need(out.bytes.byteLength<=limits.fileBytes,'CONTENT_LIMIT_EXCEEDED','생성된 문서 크기 한도입니다.');
     const bytesHash=await sha256(out.bytes);this.ready(b);
     const d:Draft={id:crypto.randomUUID(),binding:b,expiresAt:this.clock()+limits.draftMs,digest:'',

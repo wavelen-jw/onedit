@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import { activeWorkset, activeMenuDemand } from "./active-workset.js";
 import type { Command } from "./model.js";
@@ -33,7 +34,7 @@ export function mountPictures(host:HTMLElement,editor:Interaction,actions:{execu
     const cellPicture=s.kind==='object'&&s.focus.kind==='cell'?selectedPicture(editor.adapter,s):undefined;
     properties.disabled=actions.busy()||(!list.value&&!cellPicture);status.textContent=cellPicture?cellPictureSizeNote:'본문 입력 위치 또는 본문 그림을 선택하세요.';
     if(list.value){const p=selectedPicture(editor.adapter,s).props,canvas=pictureCanvasPlacement(p);status.textContent=!canvas.supported?'이 배치의 캔버스 좌표는 미검증입니다. 목록/그림 속성을 사용하세요.':!canvas.click?'글 뒤로: 목록 선택 후 핸들 또는 그림 속성으로 크기를 변경하세요.':'';}
-  }catch(e){properties.disabled=insert.disabled=true;status.textContent=String(e);} };
+  }catch(e){properties.disabled=insert.disabled=true;status.textContent=editorFeedbackText(e);} };
   const show=(next:typeof mode)=>{try{if(actions.busy())throw Error('다른 작업을 마친 후 사용하세요.');resetHancomObjectDialog(form);editor.adapter.assertEditable(editor.selection.focus);mode=next;draft=undefined;reading=false;ok.disabled=false;generation++;file.value='';target=editor.capture();
     if(mode==='edit'){const p=selectedPicture(editor.adapter,editor.selection).props;initial={width:p.width,height:p.height,placement:p.treatAsChar?'inline':p.textWrap};if(!Array.from(placement.options).some(o=>o.value===initial.placement))throw Error('현재 그림 배치의 편집은 미지원입니다.');description.disabled=typeof p.description!=='string';description.value=description.disabled?'':p.description;description.placeholder=description.disabled?'미조회 · 원본 유지':'그림의 개체 설명문';description.title=description.disabled?'설명문 미조회 · 변경하지 않고 원본 유지':'그림에 저장하는 개체 설명문입니다. 본문이나 캡션은 바뀌지 않습니다.';}
     else{if(editor.selection.kind!=='caret'||editor.selection.focus.kind!=='body')throw Error('본문 입력 위치에서 넣으세요.');initial={width:7200,height:3600,placement:'inline'};}
@@ -54,7 +55,7 @@ export function mountPictures(host:HTMLElement,editor:Interaction,actions:{execu
       const extension=bytes[0]===137?'png':'jpg';const next:PictureFile={bytes,extension,naturalWidth:bitmap.width,naturalHeight:bitmap.height};pictureFile(next);draft=next;
       if(mode==='insert'){const scale=Math.min(1,72000/(next.naturalWidth*75),72000/(next.naturalHeight*75));initial={width:Math.max(100,Math.round(next.naturalWidth*75*scale)),height:Math.max(100,Math.round(next.naturalHeight*75*scale)),placement:'inline'};width.value=String(initial.width/100);height.value=String(initial.height/100);factor=initial.width/initial.height;}
       message.textContent=`그림 ${next.naturalWidth} × ${next.naturalHeight}px 준비됨`;
-    }catch(e){if(own===generation)message.textContent=String(e);}finally{bitmap?.close();if(own===generation){reading=false;ok.disabled=false;}}};
+    }catch(e){if(own===generation)message.textContent=editorFeedbackText(e);}finally{bitmap?.close();if(own===generation){reading=false;ok.disabled=false;}}};
   width.oninput=()=>{if(ratio.checked&&Number(width.value)>0)height.value=(Math.round(Number(width.value)*100/factor)/100).toString();};
   height.oninput=()=>{if(ratio.checked&&Number(height.value)>0)width.value=(Math.round(Number(height.value)*100*factor)/100).toString();};
   const finish=(changes:PictureChange[])=>{const captured=current();if(reading||!guard.ready())return;
@@ -64,8 +65,8 @@ export function mountPictures(host:HTMLElement,editor:Interaction,actions:{execu
     if(mode==='insert'){if(!draft)throw Error('그림 파일을 먼저 선택하세요.');finish([{action:'insert',file:draft,width:w,height:h,placement:placement.value}]);}
     else if(draft){if(w!==initial.width||h!==initial.height||placement.value!==initial.placement||description.value!==initialDescription)throw Error('그림 교체와 크기·배치·설명문은 각각 적용하세요. 초안은 유지됩니다.');finish([{action:'replace',file:draft}]);}
     else {const c:Extract<PictureChange,{action:'properties'}>={action:'properties'};if(w!==initial.width)c.width=w;if(h!==initial.height)c.height=h;if(placement.value!==initial.placement){c.treatAsChar=placement.value==='inline';if(!c.treatAsChar)c.textWrap=placement.value;}if(!description.disabled&&description.value!==initialDescription)c.description=description.value;finish([c]);}
-  }catch(e){message.dataset.error='true';message.textContent=String(e);}};
-  remove.onclick=()=>{try{finish([{action:'delete'}]);}catch(e){message.textContent=String(e);}};
+  }catch(e){message.dataset.error='true';message.textContent=editorFeedbackText(e);}};
+  remove.onclick=()=>{try{finish([{action:'delete'}]);}catch(e){message.textContent=editorFeedbackText(e);}};
   cancel.onclick=()=>closeEditorDialog(dialog);dialog.addEventListener('close',()=>{if(dialog.open)return;generation++;draft=undefined;target=undefined;reading=false;guard.close();sync();});
   dialog.addEventListener('keydown',e=>{if(e.isComposing||e.keyCode===229)return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeEditorDialog(dialog);}if(e.key==='Tab'){const controls=Array.from(form.querySelectorAll<HTMLElement>('input,textarea,select,button')).filter(c=>!(c as HTMLInputElement).disabled&&c.tabIndex>=0&&c.getClientRects().length>0);const i=controls.indexOf(document.activeElement as HTMLElement);if(e.shiftKey&&i<=0){e.preventDefault();controls.at(-1)?.focus();}else if(!e.shiftKey&&i===controls.length-1){e.preventDefault();controls[0]?.focus();}}});
   insert.onclick=()=>show('insert');properties.onclick=()=>show('edit');list.onchange=()=>{try{if(actions.busy())throw Error('현재 작업을 마친 후 선택하세요.');const [sec,para,control]=list.value.split(':').map(Number);const next={kind:'object' as const,focus:{kind:'body' as const,sec,para,offset:0},control};selectedPicture(editor.adapter,next);editor.selection=next;actions.changed();actions.focus();}catch(e){actions.error(e);sync();}};

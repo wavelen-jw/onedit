@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { FormatState } from "./formatting.js";
 import type { Props } from "./model.js";
 
@@ -69,7 +70,7 @@ export function markFormatToggle(button:HTMLButtonElement,state:ReturnType<typeo
   if(button.dataset.valueState!==state.valueState)button.dataset.valueState=state.valueState;
   if(state.pressed===undefined){if(button.hasAttribute("aria-pressed"))button.removeAttribute("aria-pressed");}
   else if(button.getAttribute("aria-pressed")!==state.pressed)button.setAttribute("aria-pressed",state.pressed);
-  const text=state.valueState==="unavailable"?`현재값 미조회 · ${reason||"기존 조회에서 값을 제공하지 않았습니다. 원본 값은 유지됩니다."}`:
+  const text=state.valueState==="unavailable"?`현재값 미조회 · ${reason ? editorFeedbackText(reason) : "기존 조회에서 값을 제공하지 않았습니다. 원본 값은 유지됩니다."}`:
     state.valueState==="mixed"?"현재 선택의 조회된 값이 혼합입니다.":"";
   if(button.getAttribute("aria-description")!==text)button.setAttribute("aria-description",text);
   let note=button.querySelector<HTMLElement>("[data-format-state-note]");

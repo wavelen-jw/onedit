@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import { menuControlDemanded } from "./menu-lifetime.js";
 
@@ -40,10 +41,12 @@ export function connectCellDialogCommand(doc: Document, ports: Ports) {
         if (!reasons.has(key)) reasons.set(key, readReason(key));
         const reason = reasons.get(key)!, disabled = String(!!reason);
         if (button.disabled !== !!reason) button.disabled = !!reason;
-        if (button.title !== (reason || binding.title)) button.title = reason || binding.title;
+        const feedback = reason ? editorFeedbackText(reason) : "";
+        const title = feedback || binding.title;
+        if (button.title !== title) button.title = title;
         if (button.getAttribute("aria-disabled") !== disabled) button.setAttribute("aria-disabled", disabled);
-        if (binding.describe && button.getAttribute("aria-description") !== reason)
-          button.setAttribute("aria-description", reason);
+        if (binding.describe && button.getAttribute("aria-description") !== feedback)
+          button.setAttribute("aria-description", feedback);
       }
     },
     ownsClosingDialog: () => ports.ownsClosingDialog?.() === true,

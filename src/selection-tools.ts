@@ -39,9 +39,13 @@ export function mountSelectionTools(doc:Document,editor:Interaction,options:{bus
     const text=editor.selection.kind==="text"&&shape==="null";
     if(text&&editor.selection.kind==="text"&&samePosition(editor.selection.anchor,editor.selection.focus)){hide();return;}
     if(dragging&&!text)return;
+    const touch=text&&doc.getElementById('pages')?.hasAttribute('data-touch-selection');
+    if(touch&&doc.body.hasAttribute('data-mobile-editing')){hide();return;}
     const sources=[...doc.querySelectorAll<HTMLButtonElement>("#adaptive-context-tools > button")].filter(b=>!b.hidden&&!b.disabled&&b.getClientRects().length);
     if(!text&&!sources.length)return;
-    const bounds=viewport.getBoundingClientRect(),v={left:Math.max(0,bounds.left),right:Math.min(doc.defaultView!.innerWidth,bounds.right),top:Math.max(0,bounds.top),bottom:Math.min(doc.defaultView!.innerHeight,bounds.bottom),get width(){return this.right-this.left;}},h=host.getBoundingClientRect();
+    const win=doc.defaultView!, visible=win.visualViewport, bounds=viewport.getBoundingClientRect();
+    const left=visible?.offsetLeft??0, topEdge=visible?.offsetTop??0;
+    const v={left:Math.max(left,bounds.left),right:Math.min(left+(visible?.width??win.innerWidth),bounds.right),top:Math.max(topEdge,bounds.top),bottom:Math.min(topEdge+(visible?.height??win.innerHeight),bounds.bottom),get width(){return this.right-this.left;}},h=host.getBoundingClientRect();
     const marks=[...doc.querySelectorAll<HTMLElement>("#pages .overlay .highlight,#pages .picture-selection")].map(n=>n.getBoundingClientRect()).filter(r=>r.bottom>v.top&&r.top<v.bottom&&r.right>v.left&&r.left<v.right);
     const selectedGeometry=text?screenSelection(editor,doc.getElementById("pages")!,viewport,owners):undefined;
     if(text){
@@ -95,7 +99,6 @@ export function mountSelectionTools(doc:Document,editor:Interaction,options:{bus
       const dismiss=doc.createElement('button');dismiss.type='button';dismiss.className='selection-dismiss';dismiss.textContent='×';dismiss.setAttribute('aria-label','선택 도구 닫기');dismiss.onclick=()=>{cancelled=true;dismissed=true;hide();options.focus();};popup.append(dismiss);
     }
     if(text)controls.sync();
-    const touch=text&&doc.getElementById('pages')?.hasAttribute('data-touch-selection');
     if(touch){
       if(!popup.contains(touchActions))popup.prepend(touchActions);
       const touchStates=active?options.touchClipboard?.state():undefined;

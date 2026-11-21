@@ -1,26 +1,31 @@
 import { isMergedValignCoreDigest } from "./b338-focused-owner-trial.js";
+import { cellLayoutHold } from "./cell-layout.js";
 import { coreRuntimeIdentity } from "./core-runtime.js";
 import { fontSupplyRevision } from "./font-provider.js";
 import type { Interaction } from "./interaction.js";
 import { cellPath, nested, samePosition, sameTable, type Props } from "./model.js";
+import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
 
 type Align = 0 | 1 | 2;
 type Capture = ReturnType<Interaction["capture"]>;
 const alignment = (v: unknown): v is Align => v === 0 || v === 1 || v === 2;
 const stale = "셀 또는 선택이 바뀌었습니다. 속성을 다시 여세요.";
 
-function admitted(editor: Interaction, doc: Document) {
+function alignmentScope(editor: Interaction, doc: Document) {
   const win = doc.defaultView;
-  if (!win || win !== win.top || !isMergedValignCoreDigest(coreRuntimeIdentity(editor.adapter.doc)?.sha256)) return false;
+  const digest = coreRuntimeIdentity(editor.adapter.doc)?.sha256;
+  if (!win || win !== win.top || !isMergedValignCoreDigest(digest)) return;
   const url = new URL(win.location.href);
   const once = (key: string) => url.searchParams.getAll(key).join("/") === "1";
-  return url.protocol === "http:" && url.hostname === "127.0.0.1" &&
-    once("oneditQaCoreScope") && once("oneditQaMergedValign");
+  if (url.protocol === "http:" && url.hostname === "127.0.0.1" &&
+      once("oneditQaCoreScope") && once("oneditQaMergedValign")) return "trial";
+  if (digest === rootEditorCoreSha256) return "3x1";
 }
 
 function target(editor: Interaction, doc: Document, capture: Capture) {
   const a = editor.adapter, s = capture.selection, p = s.focus, ref = capture.paths.focus;
-  if (!admitted(editor, doc) || p.kind !== "cell" || nested(p) || !ref ||
+  const scope = alignmentScope(editor, doc);
+  if (!scope || p.kind !== "cell" || nested(p) || !ref ||
       capture.documentId !== a.documentId || capture.revision !== a.revision ||
       capture.paths.documentId !== a.documentId || ref.offset !== p.offset)
     throw Error(stale);
@@ -61,6 +66,7 @@ function target(editor: Interaction, doc: Document, capture: Capture) {
     throw Error("누름틀·양식 또는 세로쓰기 셀의 세로 정렬은 지원하지 않습니다.");
   if (m.cellIndex !== p.cell || (m.rowSpan === 1 && m.colSpan === 1) || !alignment(values.verticalAlign))
     throw Error(stale);
+  if (scope === "3x1" && (m.rowSpan !== 3 || m.colSpan !== 1)) throw Error(cellLayoutHold);
   const boxes = a.cells(p).filter(box => box.cellIdx === p.cell);
   const box = boxes[0];
   if (boxes.length !== 1 || box.row !== m.row || box.col !== m.col ||
@@ -80,15 +86,16 @@ function target(editor: Interaction, doc: Document, capture: Capture) {
     a.documentId,a.revision,generation,s,capture.paths.focus,capture.paths.anchor,
     owner.owner.instance,owner.owner.documentEpoch,owner.owner.sectionRevision,owner.owner.ownerIds,
     m.cellId,m.row,m.col,m.rowSpan,m.colSpan,values.verticalAlign,box,
-    env,fontSupplyRevision(),doc.defaultView?.devicePixelRatio,a.nativeMutationGeneration(),
+    env,fontSupplyRevision(),doc.defaultView?.devicePixelRatio,
   ]);
-  return {native:a.doc,key,position:p,paths:capture.paths,verticalAlign:values.verticalAlign};
+  return {native:a.doc,key,position:p,paths:capture.paths,verticalAlign:values.verticalAlign,
+    mutationGeneration:a.nativeMutationGeneration()};
 }
 
 export type MergedValignDraft = Readonly<ReturnType<typeof target>>;
 export function prepareMergedValign(editor: Interaction, doc: Document, capture: Capture):
   {draft?: MergedValignDraft; reason?: string} {
-  if (!admitted(editor, doc)) return {};
+  if (!alignmentScope(editor, doc)) return {};
   try { return {draft:Object.freeze(target(editor,doc,capture))}; }
   catch (e) { return {reason:e instanceof Error ? e.message : "현재 병합 셀을 확인할 수 없습니다."}; }
 }
@@ -97,17 +104,21 @@ export function applyMergedValign(editor: Interaction, doc: Document, draft: Mer
   if (Object.keys(delta).length !== 1 || !alignment(delta.verticalAlign))
     throw Error("병합 셀 세로 정렬은 다른 속성과 따로 적용하세요.");
   const next = delta.verticalAlign, a = editor.adapter;
-  const recheck = () => {
+  const recheck = (expectedGeneration: number | undefined) => {
     const current = target(editor,doc,editor.capture());
-    if (current.native !== draft.native || current.key !== draft.key) throw Error(stale);
+    if (current.native !== draft.native || current.key !== draft.key ||
+        current.mutationGeneration !== expectedGeneration) throw Error(stale);
     return current;
   };
-  recheck();
+  const {mutationGeneration} = recheck(draft.mutationGeneration);
   if (next === draft.verticalAlign) return;
+  // History takes one native snapshot before the callback. The dispatch fence
+  // advances even though the snapshot does not change the selected cell.
+  const snapshotGeneration = mutationGeneration === undefined ? undefined : mutationGeneration + 1;
   let refused: {error:unknown} | undefined;
   const selected = editor.history.transact("병합 셀 세로 정렬", editor.selection, () => {
     let live;
-    try { live = recheck(); }
+    try { live = recheck(snapshotGeneration); }
     catch (error) { refused = {error}; return editor.selection; } // No setter was entered.
     const p = live.position;
     const reply = a.call("setCellProperties", p.sec, p.para, p.control, p.cell, JSON.stringify({verticalAlign:next}));

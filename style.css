@@ -152,14 +152,14 @@ main {
 #touch-selection-handles { position:absolute; inset:0; pointer-events:none; z-index:25; }
 #touch-selection-handles[hidden] { display:none; }
 #touch-selection-handles button {
-  position:absolute; width:32px; height:36px; padding:0; margin:0; border:0;
+  position:absolute; width:44px; height:44px; padding:0; margin:0; border:0;
   background:transparent; pointer-events:auto; touch-action:none;
   transform:translateX(-50%); cursor:ew-resize;
 }
-#touch-selection-handles button::before { content:'';position:absolute;left:15px;top:-12px;width:2px;height:23px;background:#2463c5; }
-#touch-selection-handles button::after { content:'';position:absolute;left:9px;top:5px;width:14px;height:14px;border-radius:50%;background:#2463c5;border:1px solid white; }
-#touch-selection-handles [data-touch-handle=anchor]::before { top:15px;height:17px; }
-#touch-selection-handles [data-touch-handle=anchor]::after { top:2px; }
+#touch-selection-handles button::before { content:'';position:absolute;left:50%;top:0;width:2px;height:12px;transform:translateX(-50%);background:#2463c5;pointer-events:none; }
+#touch-selection-handles button::after { content:'';position:absolute;left:50%;top:8px;width:14px;height:14px;transform:translateX(-50%);border-radius:50%;background:#2463c5;border:1px solid white;pointer-events:none; }
+#touch-selection-handles [data-touch-handle=anchor]::before { top:auto;bottom:0; }
+#touch-selection-handles [data-touch-handle=anchor]::after { top:auto;bottom:8px; }
 #touch-selection-handles button:focus-visible { outline:2px solid #2463c5;outline-offset:2px; }
 #selection-tools [data-touch-selection-actions] { display:flex;gap:4px; }
 @media print { #touch-selection-handles { display:none!important; } }

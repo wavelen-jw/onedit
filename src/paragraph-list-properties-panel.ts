@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import type { FormatState } from "./formatting.js";
 import { formatMenuState } from "./integration/a-format-menu.js";
@@ -35,8 +36,9 @@ export function mountParagraphListPropertiesPanel(doc: Document, editor: Interac
     const blocked = busy() || !!doc.querySelector("dialog[open]");
     const state = formatMenuState(editor, blocked, stateReason()).get("paragraph-lists");
     reason ||= state?.reason || (!state ? "현재 문단 번호 명령을 확인할 수 없습니다." : "");
-    more.disabled = !!reason; more.title = reason || "현재 선택의 기존 문단 번호·글머리표·개요 설정창 열기";
-    note.textContent = reason || "공통값·혼합 조회 · 참조 ID는 실제 표시 번호가 아닙니다. 변경·취소는 기존 설정창에서 처리합니다."; note.title = note.textContent;
+    const feedback = reason ? editorFeedbackText(reason) : '';
+    more.disabled = !!reason; more.title = feedback || "현재 선택의 기존 문단 번호·글머리표·개요 설정창 열기";
+    note.textContent = feedback || "공통값·혼합 조회 · 참조 ID는 실제 표시 번호가 아닙니다. 변경·취소는 기존 설정창에서 처리합니다."; note.title = note.textContent;
   }
   more.onclick = () => { sync(); if (!more.disabled) open(); };
   return {root, sync, dispose() { root.remove(); }};

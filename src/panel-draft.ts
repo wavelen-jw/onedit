@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import type { Command } from "./model.js";
 import { formatInputGuard, sameFormatTarget } from "./integration/a-format-input-guard.js";
@@ -36,8 +37,9 @@ export function bindPanelDraft<T>(form: HTMLFormElement, editor: Interaction, op
       }
       if (!captured && !invalidated && !applying) reset();
     } catch(error) { reason=String(error);options.clear?.(); }
-    for(const control of controls) { control.disabled=!!reason;control.title=reason||control.dataset.hint||titles.get(control)||"변경한 값만 설정 · Esc 취소"; }
-    if(reason){options.note.textContent=reason;options.note.dataset.result="unavailable";}
+    const message = reason ? editorFeedbackText(reason) : '';
+    for(const control of controls) { control.disabled=!!reason;control.title=message||control.dataset.hint||titles.get(control)||"변경한 값만 설정 · Esc 취소"; }
+    if(reason){options.note.textContent=message;options.note.dataset.result="unavailable";}
     else if(result){options.note.textContent=result.text;options.note.dataset.result=result.kind;}
     else options.note.dataset.result=captured?"draft":"idle";
     options.note.title=options.note.textContent??"";
@@ -48,7 +50,7 @@ export function bindPanelDraft<T>(form: HTMLFormElement, editor: Interaction, op
   form.addEventListener("focusin",e=>{
     if(e.relatedTarget instanceof Node&&form.contains(e.relatedTarget))return;
     if(sync())return;
-    try{result=undefined;captured=editor.capture();invalidated=false;guard.open();options.note.textContent="초안 · 설정 전에는 문서를 변경하지 않습니다.";options.note.dataset.result="draft";}catch(error){options.note.textContent=String(error);}
+    try{result=undefined;captured=editor.capture();invalidated=false;guard.open();options.note.textContent="초안 · 설정 전에는 문서를 변경하지 않습니다.";options.note.dataset.result="draft";}catch(error){options.note.textContent=editorFeedbackText(error);}
   });
   form.addEventListener("focusout",e=>{if(!(e.relatedTarget instanceof Node&&form.contains(e.relatedTarget))&&(captured||invalidated))cancel(false);});
   form.addEventListener("keydown",e=>{
@@ -68,7 +70,7 @@ export function bindPanelDraft<T>(form: HTMLFormElement, editor: Interaction, op
       if(command){attempted=true;applying=true;try{options.execute(command,target);}finally{applying=false;}}
       const changed=editor.adapter.revision!==revision;
       guard.consume();captured=undefined;invalidated=false;reset();feedback(changed?"설정했습니다. 실행 취소로 되돌릴 수 있습니다.":"변경 없음 · 기존 이력 유지",changed?"applied":"unchanged");options.focus();sync();
-    }catch(error){feedback((attempted?"결과 확인 필요 · ":"적용하지 않았습니다 · ")+String(error),attempted?"unknown":"rejected");options.note.title=options.note.textContent??"";}
+    }catch(error){feedback((attempted?"결과 확인 필요 · ":"적용하지 않았습니다 · ")+editorFeedbackText(error),attempted?"unknown":"rejected");options.note.title=options.note.textContent??"";}
   };
   options.cancel.onclick=()=>cancel();
   return {sync, target:()=>{if(!current())throw Error("선택이 바뀌었습니다.");return captured!;},dispose(){guard.close();options.clear?.();}};

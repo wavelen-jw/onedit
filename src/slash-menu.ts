@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog } from "./editor-popup-focus.js";
 import { activeWorkset } from "./active-workset.js";
 import type { Interaction } from "./interaction.js";
@@ -119,7 +120,7 @@ function createSlashMenu(doc:Document,editor:Interaction,actions:SlashActions,re
       else if(row.id==="table"||row.id==="inline-box")executeSlash(editor,target!,"/"+query.value,{type:"insert-table",rows:row.id==="inline-box"?1:3,cols:row.id==="inline-box"?1:3,inline:true});
       // Text shares the explicit default preset with Markdown report import.
       guard.consume();close();actions.changed();
-    }catch(e){status.textContent=String(e);}finally{running=false;if(!dialog.open)release?.();}}
+    }catch(e){status.textContent=editorFeedbackText(e);}finally{running=false;if(!dialog.open)release?.();}}
   const begin=(ev:Event, admitted=false)=>{if(ev.defaultPrevented||!ev.cancelable||dialog.open||actions.busy()||doc.querySelector("dialog[open]"))return;
     try{if(!admitted)assertSlashStart(editor);if(!draft.open())return;target=editor.capture();access=`${editor.adapter.scope}:${editor.adapter.documentLocked}`;ev.preventDefault();query.value="";active=0;guard.open();render();show();}catch{draft.close();/* Ordinary slash in unsupported/nonempty owners. */}};
   if(!release)input.addEventListener("keydown",e=>{if(e.key!=="/"||e.ctrlKey||e.altKey||e.metaKey||e.repeat||e.isComposing||e.keyCode===229||e.getModifierState("AltGraph"))return;const pending=new Event("rhwp:editor-sequence-pending",{cancelable:true});if(!input.dispatchEvent(pending))return;begin(e);},{capture:true,signal});

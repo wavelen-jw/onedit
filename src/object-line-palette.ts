@@ -64,8 +64,11 @@ export function objectLinePalette(initial: string, signal: AbortSignal, config?:
       switch (e.key) {
         case 'ArrowLeft': n = Math.max(0, i - 1); break;
         case 'ArrowRight': n = Math.min(options.length - 1, i + 1); break;
-        case 'ArrowUp': n = Math.max(0, i - 10); break;
-        case 'ArrowDown': n = Math.min(options.length - 1, i + 10); break;
+        case 'ArrowUp': case 'ArrowDown': {
+          const columns = getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length;
+          n = Math.max(0, Math.min(options.length - 1, i + (e.key === 'ArrowUp' ? -columns : columns)));
+          break;
+        }
         case 'Home': n = 0; break;
         case 'End': n = options.length - 1; break;
         default: return;
@@ -97,7 +100,7 @@ export function objectLinePalette(initial: string, signal: AbortSignal, config?:
     paint();
     // Only callers inside a clipped panel opt in. Fit before focusing an
     // option, so native focus scrolling cannot push the panel under its popup.
-    if(config?.boundary){
+    if(config?.boundary && getComputedStyle(popup).position !== "static"){
       popup.style.top='100%';popup.style.maxHeight=`${config.boundary.clientHeight}px`;popup.style.overflowY='auto';
       const clip=config.boundary.getBoundingClientRect(),anchor=row.getBoundingClientRect(),height=popup.getBoundingClientRect().height;
       const top=clip.top+config.boundary.clientTop,bottom=top+config.boundary.clientHeight;

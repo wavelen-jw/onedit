@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { activeWorkset } from "./active-workset.js";
 import type { OwnerProjection } from "./owner-projection.js";
 import { readEditorDisplay } from "./editor-state-coordinator.js";
@@ -162,7 +163,8 @@ export function syncCommandToolbar(root: ParentNode, editor: Interaction, busy =
       if (state?.valueState)markFormatToggle(b,{valueState:state.valueState,pressed:state.pressed},state.valueReason||state.reason);
     }
     if (b.disabled !== !!reason) b.disabled = !!reason;
-    if (b.title !== (reason || originalTitle)) b.title = reason || originalTitle;
+    const title = reason ? editorFeedbackText(reason) : originalTitle;
+    if (b.title !== title) b.title = title;
     const ariaDisabled = String(!!reason);
     if (b.getAttribute("aria-disabled") !== ariaDisabled) b.setAttribute("aria-disabled", ariaDisabled);
   }

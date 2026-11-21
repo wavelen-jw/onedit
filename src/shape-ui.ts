@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import type { Command } from "./model.js";
 import type { Interaction } from './interaction.js';
@@ -85,7 +86,7 @@ export function mountShapes(host: HTMLElement, editor: Interaction, actions: {
       list.disabled = busy(); properties.disabled = !!reason; properties.title = reason; status.textContent = reason;
       copyButton.disabled=busy()||!selected||row?.name!=='글상자'||!actions.copy;
       cutButton.disabled=copyButton.disabled||!actions.cut||editor.adapter.scope!=='edit'||editor.adapter.documentLocked;
-    } catch (e) { selected = undefined; insert.disabled = properties.disabled = list.disabled = copyButton.disabled = cutButton.disabled = true; insert.title = String(e); status.textContent = String(e); }
+    } catch (e) { selected = undefined; insert.disabled = properties.disabled = list.disabled = copyButton.disabled = cutButton.disabled = true; insert.title = status.textContent = editorFeedbackText(e); }
   };
   const menuToggle = (event: Event) => {
     if (event.target instanceof Element && event.target.contains(menu)) sync();
@@ -154,7 +155,7 @@ export function mountShapes(host: HTMLElement, editor: Interaction, actions: {
         selected = shapeCatalog(editor.adapter).find(r=>!before.has(key(r.target)))?.target;
       } else (actions.execute??((command,target)=>editor.execute(command,target)))({ type: 'shape-size', change: { target: selected!, ...size, ...lineDraft?.() } }, capture);
       guard.consume(); closeEditorDialog(dialog); actions.changed();
-    } catch (e) { message.dataset.error='true'; message.textContent = String(e); }
+    } catch (e) { message.dataset.error='true'; message.textContent = editorFeedbackText(e); }
   };
   cancel.onclick = () => closeEditorDialog(dialog);
   dialog.addEventListener('close', () => { if (dialog.open) return; capture = undefined; lineDraft = undefined; inserting = false; localComposing = false; guard.close(); sync(); });

@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import { nested, type CellBox, type Position } from "./model.js";
 
@@ -58,7 +59,7 @@ export function paintTableGuides(editor:Interaction,pages:HTMLElement){
     const owners:Position[]=mode==="selected"?[focus]:a.call("getCursorModel").lists
       .filter((l:any)=>l.isCell&&l.row!==undefined&&l.cellIndex===0).flatMap((l:any)=>{
         try{return[a.listPosition(l,a.call("getCursorModel").lists)];}
-        catch(error){warnings.push(String(error));return[];}
+        catch(error){warnings.push(editorFeedbackText(error));return[];}
       });
     const tables=owners.flatMap(owner=>{
       try{
@@ -99,7 +100,7 @@ export function paintTableGuides(editor:Interaction,pages:HTMLElement){
         const boxes=scoped??a.cells(owner,"owner-page");
         for(const box of boxes)borders(box.cellIdx);
         return[{boxes,props}];
-      }catch(error){warnings.push(String(error));return[];}
+      }catch(error){warnings.push(editorFeedbackText(error));return[];}
     });
     if(!tables.length&&!warnings.length)return;
     const layouts:{page:HTMLElement;edges:Omit<Edge,"visible">[]}[]=[];
@@ -125,5 +126,5 @@ export function paintTableGuides(editor:Interaction,pages:HTMLElement){
       }
       page.querySelector(".overlay")?.append(group);
     }
-  }catch(error){failures.set(editor,"표 보조선 조회 불가: "+String(error));}
+  }catch(error){failures.set(editor,"표 보조선 조회 불가: "+editorFeedbackText(error));}
 }

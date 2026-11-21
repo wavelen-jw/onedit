@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import { sameFormatTarget,formatInputGuard } from "./integration/a-format-input-guard.js";
 import { TextSearch } from "./integration/a-search.js";
@@ -52,7 +53,7 @@ export function mountDocumentNavigation(doc:Document,editor:Interaction,options:
       const key=JSON.stringify([query.value,caseMatch.checked,cells.checked]);
       if(key!==searchKey){search.setScope("document");search.refresh(query.value,caseMatch.checked,cells.checked);searchKey=key;}
       note.textContent=search.move(backward);owned=editor.capture();options.changed();doc.dispatchEvent(new CustomEvent("rhwp:reveal-selection"));reveal();query.focus({preventScroll:true});
-    }catch(error){note.textContent=String(error);}
+    }catch(error){note.textContent=editorFeedbackText(error);}
   }
   form.onsubmit=e=>{e.preventDefault();find();};previous.onclick=()=>find(true);
   detail.onclick=()=>{if(!allowed())return;hide(false,false);options.find();};

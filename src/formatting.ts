@@ -11,6 +11,16 @@ export const lineProtectionBodyUnsupported = (
 ) =>
   `NOT_SUPPORTED: ${name === "keepLines" ? "줄 함께" : "외톨이줄 보호"}의 일반 본문 배치는 미지원입니다. 새 활성화는 보류하며 기존 값 유지·명시적 해제는 가능합니다.`;
 export const sides = ["Left", "Right", "Top", "Bottom"] as const;
+// Core line appearance. HWPX's serialized border names are a separate mapping.
+export const borderLineStyles = [
+  ["0", "없음", "none", undefined],
+  ["1", "실선", "solid", undefined],
+  ["2", "파선", "dashed", "6 3"],
+  ["3", "점선", "dotted", "2 2"],
+] as const;
+export const borderLineOptions: [string, string][] = borderLineStyles.map(
+  ([value, label]) => [value, label],
+);
 export const metricKeys = [
   "ratios",
   "spacings",

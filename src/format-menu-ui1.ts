@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { browserShortcutScope } from "./browser-shortcut-scope.js";
 import { mountDropdownKeys } from "./workspace-menu-navigation.js";
 import { stylesUnavailable } from "./style-availability.js";
@@ -105,7 +106,7 @@ export function mountFormatMenuUI1(root: HTMLDetailsElement,
   return {
     sync() {
       outline.disabled=actions.blocked()||listDialog.disabled;outline.title=listDialog.disabled?listDialog.title:'기존 개요 종류·정의·수준을 초안에서 설정합니다.';outline.setAttribute('aria-disabled',String(outline.disabled));
-      for(const {b,direction}of fontButtons){const reason=actions.fontState?.(direction)??'등록 글꼴 명령 미연결';b.disabled=!!reason;b.title=reason||'현재 언어 범위와 등록 글꼴 목록 순서로 적용합니다.';b.setAttribute('aria-disabled',String(!!reason));}
+      for(const {b,direction}of fontButtons){const reason=actions.fontState?.(direction)??'등록 글꼴 명령 미연결';b.disabled=!!reason;b.title=reason?editorFeedbackText(reason):'현재 언어 범위와 등록 글꼴 목록 순서로 적용합니다.';b.setAttribute('aria-disabled',String(!!reason));}
       for (const { button, apply, remove } of listToggles) {
         const pressed = apply.getAttribute("aria-pressed"),unknown=apply.dataset.valueState==="unavailable";
         const reason = apply.disabled ? apply.title : remove.disabled ? remove.title : unknown
@@ -118,7 +119,7 @@ export function mountFormatMenuUI1(root: HTMLDetailsElement,
         if(pressed===null){button.removeAttribute("aria-checked");button.removeAttribute("aria-pressed");}
         else{button.setAttribute("aria-checked", pressed); button.setAttribute("aria-pressed", pressed);}
       }
-      const state = actions.objectState(); object.disabled = state.disabled || actions.blocked(); object.title = state.reason || "선택한 기존 본문 개체의 속성 창"; object.setAttribute("aria-disabled", String(object.disabled));
+      const state = actions.objectState(); object.disabled = state.disabled || actions.blocked(); object.title = state.reason ? editorFeedbackText(state.reason) : "선택한 기존 본문 개체의 속성 창"; object.setAttribute("aria-disabled", String(object.disabled));
     },
     dispose() { disposeKeys(); extra.removeEventListener("keydown", key); extra.removeEventListener("toggle", toggle); root.removeEventListener("toggle", rootToggle); },
   };

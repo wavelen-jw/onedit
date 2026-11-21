@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {withTypingFormatPresentation} from './typing-format-presentation.js';
 import { LiveComposition } from "./live-composition.js";
 import type { Interaction } from "./interaction.js";
@@ -102,7 +103,7 @@ export function mountCompositionInput(context: CompositionInputContext) {
     } catch (error) {
       context.composing = false;
       compositionKeys.cancel();
-      $("error").textContent = String(error); $("error").hidden = false;
+      $("error").textContent = editorFeedbackText(error); $("error").hidden = false;
       paint();
       return;
     }
@@ -122,7 +123,7 @@ export function mountCompositionInput(context: CompositionInputContext) {
       cancelComposition();
       context.composing = false;
       render();
-      $("error").textContent = String(error); $("error").hidden = false;
+      $("error").textContent = editorFeedbackText(error); $("error").hidden = false;
     }
   }, typingStart?.target.selection.kind === 'caret' && !!e.data && !/[\r\n]/.test(e.data)));
   input.addEventListener("compositionend", (e) => withTypingFormatPresentation(editor, () => {
@@ -147,7 +148,7 @@ export function mountCompositionInput(context: CompositionInputContext) {
       cancelComposition();
       context.composing = false;
       render();
-      $("error").textContent = String(error); $("error").hidden = false;
+      $("error").textContent = editorFeedbackText(error); $("error").hidden = false;
     } finally {
       context.composing = false;
       // WebKit may deliver its final native input AFTER compositionend. Keep
@@ -165,7 +166,7 @@ export function mountCompositionInput(context: CompositionInputContext) {
         if (context.composition.update(ev.data)) render(true);
       } catch (error) {
         cancelComposition(); context.composing = false; resetNative(); render();
-        $('error').textContent = String(error); $('error').hidden = false;
+        $('error').textContent = editorFeedbackText(error); $('error').hidden = false;
       }
       return;
     }

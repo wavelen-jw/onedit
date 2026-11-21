@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { subscribeWhileOpen } from "./ui-demand-lifetime.js";
 import { activeWorkset } from "./active-workset.js";
 import { editMenuState } from "./integration/a-edit-menu.js";
@@ -55,7 +56,8 @@ export function mountBodyContext(doc: Document, editor: Interaction, busy: () =>
       button.hidden = !original || ['cut','copy','delete'].includes(id)&&editor.selection.kind==='caret';
       const labels:Record<string,[string,string]>={undo:['실행 취소','Ctrl+Z'],redo:['다시 실행','Ctrl+Y'],cut:['오려두기','Ctrl+X'],copy:['복사','Ctrl+C'],paste:['붙이기','Ctrl+V'],delete:['지우기','Delete'],all:['전체 선택','Ctrl+A'],find:['찾기','Ctrl+F'],replace:['바꾸기','Ctrl+H'],character:['글자 모양…','Alt+L'],paragraph:['문단 모양…','Alt+T']};
       const [label,key]=labels[id];contextRow(button,id,label,key);
-      button.title = original ? (editStates?why||original.textContent||id:original.title) : "기존 메뉴 연결이 없습니다.";
+      button.title = !original ? "기존 메뉴 연결이 없습니다."
+        : why ? editorFeedbackText(why) : editStates ? original.textContent || id : original.title;
       button.setAttribute("aria-disabled", String(button.disabled));
     }
   };

@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from "./adapter.js";
 import { UnsupportedTableOwner } from "./adapter.js";
 import { type Position, cellPath, withPara } from "./model.js";
@@ -273,7 +274,12 @@ export function* projectSemanticParts(this: RhwpAdapter) {
         });
         if(!ownedGraphs.length)throw Error('닫힌 개체 그래프가 없습니다.');
       }
-      catch(e){throw new UnsupportedTableOwner(`복합 개체의 전체 보존 검사를 수행할 수 없습니다: ${String(e)}`);}
+      catch (error) {
+        throw new UnsupportedTableOwner(
+          `복합 개체의 전체 보존 검사를 수행할 수 없습니다. ${editorFeedbackText(error)}`,
+          { cause: error },
+        );
+      }
     }
     const captions=captionCatalog(this,objects).map(v=>({...v,paragraphs:v.paragraphs.map(p=>({...p,properties:strip(p.properties),chars:p.chars.map(strip)}))}));
     const notes=noteCatalog(this).map(v=>({...v,properties:v.properties.map(strip)}));

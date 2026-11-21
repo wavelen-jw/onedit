@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {readFormatPresentation} from './typing-format-presentation.js';
 import { paragraphListItems } from "./paragraph-lists.js";
 // Existing formatting toolbar popup; all edits use the shared Commands.
@@ -46,7 +47,7 @@ export function mountFormatAdditions(toolbar: HTMLElement, editor: Interaction, 
       const button = buttons.get(item.id)!;
       const reason = editableReason || (item.list ? listReason : "");
       button.disabled = !!reason;
-      button.title = reason || item.shortcut || item.label;
+      button.title = reason ? editorFeedbackText(reason) : item.shortcut || item.label;
       if (item.value) {
         const kind = item.property ? "char" : "paragraph";
         let result = formats.get(kind);

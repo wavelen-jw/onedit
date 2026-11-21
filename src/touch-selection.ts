@@ -20,7 +20,7 @@ export function mountTouchSelectionHandles(document:Document,editor:Interaction,
         const r=i===1?editor.cursorRect():editor.adapter.rect(p),page=pages.querySelector<HTMLElement>(`[data-page="${r.pageIndex}"]`);
         if(!page||page.hasAttribute('data-render-pending')){root.hidden=true;return;}
         const at=viewportPoint(page,viewport,r.x,i===0?r.y:r.y+r.height);
-        buttons[i].style.left=`${at.x}px`;buttons[i].style.top=`${at.y-(i===0?24:0)}px`;
+        buttons[i].style.left=`${at.x}px`;buttons[i].style.top=`${at.y-(i===0?buttons[i].offsetHeight:0)}px`;
       }
     }catch{root.hidden=true;drag=undefined;}
   }

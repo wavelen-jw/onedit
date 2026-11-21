@@ -48,6 +48,12 @@ export type NewBinding=Pick<Binding,'documentId'|'workingCopyId'|'hostVersion'>;
 export type Envelope={type:'request';contractVersion:typeof contractVersion;requestId:string;sessionId:string;method:Exclude<Method,'connect'>;binding?:Binding;params?:unknown;idempotencyKey?:string};
 export type Connect={type:'onedit-ai-connect';contractVersion:typeof contractVersion;requestId:string;sessionId:string;permissions:Permission[];sessionProof:string};
 export type Approval={subjectId:string;digest:string;kind:'create'|'edit';binding:Binding;sessionId:string;expiresAt:number;proof:string};
+// v1 capability limits retain their published wire values. Report admission uses
+// a separate payload bound and weighted layout budget before allocating a draft.
+export const reportBudget=Object.freeze({utf8Bytes:512*1024,blocks:1000,markdownBlocks:1200,work:16000,tokens:18000,layoutMs:150000,longMarkdownLayoutMs:720000});
+export function fitsReportBytes(text:string):boolean {
+ return text.length<=reportBudget.utf8Bytes&&new TextEncoder().encode(text).byteLength<=reportBudget.utf8Bytes;
+}
 export const limits=Object.freeze({jsonBytes:2*1024*1024,fileBytes:30*1024*1024,characters:20000,blocks:200,tables:20,cells:1000,columns:12,selection:4000,context:500,snapshotMs:300000,proposalMs:180000,draftMs:600000,writers:1,queue:3,receipts:128});
 export const isId=(x:unknown):x is string=>typeof x==='string'&&/^[\w:.-]{1,128}$/.test(x);
 export const isObject=(v:unknown):v is Record<string,unknown>=>!!v&&Object.getPrototypeOf(v)===Object.prototype;
@@ -64,15 +70,15 @@ export const isApproval=(v:unknown):v is Approval=>exact(v,['subjectId','digest'
 // A bounded walk BEFORE serialization/fingerprinting. Binary is permitted only
 // in the explicitly validated HWPX open slot. Reject cycles, clones with exotic
 // prototypes, surrogate input and excessive keys without copying large strings.
-function assertDense(a:unknown[]){
- need(a.length<=1000,'CONTENT_LIMIT_EXCEEDED','요청 배열이 너무 큽니다.');
+function assertDense(a:unknown[],maxLength=1000){
+ need(a.length<=maxLength,'CONTENT_LIMIT_EXCEEDED','요청 배열이 너무 큽니다.');
  need(Object.keys(a).length===a.length,'INVALID_REQUEST','연속한 JSON 배열이 필요합니다.');
  for(let i=0;i<a.length;i++)need(Object.hasOwn(a,i),'INVALID_REQUEST','연속한 JSON 배열이 필요합니다.');
 }
 function assertUnicode(s:string){
  need(!/\p{Surrogate}/u.test(s),'INVALID_REQUEST','잘못된 Unicode 입력입니다.');
 }
-export function validateValue(value:unknown, binary?:Uint8Array|ArrayBuffer):void {
+export function validateValue(value:unknown, binary?:Uint8Array|ArrayBuffer,previewBlocks?:unknown[]):void {
  const encoder=new TextEncoder(),seen=new Set<object>();let size=0, nodes=0;
  function walk(v:unknown,depth:number){
   need(depth<=16&&++nodes<=20000,'CONTENT_LIMIT_EXCEEDED','요청 구조가 너무 큽니다.');
@@ -80,9 +86,10 @@ export function validateValue(value:unknown, binary?:Uint8Array|ArrayBuffer):voi
   if(typeof v==='string'){need(v.length<=limits.jsonBytes,'CONTENT_LIMIT_EXCEEDED','문자열 한도입니다.');assertUnicode(v);size+=encoder.encode(v).byteLength+2}
   else if(v===null||typeof v==='boolean'||typeof v==='number'&&Number.isFinite(v))size+=24;
   else if(Array.isArray(v)||isObject(v)){
-   if(Array.isArray(v))assertDense(v);
+   if(Array.isArray(v))assertDense(v,depth===2&&v===previewBlocks?reportBudget.markdownBlocks:undefined);
    const o=v as object;need(!seen.has(o),'INVALID_REQUEST','순환 요청입니다.');seen.add(o);
-   const entries=Object.entries(o);need(entries.length<=1000,'CONTENT_LIMIT_EXCEEDED','요청 필드가 너무 많습니다.');
+   const entries=Object.entries(o);
+   if(!Array.isArray(v))need(entries.length<=1000,'CONTENT_LIMIT_EXCEEDED','요청 필드가 너무 많습니다.');
    for(const [k,x]of entries){
     need(k.length<=128&&!['__proto__','prototype','constructor'].includes(k),'INVALID_REQUEST','지원하지 않는 키입니다.');
     assertUnicode(k);size+=encoder.encode(k).byteLength+4;walk(x,depth+1);

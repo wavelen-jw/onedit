@@ -689,7 +689,7 @@
                               },
                               "text": {
                                 "type": "string",
-                                "maxLength": 20000,
+                                "maxLength": 524288,
                                 "minLength": 0
                               }
                             },
@@ -711,7 +711,7 @@
                               },
                               "text": {
                                 "type": "string",
-                                "maxLength": 20000,
+                                "maxLength": 524288,
                                 "minLength": 0
                               }
                             },
@@ -735,10 +735,10 @@
                                 "type": "array",
                                 "items": {
                                   "type": "string",
-                                  "maxLength": 20000,
+                                  "maxLength": 524288,
                                   "minLength": 0
                                 },
-                                "maxItems": 200,
+                                "maxItems": 1000,
                                 "minItems": 1
                               }
                             },
@@ -764,7 +764,7 @@
                                   "type": "array",
                                   "items": {
                                     "type": "string",
-                                    "maxLength": 20000,
+                                    "maxLength": 524288,
                                     "minLength": 0
                                   },
                                   "maxItems": 12,
@@ -830,7 +830,7 @@
                                         },
                                         "text": {
                                           "type": "string",
-                                          "maxLength": 20000,
+                                          "maxLength": 524288,
                                           "minLength": 0
                                         }
                                       },
@@ -864,7 +864,7 @@
                           }
                         ]
                       },
-                      "maxItems": 200,
+                      "maxItems": 1000,
                       "minItems": 1
                     }
                   },
@@ -919,7 +919,7 @@
                 },
                 "markdown": {
                   "type": "string",
-                  "maxLength": 20000,
+                  "maxLength": 524288,
                   "minLength": 1
                 }
               },

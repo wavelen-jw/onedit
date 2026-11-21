@@ -164,37 +164,9 @@ export function decodeDocumentSpecJson(raw: string): unknown {
 }
 export function assertValidatedMergedGrids(plan: NativeDocumentPlan) {
   if (!plan.blocks.some((block) => block.kind === "merged-grid")) return;
-  requireGrid(
-    plan.mode === "report" && plan.blocks.length <= 200,
-    "GRID_LIMIT",
-    "REPORT_PLAN",
-  );
-  let tables = 0,
-    tracks = 0,
-    characters = 0;
-  const count = (text: string) => {
-    characters += Array.from(text).length;
-  };
-  for (const block of plan.blocks) {
-    if (block.kind === "merged-grid") {
-      requireGrid(issued.has(block), "INVALID_GRID", "UNVALIDATED_PLAN");
-      tables++;
-      tracks += block.rowCount * block.colCount;
-      for (const c of block.cells) count(c.text);
-    } else if (block.kind === "table") {
-      tables++;
-      tracks += block.rows.length * block.align.length;
-      for (const row of block.rows)
-        for (const cell of row) for (const run of cell) count(run.text);
-    } else {
-      for (const run of block.runs) count(run.text);
-    }
-    requireGrid(
-      tables <= 20 && tracks <= 1000 && characters <= 20000,
-      "GRID_LIMIT",
-      "DOCUMENT_TOTAL",
-    );
-  }
+  requireGrid(plan.mode === "report", "GRID_LIMIT", "REPORT_PLAN");
+  for(const block of plan.blocks)
+    if(block.kind === "merged-grid")requireGrid(issued.has(block), "INVALID_GRID", "UNVALIDATED_PLAN");
 }
 type NativeCell = {
   listId: number;

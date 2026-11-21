@@ -1,4 +1,4 @@
-import {AIError,errorCodes,limits,validateValue,isObject,type Binding,type ErrorBody,type Approval} from '../ai-integration/contract.js';
+import {AIError,errorCodes,limits,reportBudget,fitsReportBytes,validateValue,isObject,type Binding,type ErrorBody,type Approval} from '../ai-integration/contract.js';
 import type {GridSpec,HostDocumentSpec} from '../ai-integration/document-spec.js';
 import {checkedOpenFeature,type FileFormat,type OpenScope,type OpenMetadata,type OpenApproval,type OpenedSource} from './open.js';
 
@@ -78,7 +78,7 @@ const error=obj({code:pick(...errorCodes,'OUTCOME_UNKNOWN'),message:str(512),ret
 const scope=pick('read','edit','save','lifecycle');
 const limitsSchema=obj(Object.fromEntries(Object.entries(limits).map(([k,v])=>[k,literal(v)])));
 const transfer={bytes:{'x-transferable':true} as Schema,byteLength:{...int(limits.fileBytes),minimum:1},sha256:sha};
-const documentText=str(limits.characters);
+const documentText=str(reportBudget.utf8Bytes);
 const positive=(maximum:number):Schema=>({...int(maximum),minimum:1});
 // Exact shape at the transport; B's branded validator proves coverage, non-overlap and actual spans.
 const grid=obj({rowCount:positive(limits.cells),colCount:positive(limits.columns),cells:arr(obj({
@@ -87,15 +87,15 @@ const grid=obj({rowCount:positive(limits.cells),colCount:positive(limits.columns
 const spec=obj({...template,blocks:arr(one(
  obj({kind:literal('heading'),styleId:pick('title','subtitle'),text:documentText}),
  obj({kind:literal('paragraph'),styleId:literal('body'),text:documentText}),
- obj({kind:literal('list'),styleId:literal('bullet'),items:arr(documentText,limits.blocks,1)}),
+ obj({kind:literal('list'),styleId:literal('bullet'),items:arr(documentText,reportBudget.blocks,1)}),
  obj({kind:literal('table'),styleId:literal('table'),rows:arr(arr(documentText,limits.columns,1),limits.cells,1)}),
  obj({kind:literal('table'),styleId:literal('table'),grid}),
-),limits.blocks,1)});
+),reportBudget.blocks,1)});
 const prepareBase={destination:obj(dest),replaceDirty:b};
 const methodFields:Record<Method,Schema>={
  getCapabilities:none,getState:none,openDocument:obj({format,scope:openScope,destination:obj(dest),approval:openApproval,fileName,...transfer},['fileName']),getLayoutReport:none,
  listTemplates:none,getStyleCatalog:obj(template),
- prepareDocument:one(obj({...prepareBase,spec},['replaceDirty']),obj({...prepareBase,markdown:str(limits.characters,1)},['replaceDirty'])),
+ prepareDocument:one(obj({...prepareBase,spec},['replaceDirty']),obj({...prepareBase,markdown:str(reportBudget.utf8Bytes,1)},['replaceDirty'])),
  commitPreparedDocument:obj({candidateId:id,approval},['approval']),captureSelection:none,
  readSelection:obj({snapshotId:id,context:obj({before:int(limits.context),after:int(limits.context)})},['context']),
  previewEdits:obj({snapshotId:id,targetId:id,replacement:str(2*limits.selection)}),
@@ -112,7 +112,7 @@ const resultFields:Record<Method,Schema>={
  listTemplates:obj({templates:arr(obj(template),16)}),getStyleCatalog:obj({...template,styles:arr(styles,16)}),
  prepareDocument:obj({candidateId:id,previewDigest:sha,expiresAt:int(),bytesHash:sha,layout,warnings:warning,blocks:arr(one(
   obj({kind:literal('paragraph'),text:documentText}),obj({kind:literal('table'),rows:arr(arr(documentText,limits.columns,1),limits.cells,1)}),
-  obj({kind:literal('table'),grid})),limits.blocks),destination:obj(dest),replaceDirty:b}),
+  obj({kind:literal('table'),grid})),reportBudget.markdownBlocks),destination:obj(dest),replaceDirty:b}),
  commitPreparedDocument:adopt,captureSelection:obj({snapshotId:id,targetId:id,binding,selectionRevision:int(),expiresAt:int(),start:int(),end:int(),sourceSha256:sha,formatDigest:sha}),
  readSelection:obj({segmentKey:id,text:str(2*limits.selection),format:obj({bold:b,italic:b,underline:b,fontSize:one({type:'number'},literal(null))}),
   context:obj({before:str(2*limits.context),after:str(2*limits.context),readOnly:literal(true),truncatedBefore:b,truncatedAfter:b})},['context']),
@@ -155,7 +155,14 @@ function matches(s:Schema,x:unknown):boolean{
  return true;
 }
 export function check(s:Schema,x:unknown,bytes?:ArrayBuffer){
- validateValue(x,bytes);
+ // Only a successful prepare reply may carry the complete Markdown preview.
+ const previewBlocks=s===replies.prepareDocument&&isObject(x)&&x.ok===true&&isObject(x.result)&&
+   Array.isArray(x.result.blocks)?x.result.blocks:undefined;
+ validateValue(x,bytes,previewBlocks);
+ if(s===requests.prepareDocument&&isObject(x)&&isObject(x.params)&&
+   typeof x.params.markdown==='string'&&!fitsReportBytes(x.params.markdown))
+  throw new AIError('CONTENT_LIMIT_EXCEEDED','Markdown의 UTF-8 전송 크기 한도를 넘었습니다.');
+
  if(!matches(s,x))throw new AIError('INVALID_REQUEST','요청이나 응답 형식이 올바르지 않습니다.');
 }
 export function methodOf(x:unknown):Method|undefined{

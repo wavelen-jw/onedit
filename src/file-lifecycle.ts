@@ -321,7 +321,10 @@ export class FileLifecycle {
       throw Error("현재 작업본은 교체할 수 없습니다.");
     }
     this.replace(undefined, fileName ?? "연결 문서." + format, false, undefined, next => {
-      if (next.pageCount > 100) throw Error("연결 문서의 페이지 한도를 넘었습니다.");
+      // A checked 1,091-block report can reopen at 170 pages. Bound root
+      // rendering independently of the native HWPX archive and XML budgets.
+      const maxPages = format === "hwpx" ? 192 : 100;
+      if (next.pageCount > maxPages) throw Error("연결 문서의 페이지 한도를 넘었습니다.");
       if (scope === "readonly") {
         next.scope = "readonly";
         next.viewerOnlyReason = "연결된 서비스에서 읽기 전용으로 열었습니다";
@@ -488,7 +491,7 @@ export class FileLifecycle {
       r.failure !== undefined && r.failure !== "export";
   }
   downloadCopy() {
-    if (!this.canDownloadCopy) return Promise.resolve(false);
+    if (!this.ui.standalone || this.continuation) return Promise.resolve(false);
     return this.run(() => this.prepareSave(false, true));
   }
   private async prepareSave(as: boolean, copy = false) {

@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { approvedEmbedChrome } from "./approved-embed-chrome.js";
 import { closeEditorDialog, keepDialogFieldFocus, showDocumentEditingDialog, showEditorDialog, wrapDialogTab } from "./editor-popup-focus.js";
 import { subscribeWhileOpen } from "./ui-demand-lifetime.js";
@@ -65,6 +66,7 @@ import { mountWorkspaceUI } from "./workspace-ui.js";
 import { mountModernWorkspace } from "./workspace-modern.js";
 import { mountEmptyParagraphHint } from "./empty-paragraph-hint.js";
 import { mountSelectionTools } from "./selection-tools.js";
+import { mountMobileEditTools } from "./mobile-edit-tools.js";
 import { mountDocumentNavigation } from "./document-navigation.js";
 import { mountTableBoundary,assertBoundaryTable } from "./table-boundary.js";
 import { mountPictureCanvas } from "./picture-canvas.js";
@@ -638,7 +640,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
           }
         } catch (error) {
           doc.getElementById("format-note")!.textContent =
-            nestedDraft && error instanceof Error ? error.message : String(error);
+            editorFeedbackText(error);
         }
       };
       form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
@@ -1042,7 +1044,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       for(const [i,button] of [...resize,...deletes].entries()){
         const reason=reasons[i];
         button.disabled=!!reason;
-        button.title=reason||(i<resize.length?(button.textContent||"셀 크기 변경"):"현재 행 삭제 (내용 포함)");
+        button.title=reason?editorFeedbackText(reason):(i<resize.length?(button.textContent||"셀 크기 변경"):"현재 행 삭제 (내용 포함)");
       }
     } else {
     // The toolbar and table menu consume the same pre-History Command verdict.
@@ -1057,7 +1059,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
         ? "입력 처리 중"
         : editor.tableCommandReason({ type: "resize", width, height });
       button.disabled = !!reason;
-      button.title = reason || button.textContent || "셀 크기 변경";
+      button.title = reason ? editorFeedbackText(reason) : button.textContent || "셀 크기 변경";
     }
     for (const button of doc.querySelectorAll<HTMLButtonElement>(
       '[data-table="row-delete"]',
@@ -1066,7 +1068,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
         ? "입력 처리 중"
         : editor.tableCommandReason({ type: "table-edit", operation: "row-delete" });
       button.disabled = !!reason;
-      button.title = reason || "현재 행 삭제 (내용 포함)";
+      button.title = reason ? editorFeedbackText(reason) : "현재 행 삭제 (내용 포함)";
     }
     }
     legacyTableToolsDirty=false;
@@ -1420,6 +1422,26 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     queueMicrotask(()=>{toolbarOverflow=mountToolbarOverflow(doc);});
     documentNavigation=mountDocumentNavigation(doc,editor,{busy:unavailable,focus,changed:()=>files.ui.change(false),find:()=>search.show()});
     emptyHint=mountEmptyParagraphHint(doc,editor,unavailable);
+    if (activeWorkset(doc)) mountMobileEditTools(doc, editor, {
+      busy: unavailable,
+      error: error => files.ui.error(error),
+      run: (action, target) => {
+        switch (action) {
+          case "undo": case "copy": case "cut": case "paste":
+            syncEdit.invoke(action, target); return;
+          case "previous-cell": case "next-cell":
+            syncTable.invoke(action === "previous-cell" ? "previous" : "next", target); return;
+          case "cell-properties": cellCommand.open("properties", target); return;
+          case "character": showFormat("char"); return;
+          case "paragraph": showFormat("paragraph"); return;
+          case "bold": safe(() => editor.execute({ type: "bold" }, target)); return;
+          case "insert-table":
+            assertTableInsertTarget(editor, target, unavailable());
+            tableInsert?.show(); return;
+          case "insert-picture": pictures.showInsert(); return;
+        }
+      },
+    });
     selectionTools=mountSelectionTools(doc,editor,{busy:unavailable,focus,shapeTarget:()=>shapes.readSelected()?.target,touchClipboard:{state:syncEdit.liveState,invoke:syncEdit.invoke},execute:(command,target)=>{editor.execute(lowerMenuCommand(editor,command),target);changed();}});
     lineGutter=mountLineSelectionGutter(doc,editor,{busy:unavailable,changed:()=>files.ui.change(false),focus,error:e=>files.ui.error(e)});
     removeExcludedMenuEntries(doc);

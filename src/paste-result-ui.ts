@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 // Display-only receipts for the existing clipboard commands. No clipboard read,
 // document query, policy conversion, focus change or second edit lives here.
 export const pastePolicyHelp = {
@@ -61,12 +62,13 @@ export function mountPasteResult(
       showNotes(); root.hidden = true;
       doc.dispatchEvent(new CustomEvent("rhwp:paste-diagnostic",{detail:{...receipt,applied:{...data}}}));
     },
-    failed(reason: string, commandApplied: boolean) {
+    failed(reason: unknown, commandApplied: boolean) {
       if (!receipt) return;
       Object.assign(receipt, current()); receipt.formatted = false; receipt.baseNotes = [];
       heading.textContent = commandApplied ? "붙여넣기 후 표시 오류 · 결과 확인 필요" : "붙여넣기 미적용";
       request.textContent = "요청: " + (receipt.plain ? "텍스트만 붙이기" : "원본 서식 포함 (지원 범위)");
-      result.textContent = commandApplied ? "편집 명령 이후 오류가 발생했습니다. 성공 또는 원문 보존으로 판정하지 않습니다. " + reason : reason;
+      const message = editorFeedbackText(reason);
+      result.textContent = commandApplied ? "편집 명령 이후 오류가 발생했습니다. 성공 또는 원문 보존으로 판정하지 않습니다. " + message : message;
       notes.replaceChildren(); notes.hidden = true; root.hidden = false;
       doc.dispatchEvent(new CustomEvent("rhwp:transient-notice",{detail:root}));
     },

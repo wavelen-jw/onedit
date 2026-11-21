@@ -1,8 +1,10 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import { nested, type Command, type Props } from "./model.js";
 import { cellBorderPlan, type CellBorderDraft } from "./cell-border-plan.js";
 import { bindPanelDraft } from "./panel-draft.js";
 import { objectLinePalette } from "./object-line-palette.js";
+import { borderLineStyles } from "./formatting.js";
 import { fields } from "./integration/a-format-dialog.js";
 import { formatValueState, formatValueGroup, markFormatValue } from "./format-value-state.js";
 
@@ -88,13 +90,14 @@ export function mountPanelCellBorders(root:HTMLElement,editor:Interaction,busy:(
           const line=doc.createElementNS(svg.namespaceURI,"line"),horizontal=side==="Top"||side==="Bottom",x=side==="Right"?c.x+c.w:c.x,y=side==="Bottom"?c.y+c.h:c.y;
           const next={...(current[`border${side}`] as any),...Object.fromEntries(Object.entries(props).filter(([k])=>k.startsWith(`border${side}.`)).map(([k,v])=>[k.split(".")[1],v]))};
           line.setAttribute("x1",String(x));line.setAttribute("y1",String(y));line.setAttribute("x2",String(horizontal?x+c.w:x));line.setAttribute("y2",String(horizontal?y:y+c.h));line.setAttribute("stroke",next.type===0?"#245ddd":next.color);line.setAttribute("stroke-width",String(next.type===0?2:(widths[next.width]??.12)*96/25.4));
-          if(next.type===0||next.type===2||next.type===3)line.setAttribute("stroke-dasharray",next.type===2?"1 3":"5 3");
+          const pattern = next.type === 0 ? "5 3" : borderLineStyles.find(([value]) => Number(value) === next.type)?.[3];
+          if (pattern) line.setAttribute("stroke-dasharray", pattern);
           if(next.type===0)line.setAttribute("opacity",".55");svg.append(line);
         }
         overlay.append(svg);page.append(overlay);overlays.push(overlay);
       }
       note.textContent="문서 위 적용 예정 표시 · 파란 점선은 제거 예정 · 아직 원문 변경 없음";
-    }catch(error){note.textContent=String(error);}
+    }catch(error){note.textContent=editorFeedbackText(error);}
   }
   form.addEventListener("input",()=>{palettes[0].setValue(color.value);palettes[1].setValue(background.value);preview();});form.addEventListener("change",preview);
   return{sync(){if(root.hidden){remove();return;}draft.sync();if(previewToggle.checked)preview();},dispose(){remove();draft.dispose();life.abort();form.remove();}};

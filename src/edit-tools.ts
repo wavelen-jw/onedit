@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { activeWorkset } from "./active-workset.js";
 import type { Interaction } from "./interaction.js";
 import type { EditAction } from "./integration/a-edit-menu.js";
@@ -28,7 +29,7 @@ export function mountEditTools(doc: Document, sources: Map<EditAction, HTMLButto
       if((e.key==="Enter"||e.key===" ")&&(e.isComposing||e.keyCode===229||e.repeat)){e.preventDefault();e.stopPropagation();return;}
       if(e.key==="Escape"&&!e.isComposing&&e.keyCode!==229){target=undefined;doc.getElementById("input")?.focus();e.preventDefault();e.stopPropagation();}
     });
-    b.onclick=()=>{if(demand){try{invoke(id,capture());}catch(error){const note=doc.getElementById("error");if(note){note.textContent=String(error);note.hidden=false;}}return;}sync();if(!b.disabled&&target){const once=target;target=undefined;invoke(id,once);}};
+    b.onclick=()=>{if(demand){try{invoke(id,capture());}catch(error){const note=doc.getElementById("error");if(note){note.textContent=editorFeedbackText(error);note.hidden=false;}}return;}sync();if(!b.disabled&&target){const once=target;target=undefined;invoke(id,once);}};
     const observer=new MutationObserver(sync);if(!demand)observer.observe(source,{attributes:true,attributeFilter:["disabled","title"]});observers.push(observer);
     mirrors.push(b);root.append(b);sync();
   }

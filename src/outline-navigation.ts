@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import type { Position } from "./model.js";
 import { excludedMenuReason, unavailableMenuButton } from "./menu-scope.js";
@@ -112,10 +113,11 @@ export function mountOutlineNavigation(doc: Document, editor: Interaction, actio
       } catch (error) { failure = String(error); }
     }
     const why = failure || (blocked() ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : "");
+    const feedback = why ? editorFeedbackText(why) : "";
     for (const b of [...buttons, ...list.querySelectorAll<HTMLButtonElement>("button")]) {
       if (b.disabled !== !!why) b.disabled = !!why;
       if (buttons.includes(b)) {
-        const title = why || "개요 번호 문단을 찾아 이동합니다. 문서 내용은 바꾸지 않습니다.";
+        const title = feedback || "개요 번호 문단을 찾아 이동합니다. 문서 내용은 바꾸지 않습니다.";
         if (b.title !== title) b.title = title;
         const expanded = String(visible()); if (b.getAttribute("aria-expanded") !== expanded) b.setAttribute("aria-expanded", expanded);
       }
@@ -125,7 +127,7 @@ export function mountOutlineNavigation(doc: Document, editor: Interaction, actio
       const current = String(p.kind === "body" && b.dataset.outlineTarget === `${p.sec}:${p.para}`);
       if (b.getAttribute("aria-current") !== current) b.setAttribute("aria-current", current);
     }
-    text(note, why || (snapshot?.entries.length ? `${snapshot.entries.length}개 개요 · 문단 첫 위치로 이동` : "개요 번호가 지정된 본문 문단이 없습니다."));
+    text(note, feedback || (snapshot?.entries.length ? `${snapshot.entries.length}개 개요 · 문단 첫 위치로 이동` : "개요 번호가 지정된 본문 문단이 없습니다."));
   }
   panel.addEventListener("keydown", e => {
     if (e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey) return;

@@ -1,4 +1,4 @@
-import {AIError,exact,limits} from './contract.js';
+import {AIError,exact,limits,reportBudget} from './contract.js';
 import {validateMergedGrid,type MergedGridCell,type NativeDocumentPlan} from '../ai-merged-grid.js';
 
 export const catalog=Object.freeze({templateId:'public-report',templateVersion:'1',
@@ -17,10 +17,11 @@ export function compileDocumentSpec(input:unknown,allowMerged=false):NativeDocum
   !Array.isArray(input.blocks)||!input.blocks.length)throw invalid();
  const out:NativeDocumentPlan['blocks']=[];let length=0,tables=0,cells=0;
  const bounded=(ok:boolean)=>{if(!ok)throw new AIError('CONTENT_LIMIT_EXCEEDED','공공문서 생성 한도를 넘었습니다.')};
- bounded(input.blocks.length<=limits.blocks);
+ const blockLimit=allowMerged?reportBudget.blocks:limits.blocks;
+ bounded(input.blocks.length<=blockLimit);
  const text=(x:unknown)=>{
   if(typeof x!=='string'||/[\p{Surrogate}\u0000-\u001f\u007f\u2028\u2029]/u.test(x))throw invalid();
-  length+=[...x].length;bounded(length<=limits.characters);return x;
+  length+=[...x].length;if(!allowMerged)bounded(length<=limits.characters);return x;
  };
  for(const b of input.blocks){
   if(exact(b,['kind','styleId','text'])&&b.kind==='heading'&&(b.styleId==='title'||b.styleId==='subtitle')){
@@ -29,7 +30,7 @@ export function compileDocumentSpec(input:unknown,allowMerged=false):NativeDocum
   }else if(exact(b,['kind','styleId','text'])&&b.kind==='paragraph'&&b.styleId==='body'){
    out.push({kind:'paragraph',runs:[{text:text(b.text)}],role:'body',reportRole:'text'});
   }else if(exact(b,['kind','styleId','items'])&&b.kind==='list'&&b.styleId==='bullet'&&Array.isArray(b.items)&&b.items.length){
-   bounded(out.length+b.items.length<=limits.blocks);
+   bounded(out.length+b.items.length<=blockLimit);
    for(const s of b.items){
     const t=text(s);if(!t.trim())throw invalid();
     out.push({kind:'paragraph',role:'list',level:1,reportRole:'body1',runs:[{text:t}]});
@@ -40,16 +41,17 @@ export function compileDocumentSpec(input:unknown,allowMerged=false):NativeDocum
     if((e as {code?:string})?.code==='GRID_LIMIT')bounded(false);
     throw invalid();
    }
-   cells+=grid.rowCount*grid.colCount;bounded(++tables<=limits.tables&&cells<=limits.cells);
+   cells+=grid.rowCount*grid.colCount;if(!allowMerged)bounded(++tables<=limits.tables&&cells<=limits.cells);
    for(const cell of grid.cells)text(cell.text);
    out.push(grid);
   }else if(exact(b,['kind','styleId','rows'])&&b.kind==='table'&&b.styleId==='table'&&Array.isArray(b.rows)&&b.rows.length){
    const columns=Array.isArray(b.rows[0])?b.rows[0].length:0;
    if(!columns||!b.rows.every(row=>Array.isArray(row)&&row.length===columns))throw invalid();
-   cells+=b.rows.length*columns;bounded(columns<=limits.columns&&++tables<=limits.tables&&cells<=limits.cells);
+   cells+=b.rows.length*columns;bounded(columns<=limits.columns&&b.rows.length<=limits.cells);
+   if(!allowMerged)bounded(++tables<=limits.tables&&cells<=limits.cells);
    out.push({kind:'table',rows:b.rows.map(row=>row.map((s:unknown)=>[{text:text(s)}])),align:Array(columns).fill(null)});
   }else throw invalid();
-  bounded(out.length<=limits.blocks);
+  bounded(out.length<=blockLimit);
  }
  return {version:1,mode:'report',blocks:out,diagnostics:[],ready:true,preview:''};
 }

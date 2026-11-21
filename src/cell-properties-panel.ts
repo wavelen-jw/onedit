@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { cellDialogFor } from "./cell-dialog-command.js";
 import type { Interaction } from "./interaction.js";
 import type { FormatState } from "./formatting.js";
@@ -43,7 +44,7 @@ export function mountCellPropertiesPanel(doc: Document, editor: Interaction, bus
     if (!reason) reason = stateReason();
     // The registry owns disabled/title for this entrance. This panel owns
     // its exact displayed field values and never dispatches through a source button.
-    note.textContent = reason || "공통값·혼합 조회 · 변경은 기존 셀 속성 창에서 적용/취소합니다. 병합·중첩·공유 테두리 제한은 그대로 유지됩니다.";
+    note.textContent = reason ? editorFeedbackText(reason) : "공통값·혼합 조회 · 변경은 기존 셀 속성 창에서 적용/취소합니다. 병합·중첩·공유 테두리 제한은 그대로 유지됩니다.";
     note.title = note.textContent;
   }
   more.onclick = () => { command?.open("properties"); };

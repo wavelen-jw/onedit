@@ -33,7 +33,7 @@ export class TouchIntent {
     const double = this.tap && this.tap.key === key && time - this.tap.time <= 350 &&
       Math.hypot(x - this.tap.x, y - this.tap.y) <= 24;
     this.tap = double ? undefined : { x, y, time, key };
-    return double ? 'zoom' : 'caret';
+    return double ? 'double-tap' : 'caret';
   }
   cancel() { this.down = this.tap = undefined; }
 }

@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "../editor-feedback-text.js";
 import { activeWorkset, activeMenuDemand, withMenuDemand } from "../active-workset.js";
 import { mountDropdownKeys } from "../workspace-menu-navigation.js";
 import { selectedCutObject } from "../object-clipboard.js";
@@ -141,8 +142,9 @@ export function mountEditMenu(
     for (const [id, label] of editItems) {
       const b = buttons.get(id)!;
       const extra = id === "format-paste" ? context?.formatPasteReason?.() : "";
-      b.disabled = !!states.get(id) || !!extra;
-      b.title = extra || states.get(id) || (id === "paste" ? pastePolicyHelp.source : id === "paste-special" ? pastePolicyHelp.text : label);
+      const reason = extra || states.get(id);
+      b.disabled = !!reason;
+      b.title = reason ? editorFeedbackText(reason) : id === "paste" ? pastePolicyHelp.source : id === "paste-special" ? pastePolicyHelp.text : label;
       if (id === "block") b.setAttribute("aria-pressed", String(editor.block));
       const mirror = mirrors.get(id);
       if (mirror) {

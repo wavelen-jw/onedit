@@ -8,6 +8,8 @@ export const cursorMemoRows = 1024;
 const irReaders = new Set([
   "getCursorModel","getDocumentInfo","getSectionCount","getParagraphCount","getParagraphLength","getLogicalLength",
   "getTextRange","getCellParagraphCount","getCellParagraphCountByPath","getCellParagraphLength","getCellParagraphLengthByPath",
+  // The deferred character count reads the document without changing its owner or layout.
+  "getTextFileUnicode",
   "getTextInCell","getTextInCellByPath","textToLogicalOffset","logicalToTextOffset",
   "getCellOwnProperties","getCellProperties","getTableProperties","getPageDef","getColumnDef","getParaShapeSet",
   "getCellCharPropertiesAt","getCharPropertiesAt","getCellParaPropertiesAt",

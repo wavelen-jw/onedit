@@ -1,3 +1,4 @@
+import { borderLineStyles, sides } from './formatting.js';
 import { objectLinePalette } from './object-line-palette.js';
 // UI1-TABLE-PROPERTIES-{EXISTING,MARGIN-CAPTION,TABLE,CELL} and
 // UI1-CELL-BORDER-{EACH,BACKGROUND,DIAGONAL}. Presentation of existing cell drafts.
@@ -27,7 +28,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     controls.get(name)!.title = "표 안의 표에서는 안 여백과 세로 정렬을 바꿀 수 없습니다.";
   }
   const pages: HTMLElement[] = [], borderPages: HTMLElement[] = [];
-  let mode = borderFirst, page = 3, borderPage = 0, edge = "Left";
+  let mode = borderFirst, page = 3, borderPage = 0, edge = blockScope ? "All" : "Left";
   const pageOf = new Map<string, number>();
   const nav = document.createElement("nav"), tabs = document.createElement("div");
   tabs.className = "cell-dialog-tabs"; tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "표/셀 속성 탭"); nav.append(tabs);
@@ -105,6 +106,11 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   for(const input of margins.querySelectorAll<HTMLInputElement>("[data-cell-margin]"))input.setAttribute("aria-describedby",marginReason.id);
   for(const b of alignButtons)b.setAttribute("aria-describedby",alignReason.id);
   const palettes = new Map<string, ReturnType<typeof objectLinePalette>>();
+  function setDraft(control: HTMLInputElement | HTMLSelectElement, value: string) {
+    if (control instanceof HTMLSelectElement && ![...control.options].some(option => option.value === value))
+      control.add(new Option(value, value));
+    control.value = value;
+  }
   function colorProxy(name: string, parent: HTMLElement, caption: string, label: string, at: number) {
     move(name, parent, at, caption);
     const backing = controls.get(name)!, row = rows.get(name)!;
@@ -113,9 +119,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
       id: 'cell-color-' + name.replace('.', '-') + '-popup', label, caption,
       keep: true, allowNone: name === 'background', boundary: root,
       onChange: value => {
-        if (backing instanceof HTMLSelectElement && ![...backing.options].some(o => o.value === value))
-          backing.add(new Option(value, value));
-        backing.value = value;
+        setDraft(backing, value);
         backing.dispatchEvent(new Event('change', {bubbles: true}));
       }
     });
@@ -130,8 +134,47 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   for (const [side, label] of [["Left", "왼쪽"], ["Right", "오른쪽"], ["Top", "위쪽"], ["Bottom", "아래쪽"]]) {
     const b = document.createElement("button"); b.type = "button"; b.dataset.cellEdge = side; b.textContent = label;
     b.onclick = () => { edge = side; sync(); }; edges.append(b); edgeButtons.push(b);
-    for (const [key, text] of [["type", "종류"], ["width", "굵기"]]) move(`border${side}.${key}`, border, 4, text);
+    for (const [key, text] of [["type", "선 모양"], ["width", "굵기"]]) move(`border${side}.${key}`, border, 4, text);
     colorProxy(`border${side}.color`, border, '색', `${label} 테두리 색`, 4);
+  }
+  const allBorders = blockScope ? document.createElement("div") : undefined;
+  const allSelectors = new Map<string, HTMLSelectElement>();
+  const sideFields = (key: string) => sides.map(side => controls.get(`border${side}.${key}`)!);
+  const commonValue = (key: string) => {
+    const fields = sideFields(key);
+    return fields.every(field => field.value === fields[0].value) ? fields[0].value : "";
+  };
+  const setOuterDraft = (key: string, value: string) => {
+    const fields = sideFields(key);
+    if (!value || fields.some(field => field.disabled)) return;
+    for (const field of fields) setDraft(field, value);
+    // These fields are read together by the existing block-scope apply command.
+  };
+  if (allBorders) {
+    const button = document.createElement("button");
+    button.type = "button"; button.dataset.cellEdge = "All"; button.textContent = "바깥 전체";
+    button.onclick = () => { edge = "All"; sync(); };
+    edges.prepend(button); edgeButtons.push(button);
+    allBorders.className = "cell-border-all-controls";
+    for (const [key, caption] of [["type", "선 모양"], ["width", "굵기"]]) {
+      const row = document.createElement("label"), label = document.createElement("span"), select = document.createElement("select");
+      label.textContent = caption; select.dataset.cellOuter = key;
+      const mixed = new Option("혼합 / 유지", ""); mixed.disabled = true;
+      select.add(mixed);
+      for (const option of (sideFields(key)[0] as HTMLSelectElement).options)
+        if (option.value && !option.text.startsWith("현재:")) select.add(new Option(option.text, option.value));
+      select.onchange = () => setOuterDraft(key, select.value);
+      row.append(label, select); allBorders.append(row); allSelectors.set(key, select);
+    }
+    border.append(allBorders);
+  }
+  const allPalette = allBorders && objectLinePalette(commonValue("color"), lifetime.signal, {
+    id: "cell-color-outer-popup", label: "바깥 전체 테두리 색", caption: "색", boundary: root,
+    onChange: value => { setOuterDraft("color", value); sync(); },
+  });
+  if (allPalette && allBorders) {
+    allPalette.row.classList.add("cell-color-palette");
+    allBorders.append(allPalette.row);
   }
   border.append(edges);
   const sample = document.createElement("div"); sample.className = "cell-border-sample"; sample.setAttribute("aria-label", "셀 테두리·단색 배치 예시 · 실제 문서 미리보기 아님"); border.append(sample);
@@ -175,6 +218,18 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
       palette.row.hidden = rows.get(name)!.hidden; palette.setValue(controls.get(name)!.value);
       if (palette.row.hidden) palette.close(false);
     }
+    if (allBorders && allPalette) {
+      allBorders.hidden = !mode || borderPage !== 0 || edge !== "All";
+      for (const [key, select] of allSelectors) {
+        const value = commonValue(key);
+        select.value = [...select.options].some(option => option.value === value) ? value : "";
+        select.disabled = sideFields(key).some(field => field.disabled);
+      }
+      allPalette.setValue(commonValue("color"));
+      allPalette.row.querySelector<HTMLButtonElement>("[data-object-line-color]")!.disabled =
+        sideFields("color").some(field => field.disabled);
+      if (allBorders.hidden) allPalette.close(false);
+    }
     applyProxy.checked = apply.value === "true"; applyProxy.indeterminate = apply.value === ""; applyProxy.disabled = apply.disabled; applyProxy.title = apply.title;
     applyProxy.dataset.valueState=apply.dataset.valueState;applyProxy.dataset.mixed=apply.dataset.mixed;
     const marginWhy=apply.disabled?(apply.title):
@@ -189,7 +244,10 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
       const type = controls.get(`border${side}.type`)!.value, color = controls.get(`border${side}.color`)!.value;
       const widths = [.1, .12, .15, .2, .25, .3, .4, .5, .6, .7, 1, 1.5, 2, 3, 4, 5];
       const width = controls.get(`border${side}.width`)!.value;
-      sample.style.setProperty(`border-${side.toLowerCase()}`, type === "0" ? "none" : `${width === "" ? .1 : widths[Number(width)]}mm ${{"1":"solid","2":"dotted","3":"dashed"}[type] || "solid"} ${/^#[\da-f]{6}$/i.test(color) ? color : "#aaa"}`);
+      const lineStyle = borderLineStyles.find(([value]) => value === type)?.[2] ?? "solid";
+      const paint = /^#[\da-f]{6}$/i.test(color) ? color : "#aaa";
+      const thickness = width === "" ? .1 : widths[Number(width)];
+      sample.style.setProperty(`border-${side.toLowerCase()}`, lineStyle === "none" ? "none" : `${thickness}mm ${lineStyle} ${paint}`);
     }
     const bg = controls.get("background")!.value; sample.style.background = /^#[\da-f]{6}$/i.test(bg) ? bg : "white";
     switcher.textContent = mode ? "표/셀 속성…" : "셀 테두리/배경…";

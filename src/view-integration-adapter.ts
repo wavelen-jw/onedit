@@ -380,6 +380,23 @@ export function connectViewIntegration(
   const touchMode = () => {pages.toggleAttribute('data-touch-selection', touch.selecting);handles.refresh();};
   const cancelContact = () => {clearHold();touch.cancel();tapRelease=undefined;tapRestore=undefined;downBefore=undefined;};
   const resetTouch = () => {cancelContact();touch.reset();touchMode();};
+  const selectTouchWord = (x: number, y: number) => {
+    const page = document.elementFromPoint(x,y)?.closest<HTMLElement>('.page');
+    if (!page || !pages.contains(page) || page.hasAttribute('data-render-pending')) return false;
+    const at = pagePoint(page,x,y), f = connection.files;
+    const range = pointerTextRange(f.adapter,Number(page.dataset.page),at.x,at.y,'touch-word');
+    if (!range) return false;
+    f.editor.point(range[0]);
+    f.editor.point(range[1],true);
+    f.editor.block = false;
+    touch.selecting = true;
+    touchMode();
+    f.ui.change(false);
+    inputPosition();
+    handles.refresh();
+    document.dispatchEvent(new Event('rhwp:touch-selection'));
+    return true;
+  };
   document.addEventListener('rhwp:editor-state', () => {
     if (touchDocument !== connection.files.adapter.documentId) {
       touchDocument = connection.files.adapter.documentId; resetTouch();
@@ -400,13 +417,7 @@ export function connectViewIntegration(
           !touch.isCurrent(id,touchKey())||!touch.hold(id,window.performance.now(),touchKey()))return;
       tapRestore=undefined;
       try {
-        const page=document.elementFromPoint(x,y)?.closest<HTMLElement>('.page');
-        if(!page||!pages.contains(page)||page.hasAttribute('data-render-pending')){touch.rejectHold();return;}
-        const at=pagePoint(page,x,y),range=pointerTextRange(connection.files.adapter,Number(page.dataset.page),at.x,at.y,'word');
-        if(!range){touch.rejectHold();return;}
-        const f=connection.files;f.editor.point(range[0]);f.editor.point(range[1],true);f.editor.block=false;
-        touchMode();f.ui.change(false);inputPosition();handles.refresh();
-        document.dispatchEvent(new Event('rhwp:touch-selection'));
+        if(!selectTouchWord(x,y))touch.rejectHold();
       }catch(error){touch.rejectHold();touchMode();connection.files.ui.error(error);}
     },520);
   },true);
@@ -427,8 +438,14 @@ export function connectViewIntegration(
       if(touch.selecting)tapRelease={x:e.clientX,y:e.clientY,key:touchKey(),focus:false};
       touchMode();return;
     }
-    if(result==='zoom'){
+    if(result==='double-tap'){
       const restore=tapRestore;tapRestore=undefined;
+      try {
+        if(selectTouchWord(e.clientX,e.clientY)){
+          tapRelease={x:e.clientX,y:e.clientY,key:touchKey(),focus:false};
+          return;
+        }
+      } catch(error) { resetTouch(); connection.files.ui.error(error); return; }
       if(restore&&restore.before.documentId===connection.files.adapter.documentId&&
           restore.before.revision===connection.files.adapter.revision&&restore.after===selectionStamp()){
         const f=connection.files,old=restore.before;
@@ -443,6 +460,7 @@ export function connectViewIntegration(
     touch.acceptTap();touchMode();
     if(before)tapRestore={before,after:selectionStamp()};
     tapRelease={x:e.clientX,y:e.clientY,key:touchKey(),focus:true};root!.open=false;
+    document.dispatchEvent(new Event('rhwp:touch-caret'));
   },true);
   window.addEventListener('touchend',e=>{
     const tap=tapRelease;tapRelease=undefined;
@@ -466,12 +484,19 @@ export function connectViewIntegration(
     if (document.activeElement !== input || composing || modal()) return;
     inputPosition(true);
     const v = window.visualViewport, r = input.getBoundingClientRect();
-    if (v && r.bottom > v.offsetTop + v.height - 16)
-      viewport.scrollTop += r.bottom - (v.offsetTop + v.height - 16);
-    else if (v && r.top < v.offsetTop + 16)
-      viewport.scrollTop -= v.offsetTop + 16 - r.top;
+    if (!v) return;
+    const tools = document.getElementById('mobile-edit-tools');
+    const bottom = tools && !tools.hidden
+      ? Math.min(v.offsetTop + v.height, tools.getBoundingClientRect().top)
+      : v.offsetTop + v.height;
+    const top = Math.max(v.offsetTop, viewport.getBoundingClientRect().top);
+    if (r.bottom > bottom - 16) viewport.scrollTop += r.bottom - (bottom - 16);
+    else if (r.top < top + 16) viewport.scrollTop -= top + 16 - r.top;
   };
-  window.visualViewport?.addEventListener('resize', revealMobileCaret);
+  window.visualViewport?.addEventListener('resize', () => {
+    if (!document.body.hasAttribute('data-mobile-editing')) revealMobileCaret();
+  });
+  document.addEventListener('rhwp:mobile-keyboard-layout', revealMobileCaret);
   pages.addEventListener(
     "pointerdown",
     (e) => {

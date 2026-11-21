@@ -265,7 +265,7 @@ function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
       return;
     }
     if(showTableNotice(e))return;
-    if(e instanceof UnsupportedTableOperation){recordTableRefusal(document,e,editor.selection);$("error").hidden=true;$("clipboard-status").textContent=e.message;return;}
+    if(e instanceof UnsupportedTableOperation){recordTableRefusal(document,e,editor.selection);$("error").hidden=true;$("clipboard-status").textContent=editorFeedbackText(e);return;}
     knownDiagnosticError(e);
     $("error").textContent = editorFeedbackText(e);
     $("error").hidden = false;
@@ -1374,7 +1374,7 @@ syncFormatAdditions = mountFormatAdditions($("toolbar"), editor, {
   busy: () => composing || dialog.open || clipboardBusy || files.busy,
   command: (command, captured) => { safe(() => editor.execute(command, captured)); focus(); },
   dialog: () => document.dispatchEvent(new CustomEvent("rhwp:paragraph-lists")),
-  feedback: message => { $("error").textContent = message; $("error").hidden = false; },
+  feedback: message => { $("error").textContent = editorFeedbackText(message); $("error").hidden = false; },
 });
 $("table-object").onclick = () => {
   updateView(() => editor.selectTable());
@@ -1779,9 +1779,9 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
     }
     restoreTarget = editor.capture();
   } catch (e) {
-    if(e instanceof UnsupportedTableOperation&&!pasteApplied&&!osWriteCompleted){recordTableRefusal(document,e,editor.selection);$("error").hidden=true;$("clipboard-status").textContent=e.message;return;}
+    if(e instanceof UnsupportedTableOperation&&!pasteApplied&&!osWriteCompleted){recordTableRefusal(document,e,editor.selection);$("error").hidden=true;$("clipboard-status").textContent=editorFeedbackText(e);return;}
     if (kind === "paste" || kind === "paste-text") {
-      pasteResult.failed(e instanceof Error ? e.message : String(e), pasteApplied);
+      pasteResult.failed(e, pasteApplied);
       $("error").hidden = !(e instanceof ClippedTextEdit);
       if (e instanceof ClippedTextEdit) $("error").textContent = e.message;
     } else {

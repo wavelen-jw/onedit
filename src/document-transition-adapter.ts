@@ -122,7 +122,7 @@ export function syncFileRecovery(files: FileLifecycle, doc: Document) {
     };
     panel.append(retry);
   }
-  const request=files.state().request;
+  const { request, transition } = files.state();
   retry.textContent = "다른 이름·위치에 저장";
   retry.hidden = !files.ui.standalone || !files.ui.pickSaveTarget ||
     request?.status !== "failed" || request.failure === "export";
@@ -134,13 +134,14 @@ export function syncFileRecovery(files: FileLifecycle, doc: Document) {
     copy.dataset.downloadSaveCopy = "";
     copy.textContent = "HWPX 사본 다운로드";
     copy.onclick = async () => {
-      if (files.busy || !files.canDownloadCopy) return;
+      if (files.busy) return;
       doc.getElementById("error")?.setAttribute("hidden", "");
       await files.downloadCopy();
       doc.getElementById("input")?.focus({ preventScroll: true });
     };
     panel.append(copy);
   }
+  // The file menu also invokes this command; only the recovery notice is conditional.
   copy.hidden = !files.canDownloadCopy;
-  copy.disabled = files.busy;
+  copy.disabled = files.busy || !!transition;
 }

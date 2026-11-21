@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import {activeWorkset} from './active-workset.js';
 import {coreRuntimeObjectClipboardEpoch} from './core-runtime.js';
 import {subscribeWhileOpen} from './ui-demand-lifetime.js';
@@ -38,7 +39,7 @@ export function mountObjectClipboard(host:HTMLElement,editor:Interaction,actions
       list.value=row?key(row):'';owner=editor.adapter.documentId;
       if(demand)issued=stamp();
       list.disabled=actions.busy();copy.disabled=actions.busy()||!row||row.locked||row.kind==='차트';
-    }catch(e){copy.disabled=list.disabled=true;note.textContent=String(e);}
+    }catch(e){copy.disabled=list.disabled=true;note.textContent=editorFeedbackText(e);}
   }
   if(!demand)menu.addEventListener('toggle',sync);
   list.onchange=()=>{try{

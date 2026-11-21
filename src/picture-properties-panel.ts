@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import { selectedPicture, pictureCanvasPlacement,cellPictureSizeNote } from "./pictures.js";
 
@@ -33,8 +34,9 @@ export function mountPicturePropertiesPanel(doc: Document, editor: Interaction, 
     if (!reason) reason = stateReason() || (busy() || doc.querySelector("dialog[open]") ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : "");
     if (!reason) { try { editor.adapter.assertEditable(editor.selection.focus); } catch (error) { reason = String(error); } }
     if (!reason && (!source() || source()!.disabled)) reason = "현재 그림 속성 명령을 사용할 수 없습니다.";
-    more.disabled = !!reason; more.title = reason || (editor.selection.focus.kind==='cell' ? "선택한 일반셀 그림의 크기 속성 창 열기" : "선택한 본문 그림의 기존 속성 창 열기");
-    note.textContent = reason || (editor.selection.focus.kind==='cell' ? cellPictureSizeNote : "본문 그림 한 개 · 비율 유지·적용/취소는 기존 그림 속성 창을 사용합니다. 복수·중첩·그룹·회전·자르기 편집은 미지원입니다."); note.title = note.textContent;
+    const feedback = reason ? editorFeedbackText(reason) : '';
+    more.disabled = !!reason; more.title = feedback || (editor.selection.focus.kind==='cell' ? "선택한 일반셀 그림의 크기 속성 창 열기" : "선택한 본문 그림의 기존 속성 창 열기");
+    note.textContent = feedback || (editor.selection.focus.kind==='cell' ? cellPictureSizeNote : "본문 그림 한 개 · 비율 유지·적용/취소는 기존 그림 속성 창을 사용합니다. 복수·중첩·그룹·회전·자르기 편집은 미지원입니다."); note.title = note.textContent;
   }
   more.onclick = () => { sync(); if (!more.disabled) source()?.click(); };
   return {root, sync, dispose() { root.remove(); }};

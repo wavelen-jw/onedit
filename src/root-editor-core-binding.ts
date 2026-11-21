@@ -1,2 +1,2 @@
 // Reviewed root-only Core pin. External checked-open uses its separate stable pin.
-export const rootEditorCoreSha256: string = "8fbb7253449b1aab87ddd778b78294135999f087f9e4843cd86896985066a229";
+export const rootEditorCoreSha256: string = "78845dc759ebeabdaa36feee2271d9112eb72e6fe6f57ad8d4117b587e181890";

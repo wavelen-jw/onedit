@@ -1,3 +1,4 @@
+import {AIError,fitsReportBytes,reportBudget} from './ai-integration/contract.js';
 import type {ReportBlockRole} from './report-block-presets.js';
 import { Lexer } from './vendor/marked.js';
 
@@ -20,10 +21,17 @@ const decodeEntities = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|qu
 });
 // No rendering of HTML and no URL fetching. Unsupported semantics stay visible
 // as exact Markdown literals, only after an explicit per-diagnostic acceptance.
-export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
+export function analyzeMarkdown(request: MarkdownRequest,sdkReport=false): MarkdownPlan {
   const { source, mode = 'source' } = request;
   if(request.fitShortLastLine!==undefined&&typeof request.fitShortLastLine!=='boolean')throw Error('마지막 줄 정리 옵션이 올바르지 않습니다.');
-  if (typeof source !== 'string' || !source.trim() || source.length > markdownLimits.characters) throw Error('비어 있지 않은 100,000자 이하 Markdown이 필요합니다.');
+  if (typeof source !== 'string' || !source.trim()) throw Error('비어 있지 않은 Markdown이 필요합니다.');
+  const tooLarge=(what:string)=>{
+    if(sdkReport)throw new AIError('CONTENT_LIMIT_EXCEEDED',what+' 한도를 넘었습니다. 원문을 내려받거나 보고서를 나누어 주세요.');
+    throw Error(what+' 한도 초과');
+  };
+  if(sdkReport?!fitsReportBytes(source):source.length>markdownLimits.characters)tooLarge('Markdown 입력');
+  const blockLimit=sdkReport?reportBudget.markdownBlocks:markdownLimits.blocks;
+  const tokenLimit=sdkReport?reportBudget.tokens:10000;
   if (!['source','report'].includes(mode)) throw Error('지원하지 않는 서식 모드입니다.');
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(source)) throw Error('지원하지 않는 제어문자가 있습니다.');
   if (request.acceptedDiagnostics !== undefined && (!Array.isArray(request.acceptedDiagnostics) || request.acceptedDiagnostics.some(x=>typeof x!=='string'))) throw Error('진단 승인 목록이 올바르지 않습니다.');
@@ -63,7 +71,7 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
     if(depth>markdownLimits.depth)throw Error('Markdown 인라인 중첩 한도 초과');
     const runs:MarkdownRun[]=[];let at=base;
     for(const t of tokens){
-      if(++count>10000)throw Error('Markdown 토큰 한도 초과');
+      if(++count>tokenLimit)tooLarge('Markdown 토큰');
       const where=normalized.indexOf(t.raw??'',at);const offset=where<0?at:where;at=offset+(t.raw?.length??0);
       if(t.type==='strong'||t.type==='em'||t.type==='del') runs.push(...inline(t.tokens,offset,depth+1,{...style,[t.type==='strong'?'bold':t.type==='em'?'italic':'strikethrough']:true}));
       else if(t.type==='codespan') runs.push({...style,text:t.text,code:true});
@@ -89,7 +97,7 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
   const visit=(tokens:any[],start=0,depth=0,quote=0,quoteGroup?:number)=>{
     if(depth>markdownLimits.depth)throw Error('Markdown 블록 중첩 한도 초과');let cursor=start;
     for(const t of tokens){
-      if(++count>10000)throw Error('Markdown 토큰 한도 초과');
+      if(++count>tokenLimit)tooLarge('Markdown 토큰');
       const where=normalized.indexOf(t.raw??'',cursor),offset=where<0?cursor:where;cursor=offset+(t.raw?.length??0);
       if(t.type==='space')continue;
       if(t.type==='heading'||t.type==='paragraph'||t.type==='text'){
@@ -117,7 +125,7 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
             const m=/^( +)([-*※]) +(.*)$/.exec(line)!;
             blocks.push({kind:'paragraph',role:'list',runs:inline(Lexer.lexInline(m[3]),offset),level:1+Math.ceil(m[1].length/2),prefix:m[2]+' '});
           }
-          if(blocks.length>markdownLimits.blocks)throw Error('문단/블록 한도 초과');
+          if(blocks.length>blockLimit)tooLarge('문단/블록');
           continue;
         }
         const rawTabs=t.raw.includes('\t');
@@ -154,7 +162,8 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
         }
       } else if(t.type==='table'){
         const rows=[t.header,...t.rows];cellCount+=rows.length*t.header.length;
-        if(t.header.length>markdownLimits.columns || cellCount>markdownLimits.cells)throw Error('표 크기 한도 초과');
+        if(t.header.length>markdownLimits.columns || rows.length*t.header.length>markdownLimits.cells || (!sdkReport&&cellCount>markdownLimits.cells))tooLarge('표 크기');
+        if(sdkReport&&cellCount*4>reportBudget.work)tooLarge('표 조판량');
         const rawRows=t.raw.replace(/\n+$/,'').split('\n');let rowAt=offset;
         for(let n=0;n<rawRows.length;n++){
           if(n!==1 && splitRow(rawRows[n]).length!==t.header.length)diagnostic('MALFORMED_TABLE',rowAt,rawRows[n],'표 행의 열 수가 다릅니다. 생략/채움 없이 차단합니다.','error','차단');
@@ -170,7 +179,7 @@ export function analyzeMarkdown(request: MarkdownRequest): MarkdownPlan {
         diagnostic(t.type==='html'?'HTML_LITERAL':mode==='report'&&t.type==='hr'?'RULE_LITERAL':'BLOCK_LITERAL',offset,t.raw,`${t.type}는 원문 기호를 문자로 보존하는 처리만 지원합니다.`);
         for(const line of t.raw.replace(/\n$/,'').split('\n')) blocks.push({kind:'paragraph',role:'body',runs:[{text:line}]});
       }
-      if(blocks.length>markdownLimits.blocks)throw Error('문단/블록 한도 초과');
+      if(blocks.length>blockLimit)tooLarge('문단/블록');
     }
   };
   const tokens=Lexer.lex(normalized,{gfm:true,breaks:false});

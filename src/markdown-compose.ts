@@ -1,3 +1,4 @@
+import {reportBlockFormat} from './report-block-presets.js';
 import {initializeBlankDocument} from './blank-document-defaults.js';
 import {analyzeMarkdown,type MarkdownRequest,type MarkdownRun} from './markdown-import.js';
 import {executeReportBlockSteps,formatEmptyCommandParagraph} from './slash-commands.js';
@@ -99,6 +100,20 @@ export function applyMarkdownCommands(editor:Interaction,request:MarkdownRequest
 }
 
 function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?:boolean){
+  const before=copy(editor.selection),typing=copy(editor.typing);
+  const work=documentPlan(editor,plan,fitShortLines);
+  try{
+    let result!:ReturnType<typeof work.next>;
+    editor.selection=editor.history.atomic('markdown-command-import',before,()=>{
+      do{result=work.next();}while(!result.done);
+      return editor.selection;
+    });
+    if(!result.done)throw Error('문서 생성이 완료되지 않았습니다.');
+    return result.value;
+  }catch(error){editor.selection=before;editor.typing=typing;throw error;}
+}
+
+function* documentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?:boolean,detached=false){
   assertValidatedMergedGrids(plan);
   const a=editor.adapter;
   if(!plan.ready)throw Object.assign(Error('미지원 요소의 처리를 확인하거나 차단 항목을 수정하세요.'),{code:'MARKDOWN_DIAGNOSTICS',details:plan.diagnostics});
@@ -130,6 +145,24 @@ function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLi
     }
     if(a.text(p)!==text)throw Error('마크다운 명령 입력의 공백·줄바꿈·내용이 일치하지 않습니다.');
     editor.point(end);return text;
+  };
+  const noBreaks=(runs:MarkdownRun[])=>runs.every(run=>!/[\n\r\t]/u.test(run.text));
+  const populateFlat=(p:Position,runs:MarkdownRun[],base:Props)=>{
+    if(a.text(p)!=='')throw Error('새 문단 위치가 비어 있지 않습니다.');
+    const text=runs.map(run=>run.text).join('');
+    a.format(p,0,base);
+    const end=text?a.insert(p,text):p;
+    if(text)a.format(p,end.offset,base);
+    let at=0;
+    for(const run of runs){
+      const length=[...run.text].length;
+      if(length&&(run.bold||run.italic||run.strikethrough||run.code))
+        a.format({...p,offset:at},at+length,{bold:!!base.bold||!!run.bold,italic:!!run.italic,
+          strikethrough:!!run.strikethrough,...(run.code?{fontFamily:'monospace'}:{})});
+      at+=length;
+    }
+    if(end.offset!==at||a.text(p)!==text)throw Error('생성 문단의 원문과 길이가 다릅니다.');
+    return {text,end};
   };
   const quote=(host:number,paragraphs:MarkdownRun[][])=>{
     const page=a.call('getPageDef',0),width=page.width-page.marginLeft-page.marginRight-page.marginGutter,
@@ -169,9 +202,9 @@ function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLi
   // layout puts that block below the body. This changes only this new document;
   // it is not a repair of an opened file or a guess about source appearance.
   // One bounded attempt per block; a block too large for a page still refuses.
-  const blockBelowBody=(paragraph:number)=>{
+  const blockBelowBody=(paragraph:number,from=0)=>{
     let below=false;
-    for(let page=0;page<a.pageCount;page++){
+    for(let page=from;page<a.pageCount;page++){
       const info=a.call('getPageInfo',page);
       if(a.runs(page).some(r=>r.secIdx===0&&(r.parentParaIdx??r.paraIdx)===paragraph&&r.text&&r.y+r.h>info.footerArea.y))below=true;
       const visit=(node:any)=>{if(node.pi===paragraph&&['Table','Shape'].includes(node.type)&&node.bbox&&node.bbox.y+node.bbox.h>info.footerArea.y)below=true;for(const child of node.children??[])visit(child);};
@@ -179,15 +212,68 @@ function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLi
     }
     return below;
   };
-  const before=copy(editor.selection),typing=copy(editor.typing);
-  try{editor.selection=editor.history.atomic('markdown-command-import',before,()=>{
+    const flatBody=(index:number)=>{
+      const b=plan.blocks[index];
+      return detached&&b?.kind==='paragraph'&&b.role==='body'&&b.reportRole==='text'&&b.prefix===undefined&&noBreaks(b.runs)?b:null;
+    };
     editor.point(first);
+    let precedingScanStart=0;
     for(let index=0;index<plan.blocks.length;index++){
       const block=plan.blocks[index],p=copy(editor.selection.focus);
       if(p.kind!=='body'||p.offset!==0||a.text(p)!=='')throw Error('마크다운 다음 블록의 빈 본문 위치가 아닙니다.');
+      // Appending to a detached blank draft can affect the current page and
+      // following pages. The final proof still visits every page.
+      let from=0,startsNewPage=false;
+      if(detached){
+        try{from=Math.max(0,a.rect(p).pageIndex-1);}
+        catch(error){
+          // At a full page the appended empty tail may lack a native caret.
+          // Its preceding block may also be a table host without a body caret.
+          // Reuse the last verified scan start and resolve the tail after input.
+          const missing=`문단 (sec=${p.sec}, para=${p.para})이 페이지에 없습니다`;
+          if(!locations.length||a.doc.getParagraphCount(p.sec)!==p.para+1||
+            a.hasBodyLayoutObject(p)||!String(error).endsWith(missing))throw error;
+          from=precedingScanStart;
+          startsNewPage=true;
+        }
+      }
+      if(detached)precedingScanStart=from;
+      let body=flatBody(index);
+      if(body){
+        const preset=reportBlockFormat('text');
+        const character=fitShortLines?{...preset.character,spacings:Array(7).fill(0)}:preset.character;
+        let at:Position=p;
+        const positions:Position[]=[];
+        a.call('beginBatch');
+        try{
+          for(let n=0;;n++){
+            if(a.text(at)!==''||a.hasBodyLayoutObject(at))throw Error('보고서 새 본문 위치가 올바르지 않습니다.');
+            a.paragraph(at,{...preset.paragraph,pageBreakBefore:n===0&&startsNewPage});
+            const {text,end}=populateFlat(at,body.runs,character);
+            positions.push(at);
+            locations.push({kind:'paragraph',paragraph:at.para,text});
+            at=index<plan.blocks.length-1?a.split(end):end;
+            body=n<11?flatBody(index+1):null;
+            if(!body)break;
+            index++;
+          }
+        }finally{a.call('endBatch');}
+        editor.point(at);
+        editor.typing={...character};
+        for(const pos of positions){
+          if(fitShortLines)lineFit.push(fitShortLastLine(editor,pos,true));
+          const page=Math.max(0,a.rect(pos).pageIndex-1);
+          if(blockBelowBody(pos.para,page)){
+            a.paragraph(pos,{pageBreakBefore:true});
+            if(blockBelowBody(pos.para,page))throw Error('한 쪽 안에 배치할 수 없는 보고서 문단입니다.');
+          }
+        }
+        yield;
+        continue;
+      }
       // Enter inherits paragraph properties: do not propagate a generated page
       // break to every following block. Other formatting uses the shared preset.
-      execute({type:'paragraph',props:{pageBreakBefore:false}});
+      execute({type:'paragraph',props:{pageBreakBefore:startsNewPage}});
       // A fitted preceding paragraph must not pass its tracking through Enter
       // into another generated paragraph, quote or table. OFF keeps the old path.
       if(fitShortLines)formatEmptyCommandParagraph(editor,{spacings:Array(7).fill(0)});
@@ -227,26 +313,70 @@ function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLi
         execute({type:'insert-table',inline:true,rows:block.rows.length,cols:block.align.length});
         const table=copy(editor.selection.focus);if(table.kind!=='cell')throw Error('일반 표 삽입 결과가 셀 위치가 아닙니다.');
         const rows:string[][]=[];
-        for(let r=0;r<block.rows.length;r++){const texts:string[]=[];for(let c=0;c<block.align.length;c++){
-          const cell:Position={...table,cell:r*block.align.length+c,cellPara:0,offset:0};
-          texts.push(populate(cell,block.rows[r][c],{fontFamily:plan.mode==='report'?'맑은 고딕':'함초롬바탕',fontSize:plan.mode==='report'?1200:1000,bold:r===0,italic:false,underline:false,strikethrough:false,textColor:'#000000'}));
-          execute({type:'paragraph',props:{alignment:r===0?'center':block.align[c]??'left',marginLeft:0,marginRight:0,indent:0,spacingBefore:0,spacingAfter:0,lineSpacing:160,lineSpacingType:'Percent',headType:'None',numberingId:0,paraLevel:0}});
-        }rows.push(texts);}
+        const simpleRow=(r:number)=>detached&&r<block.rows.length&&block.rows[r].every(noBreaks);
+        for(let r=0;r<block.rows.length;){
+          const simple=simpleRow(r);
+          const stop=Math.min(block.rows.length,r+Math.max(1,Math.floor(48/block.align.length)));
+          if(simple)a.call('beginBatch');
+          try{
+            do{
+              const texts:string[]=[];
+              for(let c=0;c<block.align.length;c++){
+                const cell:Position={...table,cell:r*block.align.length+c,cellPara:0,offset:0};
+                const base={fontFamily:plan.mode==='report'?'맑은 고딕':'함초롬바탕',fontSize:plan.mode==='report'?1200:1000,bold:r===0,italic:false,underline:false,strikethrough:false,textColor:'#000000'};
+                const props:Props={alignment:r===0?'center':block.align[c]??'left',marginLeft:0,marginRight:0,indent:0,spacingBefore:0,spacingAfter:0,lineSpacing:160,lineSpacingType:'Percent',headType:'None',numberingId:0,paraLevel:0};
+                const runs=block.rows[r][c];
+                if(simple){texts.push(populateFlat(cell,runs,base).text);a.paragraph(cell,props);}
+                else{texts.push(populate(cell,runs,base));execute({type:'paragraph',props});}
+              }
+              rows.push(texts);r++;
+            }while(simple&&r<stop&&simpleRow(r));
+          }finally{if(simple)a.call('endBatch');}
+          if(detached)yield;
+        }
         tableFit.push(fitMarkdownTable(editor,table));
         locations.push({kind:'table',paragraph:table.para,rows});
         const host:Position={kind:'body',sec:table.sec,para:table.para,offset:0};const inline=a.inline(host).find(x=>x.controlIndex===table.control);if(!inline)throw Error('새 표를 담은 본문 소유자가 없습니다.');editor.point({...host,offset:inline.offset+1});
       }
-      if(fitShortLines&&block.kind==='paragraph'&&block.role!=='quote'&&block.role!=='code')lineFit.push(fitShortLastLine(editor,p));
-      if(blockBelowBody(p.para)){
+      if(startsNewPage)a.rect(p);
+      if(fitShortLines&&block.kind==='paragraph'&&block.role!=='quote'&&block.role!=='code')lineFit.push(fitShortLastLine(editor,p,detached));
+      if(blockBelowBody(p.para,from)){
         const end=copy(editor.selection);editor.point(p);
         execute({type:'paragraph',props:{pageBreakBefore:true}});editor.selection=end;
-        if(blockBelowBody(p.para))throw Error('한 쪽 안에 안전하게 배치할 수 없는 블록입니다. 내용을 나누어 주세요. 원본 문서는 유지했습니다.');
+        if(blockBelowBody(p.para,from))throw Error('한 쪽 안에 안전하게 배치할 수 없는 블록입니다. 내용을 나누어 주세요. 원본 문서는 유지했습니다.');
       }
       if(index<plan.blocks.length-1)execute({type:'break'});
+      if(detached)yield;
     }
-    assertMarkdownSafety(a);return editor.selection;
-  });return{plan,locations,lineFit,tableFit};}
-  catch(error){editor.selection=before;editor.typing=typing;throw error;}
+    assertMarkdownSafety(a);
+    return {plan,locations,lineFit,tableFit};
+}
+
+// The SDK prepares an isolated document and yields between finite batches.
+// Existing edit commands retain their local rollback; the entire draft is
+// discarded on deadline, stale binding, validation failure, or disconnect.
+export async function composeSdkDocument(source:HwpDocument,plan:NativeDocumentPlan,fitShortLines:boolean|undefined,checkpoint:()=>void){
+  const doc=siblingDocument(source),a=new RhwpAdapter(doc),editor=new Interaction(a);
+  try{
+    initializeBlankDocument(a);
+    const work=documentPlan(editor,plan,fitShortLines,true);
+    let result!:ReturnType<typeof work.next>;
+    do{
+      checkpoint();
+      const until=performance.now()+24;
+      editor.selection=editor.history.atomic('sdk-prepare-slice',editor.selection,()=>{
+        do{result=work.next();}while(!result.done&&performance.now()<until);
+        return editor.selection;
+      });
+      editor.history.clear();
+      if(!result.done)await new Promise<void>(resolve=>setTimeout(resolve,0));
+    }while(!result.done);
+    checkpoint();
+    const exported=a.exportChecked();
+    verifyMergedRoundtrip(doc,a,plan,exported.bytes);
+    checkpoint();
+    return{bytes:exported.bytes,pageCount:a.pageCount,...result.value};
+  }finally{editor.history.clear();doc.free();}
 }
 
 export function composeMarkdownHwpx(source:HwpDocument,request:MarkdownRequest){
@@ -259,10 +389,17 @@ export function composeDocumentPlan(source:HwpDocument,plan:NativeDocumentPlan,f
   try{
     initializeBlankDocument(a);
     const result=applyDocumentPlan(editor,plan,fitShortLastLine),exported=a.exportChecked();
+    verifyMergedRoundtrip(doc,a,plan,exported.bytes);
+    return{bytes:exported.bytes,pageCount:a.pageCount,...result};
+  }
+  finally{editor.history.clear();doc.free();}
+}
+
+function verifyMergedRoundtrip(doc:HwpDocument,a:RhwpAdapter,plan:NativeDocumentPlan,bytes:Uint8Array){
     if(plan.blocks.some(block=>block.kind==='merged-grid')){
       // This is a new, bounded creation contract. Do not alter the legacy
       // composer or use HWPX reopen to repair the live generated model.
-      const coldDoc=siblingDocument(doc,exported.bytes);
+      const coldDoc=siblingDocument(doc,bytes);
       try{
         const cold=new RhwpAdapter(coldDoc);
         assertMarkdownSafety(cold);
@@ -274,7 +411,4 @@ export function composeDocumentPlan(source:HwpDocument,plan:NativeDocumentPlan,f
         }
       }finally{coldDoc.free();}
     }
-    return{bytes:exported.bytes,pageCount:a.pageCount,...result};
-  }
-  finally{editor.history.clear();doc.free();}
 }
