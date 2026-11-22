@@ -99,6 +99,28 @@ export function applyMarkdownCommands(editor:Interaction,request:MarkdownRequest
   return applyDocumentPlan(editor,analyzeMarkdown(request),request.fitShortLastLine);
 }
 
+/** Clipboard text keeps the receiving font unless the Markdown selects code. */
+export function markdownInlineFormat(run:MarkdownRun):Props {
+  return {
+    ...(run.bold ? {bold:true} : {}),
+    ...(run.italic ? {italic:true} : {}),
+    ...(run.strikethrough ? {strikethrough:true} : {}),
+    ...(run.code ? {fontFamily:'monospace'} : {}),
+  };
+}
+
+export function captureMarkdownBody(target:RhwpAdapter,section:number,plan:NativeDocumentPlan){
+  const doc=siblingDocument(target.doc),a=new RhwpAdapter(doc),editor=new Interaction(a);
+  try{
+    initializeBlankDocument(a);
+    a.call('setPageDef',0,JSON.stringify(target.call('getPageDef',section)));
+    const {locations}=applyDocumentPlan(editor,plan);
+    const end=editor.selection.focus;
+    if(end.kind!=='body'||end.sec!==0)throw Error('마크다운 끝 위치를 확인할 수 없습니다.');
+    return {fragment:doc.captureBodyClipboard(0,0,0,end.para,end.offset),locations};
+  }finally{editor.history.clear();doc.free();}
+}
+
 function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?:boolean){
   const before=copy(editor.selection),typing=copy(editor.typing);
   const work=documentPlan(editor,plan,fitShortLines);
@@ -140,7 +162,7 @@ function* documentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?
     let offset=0;
     for(const run of runs){const length=[...run.text].length;
       if(length){const from={...p,offset:a.logical(p,offset)},to={...p,offset:a.logical(p,offset+length)};
-        character(from,to,{bold:!!base.bold||!!run.bold,italic:!!run.italic,strikethrough:!!run.strikethrough,...(run.code?{fontFamily:'monospace'}:{})});}
+        character(from,to,{bold:!!base.bold,italic:false,strikethrough:false,...markdownInlineFormat(run)});}
       offset+=length;
     }
     if(a.text(p)!==text)throw Error('마크다운 명령 입력의 공백·줄바꿈·내용이 일치하지 않습니다.');
@@ -157,8 +179,7 @@ function* documentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?
     for(const run of runs){
       const length=[...run.text].length;
       if(length&&(run.bold||run.italic||run.strikethrough||run.code))
-        a.format({...p,offset:at},at+length,{bold:!!base.bold||!!run.bold,italic:!!run.italic,
-          strikethrough:!!run.strikethrough,...(run.code?{fontFamily:'monospace'}:{})});
+        a.format({...p,offset:at},at+length,{bold:!!base.bold,italic:false,strikethrough:false,...markdownInlineFormat(run)});
       at+=length;
     }
     if(end.offset!==at||a.text(p)!==text)throw Error('생성 문단의 원문과 길이가 다릅니다.');
@@ -291,9 +312,14 @@ function* documentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?
           const text=block.runs.map(r=>r.text).join('');
           for(const[n,part]of text.split('\n').entries()){if(n)execute({type:'break',soft:true});if(part)execute({type:'insert',text:part});}
           const end=copy(editor.selection.focus);let at=[...prefix].length;
-          for(const run of block.runs){const size=[...run.text].length;if(size)character({...p,offset:a.logical(p,at)},{...p,offset:a.logical(p,at+size)},{bold:!!base.bold||!!run.bold,italic:!!run.italic,strikethrough:!!run.strikethrough,...(run.code?{fontFamily:'monospace'}:{})});at+=size;}
+          for(const run of block.runs){const size=[...run.text].length;if(size)character({...p,offset:a.logical(p,at)},{...p,offset:a.logical(p,at+size)},{bold:!!base.bold,italic:false,strikethrough:false,...markdownInlineFormat(run)});at+=size;}
           if(a.text(p)!==prefix+text)throw Error('기본블록 입력 내용이 일치하지 않습니다.');editor.point(end);locations.push({kind:'paragraph',paragraph:p.para,text:prefix+text});
-        }else{const text=populate(p,[...(block.prefix?[{text:block.prefix}]:[]),...block.runs],{fontSize:block.role==='heading'?2000-Math.min(5,(block.level??1)-1)*150:1000,bold:block.role==='heading',underline:false,italic:false,strikethrough:false,textColor:'#000000'});execute({type:'paragraph',props:{alignment:'left',marginLeft:0,marginRight:0,indent:0,spacingBefore:0,spacingAfter:0,lineSpacing:160,lineSpacingType:'Percent'}});locations.push({kind:'paragraph',paragraph:p.para,text});}
+        }else{
+          const text=populate(p,[...(block.prefix?[{text:block.prefix}]:[]),...block.runs],{fontFamily:'함초롬바탕',fontSize:block.role==='heading'?2000-Math.min(5,(block.level??1)-1)*150:1000,bold:block.role==='heading',underline:false,italic:false,strikethrough:false,textColor:'#000000'});
+          const marginLeft=block.role==='list'||block.role==='quote'?600*(block.level??1):0;
+          execute({type:'paragraph',props:{alignment:'left',marginLeft,marginRight:0,indent:0,spacingBefore:0,spacingAfter:0,lineSpacing:160,lineSpacingType:'Percent'}});
+          locations.push({kind:'paragraph',paragraph:p.para,text});
+        }
       }else if(block.kind==='merged-grid'){
         executeReportBlockSteps(editor,'text');
         execute({type:'insert-table',inline:true,rows:block.rowCount,cols:block.colCount});

@@ -12,7 +12,8 @@ const key=(p:Position)=>JSON.stringify(p.kind==='body'?['body',p.sec,p.para]:['c
 const instances=new WeakMap<Interaction,CharacterStatistics>();
 export function characterStatistics(editor:Interaction){let v=instances.get(editor);if(!v){v=new CharacterStatistics(editor);instances.set(editor,v);}return v;}
 class CharacterStatistics {
-  private id='';private revision=-1;private value?:Count;private timer?:ReturnType<typeof setTimeout>;
+  private id='';
+  private coreDocument?: Interaction["adapter"]["doc"];private revision=-1;private value?:Count;private timer?:ReturnType<typeof setTimeout>;
   private undo?:Interaction['history']['undoStack'][number];private redo?:Interaction['history']['redoStack'][number];
   private snapshots=new WeakMap<object,{before:Count;after?:Count}>();
   private paragraphs=new Map<string,{length:number;breaks:number[]}>();
@@ -24,7 +25,8 @@ class CharacterStatistics {
   private paragraph(p:Position){const id=key(p);let value=this.paragraphs.get(id);if(!value){const text=this.editor.adapter.text(p),breaks:number[]=[];let length=0;for(const ch of text){if(/[\r\n\u2028\u2029]/u.test(ch))breaks.push(length);length++;}value={length,breaks};this.paragraphs.set(id,value);}return value;}
   sync():Count|undefined{
     const e=this.editor,a=e.adapter,u=e.history.undoStack.at(-1),r=e.history.redoStack.at(-1);
-    if(this.id!==a.documentId){clearTimeout(this.timer);this.timer=undefined;this.id=a.documentId;this.revision=-1;this.value=undefined;this.paragraphs.clear();this.tableTargets=undefined;this.snapshots=new WeakMap();this.undo=this.redo=undefined;}
+    if(this.id!==a.documentId||this.coreDocument!==a.doc){
+      this.coreDocument = a.doc;clearTimeout(this.timer);this.timer=undefined;this.id=a.documentId;this.revision=-1;this.value=undefined;this.paragraphs.clear();this.tableTargets=undefined;this.snapshots=new WeakMap();this.undo=this.redo=undefined;}
     // Live IME and hover previews are uncommitted. Never publish them as saved text.
     if(a.transientEdit)return this.value;
     if(this.revision!==a.revision){
@@ -53,10 +55,10 @@ class CharacterStatistics {
           const group=this.snapshots.get(u);
           if(group)this.snapshots.set(u,{before:group.before});
         }
-        const id=this.id,revision=this.revision;
+        const id=this.id,revision=this.revision,coreDocument=a.doc;
         // Coalesce structural edits/key repeats; never scan a document on drag,
         // selection changes, formatting or repeated resize commands.
-        this.timer=setTimeout(()=>{this.timer=undefined;if(a.documentId!==id||a.revision!==revision||a.transientEdit)return;
+        this.timer=setTimeout(()=>{this.timer=undefined;if(a.documentId!==id||a.doc!==coreDocument||a.revision!==revision||a.transientEdit)return;
           try{this.value=countCharacters(a.call<string>('getTextFileUnicode'));this.error='';if(u&&before&&u!==oldUndo&&u!==oldRedo&&revision===previousRevision+1)this.snapshots.set(u,{before,after:this.value});else if(u&&u===oldUndo&&u!==oldRedo){const group=this.snapshots.get(u);if(group)this.snapshots.set(u,{before:group.before,after:this.value});}}
           catch(error){this.error=String(error);console.warn('문서 글자수 조회 실패',error);}
           this.onchange();

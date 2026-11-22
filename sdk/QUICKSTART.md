@@ -2,14 +2,14 @@
 
 ## 프로젝트와 분리된 디렉터리에서 실행
 
-패키지 tarball과 별도 승인 경로로 받은 온편집 사전 빌드 디렉터리를 준비하세요. SDK tarball에는 편집기, WASM, 폰트, Playwright가 들어 있지 않습니다. 승인받은 사전 빌드가 없으면 설치·import·계약 시험까지 실행할 수 있으며 브라우저 전체 예제는 실행할 수 없습니다.
+릴리스에서 SDK tarball과 SDK용 `onedit-sdk-editor-runtime.tar.gz`를 준비하세요. 두 파일의 체크섬을 확인한 뒤 SDK용 실행 패키지를 `sdk-runtime/`에 압축 해제합니다. SDK tarball에는 편집기, WASM, 폰트, Playwright가 들어 있지 않습니다. 승인받은 사전 빌드가 없으면 설치·import·계약 시험까지 실행할 수 있으며 브라우저 전체 예제는 실행할 수 없습니다.
 
 ```sh
 npm init -y
-npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc7.tgz
+npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.1.0.tgz
 SDK=node_modules/onedit-ai-host-sdk
 node "$SDK/tests/contract.test.mjs"
-node "$SDK/sample/stage-editor.mjs" /path/to/authorized-onedit-runtime ./editor
+node "$SDK/sample/stage-editor.mjs" ./sdk-runtime/runtime ./editor
 node "$SDK/sample/local.mjs" ./editor
 ```
 

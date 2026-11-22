@@ -2,12 +2,12 @@
   "upstream": "https://github.com/edwardkim/rhwp",
   "referenceVersion": "0.8.7",
   "toolchain": "Rust 1.93.1 / wasm32-unknown-unknown",
-  "downstreamRevision": "dad1dd7f2abd5f434f68dab054652c58efc96836",
-  "publicApp": "a0d430e31f8015836029bc03ca71084d8fcdd98aafb36a5523a1a02df46a053b",
+  "downstreamRevision": "768e2418de8524cad25aaf40c71b87dcf2f02725",
+  "publicApp": "73b479b7bfa96ea3402c938aab848dbe694e4419f7c9c5eac5add1e3af11eb7f",
   "files": {
-    "rhwp.d.ts": "ade2772e3172179fe81372be79149e2c233d90f8f6204355c8078b7f67885c52",
-    "rhwp.js": "628e2a88de3f160972b040a70bde105c524a393a410ebfecc4e64f44972dbdc2",
-    "rhwp_bg.wasm": "78845dc759ebeabdaa36feee2271d9112eb72e6fe6f57ad8d4117b587e181890",
-    "rhwp_bg.wasm.d.ts": "515e67bc6f0f71586543cc5e3228a51575dfa2543256dc0ba9422dabf55075f1"
+    "rhwp.js": "6f80340e0cc1b2ae0a0c31fc12f7cec30a6eff6bd14ef5a30f6e55836230607e",
+    "rhwp.d.ts": "d8d62d1c478f841ef5bbe93e9753116d6d4921b1f8c723f2160e6e46a647bc22",
+    "rhwp_bg.wasm": "5f9553b45707abac54f440a7192f6c59d011c8149be71abda8c5e25e18f58447",
+    "rhwp_bg.wasm.d.ts": "2daaffde662a87a8339b081f7f83c713c1ef37491937cbc50ae0c6bcba2da5f4"
   }
 }

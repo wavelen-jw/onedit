@@ -22,7 +22,7 @@ type KeyboardInputContext = {
   readonly menuSettings: ReturnType<typeof mountMenuSettings> | undefined;
   readonly headerFooter: ReturnType<typeof mountHeaderFooter> | undefined;
   $: (id: string) => HTMLElement; render: () => void; focus: () => void; revealCursor: () => void;
-  safe: (action: () => void, visibleBodyEdit?: boolean, resizing?: boolean) => void;
+  safe: (action: () => void, visibleBodyEdit?: boolean, resizing?: boolean) => boolean | undefined;
   updateView: (action: () => void, afterF5?: () => void, trustedF5?: boolean) => void; format: (target: FormatKind) => void;
   save: (as?: boolean) => Promise<void>;
   clipboardAction: (kind: "copy" | "cut" | "paste" | "paste-text") => Promise<void>;
@@ -301,6 +301,7 @@ export function mountKeyboardInput(context: KeyboardInputContext) {
       safe(() => editor.tab(route.extend));
       return;
     }
+    let revealed = false;
     if (route.kind === "view")
       updateView(() => {
         switch (route.operation) {
@@ -366,7 +367,7 @@ export function mountKeyboardInput(context: KeyboardInputContext) {
       }, route.operation === "f5" ? () => { if (!dialog.open) revealCursor(); } : undefined,
         route.operation === "f5" && e.isTrusted && !e.repeat && !e.isComposing && e.keyCode!==229);
     else
-      safe(() => {
+      revealed = safe(() => {
         switch (route.kind) {
           case 'cell-block-format':
             document.dispatchEvent(new CustomEvent('rhwp:cell-block-format',{detail:route.background}));
@@ -394,13 +395,14 @@ export function mountKeyboardInput(context: KeyboardInputContext) {
             throw Error(route.message);
         }
       }, route.kind === "history" || route.kind === "command" && ["insert", "delete", "break"].includes(route.command.type),
-        route.kind === "command" && route.command.type === "resize");
+        route.kind === "command" && route.command.type === "resize") === true;
     if(heldResize){
       if(adapter.revision!==resizeRevision&&$("error").hidden)resizeKeyHold.completed(e.key,resizeKeyContext());
       else resizeKeyHold.cancel(); // content floor/refusal/error must not spin
     }
     if (!dialog.open) {
-      if (!(route.kind === "view" && ["all", "block", "f5"].includes(route.operation))) revealCursor();
+      if (!(revealed && route.kind === "command" && route.command.type === "break") &&
+          !(route.kind === "view" && ["all", "block", "f5"].includes(route.operation))) revealCursor();
       if (route.kind === "view" && ["document", "paragraph-start", "paragraph-end", "page-start", "word", "paragraph"].includes(route.operation))
         document.dispatchEvent(new CustomEvent("rhwp:reveal-selection"));
       focus();

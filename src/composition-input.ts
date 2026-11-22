@@ -22,7 +22,7 @@ type CompositionInputContext = {
 export function mountCompositionInput(context: CompositionInputContext) {
   const {input, document, editor, files, compositionKeys, $, cancelComposition, paint, render, finishCompositionPages, safe} = context;
   let committedTail: string | undefined;
-  let native: { value: string; start: Position; expected: string } | undefined;
+  let native: { value: string; start: Position; expected: string; endsAtCaret: boolean } | undefined;
   const identity = () => JSON.stringify([editor.adapter.documentId, editor.adapter.revision, editor.selection]);
   const resetNative = () => { native = undefined; committedTail = undefined; if (!context.composing) input.value = ''; };
   const rememberNative = () => {
@@ -32,7 +32,7 @@ export function mountCompositionInput(context: CompositionInputContext) {
     const end = a.textOffset(s.focus), from = end - [...value].length;
     if (from < 0 || [...a.text(s.focus)].slice(from, end).join('') !== value) return;
     const start = {...s.focus, offset: a.logical(s.focus, from)};
-    a.validate(start); native = { value, start, expected: identity() };
+    a.validate(start); native = { value, start, expected: identity(), endsAtCaret: true };
   };
   let typingStart: {target: ReturnType<Interaction['capture']>; count:number} | undefined;
   // An explicit navigation/edit boundary ends the native input run even if
@@ -181,28 +181,42 @@ export function mountCompositionInput(context: CompositionInputContext) {
     // the exact mapped scalar range. Never concatenate or normalize jamo.
     if (old && value !== old.value) {
       let applied = false;
+      let endsAtCaret = false;
+      // This buffer was validated at the caret for the exact current revision.
+      // A native space appended at its end has no replacement range to read.
+      const trailingSpace = old.endsAtCaret && ev.isTrusted && ev.inputType === 'insertText' &&
+        ev.data === ' ' && value === old.value + ' ' && editor.selection.kind === 'caret' &&
+        input.selectionStart === value.length && input.selectionEnd === value.length;
       safe(() => {
+        const before = editor.capture(true), count = editor.history.undoStack.length;
+        if (trailingSpace) {
+          editor.execute({type:'insert',text:' ',nativeTypingAppend:before.selection.focus.kind === 'cell'}, before);
+          editor.history.recordTyping(before,count);
+          applied = endsAtCaret = true;
+          return;
+        }
         const a = editor.adapter, delta = nativeTextDelta(old.value, value), start = a.textOffset(old.start);
         if ([...a.text(old.start)].slice(start, start + [...old.value].length).join('') !== old.value)
           throw Error('입력 원문 범위가 변경되었습니다.');
         const anchor = {...old.start, offset:a.logical(old.start, start + delta.from)};
         const focus = {...old.start, offset:a.logical(old.start, start + delta.to)};
         const selection: Selection = {kind:'text',anchor,focus};
-        const before = editor.capture(true), count = editor.history.undoStack.length;
         const append = delta.from === [...old.value].length && delta.to === delta.from && !/[\r\n]/u.test(delta.text);
         // An append at this exact cell caret has no range to erase. The
         // captured native target still goes through normal command admission.
         const caretAppend = append && ev.inputType === 'insertText' && ev.data === delta.text &&
-          before.selection.kind === 'caret' && focus.kind === 'cell' && samePosition(focus, before.selection.focus);
-        const target = caretAppend ? before : {...before,selection,paths:a.captureSelection(selection)};
-        editor.execute({type:'insert',text:delta.text,nativeTypingAppend:caretAppend}, target);
+          before.selection.kind === 'caret' && samePosition(focus, before.selection.focus);
+        const cellAppend = caretAppend && focus.kind === 'cell';
+        const target = cellAppend ? before : {...before,selection,paths:a.captureSelection(selection)};
+        editor.execute({type:'insert',text:delta.text,nativeTypingAppend:cellAppend}, target);
         if (append) editor.history.recordTyping(before,count);
+        endsAtCaret = caretAppend;
         applied = true;
       }, true);
       // A middle replacement retains its whole native buffer, not just the
       // suffix after the resulting caret. Bind it to this exact new revision.
       native = applied && retainNativeText(value)
-        ? {value,start:old.start,expected:identity()} : undefined;
+        ? {value,start:old.start,expected:identity(),endsAtCaret} : undefined;
       if (!native) input.value = '';
       return;
     }

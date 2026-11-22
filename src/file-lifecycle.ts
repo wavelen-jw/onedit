@@ -8,6 +8,8 @@ import { isCheckedExternalSibling, siblingDocument } from "./core-runtime.js";
 import { RhwpAdapter, UnsupportedTableOwner } from "./adapter.js";
 import { finishResponsiveWork } from "./responsive-work.js";
 import { exportCheckedLocalHwpx } from "./adapter-save.js";
+import { extractLinkZOrder, rememberLinkZOrder } from "./hwpx-link-zorder.js";
+import { readPrintSettings, rememberPrintSettings } from "./hwpx-print-settings.js";
 import { projectSemanticParts } from "./adapter-semantic.js";
 import { Interaction } from "./interaction.js";
 import { start } from "./model.js";
@@ -278,6 +280,7 @@ export class FileLifecycle {
     try {
       const state = this.captureReplacementState();
       const { old, files, history } = state;
+      const retireDetached=history.retireDetachedDocuments();
       try {
         this.localOpenPaint=localOpen;
         this.adoptReplacement(next, name, history, unsaved, prepareCommands);
@@ -293,6 +296,7 @@ export class FileLifecycle {
       // snapshots; cleanup errors must not be reported as replacement failure.
       try {
         old.doc.free();
+        retireDetached();
       } catch (error) {
         this.reportError(error);
       }
@@ -353,7 +357,7 @@ export class FileLifecycle {
   private adoptReplacement(next: RhwpAdapter, name: string, history: Interaction["history"], unsaved = false, prepareCommands?:()=>void) {
         // Detach old snapshots without discarding them. UI sees only candidate
         // history; the old Core remains its snapshots' owner until commit.
-        history.detachForDocumentReplacement();
+        history.detachForDocumentReplacement(true);
         Object.assign(this.adapter, {
           doc: next.doc,
           documentId: next.documentId,
@@ -431,8 +435,18 @@ export class FileLifecycle {
         if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
           throw Error("파일을 읽는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
         assertSafeHwpxEntryNames(bytes);
+        const [zOrder, printSettings] = this.ui.standalone ? await Promise.all([
+          extractLinkZOrder(bytes).catch(() => undefined),
+          readPrintSettings(bytes).catch(() => undefined),
+        ]) : [undefined, undefined];
+        if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
+          throw Error("파일을 검사하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
         const doc = siblingDocument(this.adapter.doc, bytes);
-        try { candidate = new RhwpAdapter(doc); }
+        try {
+          rememberLinkZOrder(doc,zOrder);
+          rememberPrintSettings(doc,printSettings);
+          candidate = new RhwpAdapter(doc);
+        }
         catch (error) { doc.free(); throw error; }
         await this.ui.loadOpenFonts?.(candidate);
         if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)

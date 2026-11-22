@@ -36,9 +36,15 @@ import {authorizeLocalResize,localResizeCommand} from './cell-local-resize.js';
 import { mountTextboxEditor } from "./textbox-edit-ui.js";
 import { clipboardPictureSize } from "./clipboard-image.js";
 import { pasteCompletion } from "./external-text-format.js";
+import { prepareHancomLinkedHwpx, restoreHancomNativeLink } from "./hancom-linked-hwpx.js";
+import { extractLinkZOrder, rememberLinkZOrder } from "./hwpx-link-zorder.js";
+import { readPrintSettings, rememberPrintSettings } from "./hwpx-print-settings.js";
+import { siblingDocument, wasCreatedBlank } from "./core-runtime.js";
+import { hancomFragmentRequested, readHancomQaHwpx } from "./hancom-native-qa.js";
+import { encodeHancomNativeRange } from "./clipboard.js";
 import { mountPasteResult } from "./paste-result-ui.js";
 import { offerPlainPaste, PasteFormatUnavailable } from "./paste-format-fallback.js";
-import { clipboardMarkdownTable } from "./clipboard-markdown-table.js";
+import { clipboardMarkdown } from "./clipboard-markdown.js";
 import { invalidatePaintedGlyphs, selectionPaintBoxes } from "./selection-display.js";
 import { viewportPoint,pagePoint } from "./integration/a-view-menu.js";
 import { paintTableGuides } from "./table-guides.js";
@@ -156,6 +162,7 @@ let columns: ReturnType<typeof mountColumns> | undefined;
 let clipboardBusy = false;
 let syncFormatAdditions = () => {};
 let renderedDocument: string | undefined;
+let renderedCore: RhwpAdapter['doc'] | undefined;
 let composing = false;
 let qaInputBoundary: ReturnType<typeof mountQaInputBoundary>;
 bindEditorPopupFocus(document, () => composing || clipboardBusy || files.busy || adapter.transientEdit, () => {
@@ -257,7 +264,7 @@ function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
       try { files.ui.change(true); }
       finally { resizePresentation = false; }
     }
-    revealCommandSelection(document, before, presentationTarget());
+    return revealCommandSelection(document, before, presentationTarget());
   } catch (e) {
     if (e instanceof ClippedTextEdit) {
       $("error").textContent = e.message;
@@ -482,20 +489,23 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const pageJob=()=>{
   const viewAdapter = adapter;
   applyViewMarkers(viewAdapter);
-  const replaced = renderedDocument !== undefined && renderedDocument !== adapter.documentId;
+  const replaced = renderedDocument !== undefined && (renderedDocument !== adapter.documentId || renderedCore !== adapter.doc);
   if (replaced) $("clipboard-status").textContent = "";
   const previous = viewport.scrollTop, previousLeft = viewport.scrollLeft;
   const fontRevision = fontSupplyRevision();
-  // The measured benefit is unchanged siblings of an edited page. Avoid
-  // observer/cache bookkeeping for single-page documents with no siblings.
+  // Keep document-wide workset policy for multipage documents. A standalone
+  // single-page text edit can still reuse the same validated SVG surface.
   const pageCount = viewAdapter.pageCount;
   const reusePages = pageCount > 1;
+  const reusePageSurfaces = reusePages || pageCount === 1 && textEditPresentation &&
+    renderedDocument === viewAdapter.documentId && activeWorkset(document) &&
+    !composing && !viewAdapter.transientEdit && !files.busy && document.fonts.status === "loaded";
   if (fontViewportDocument && !fontViewportActive()) fontViewportDocument = undefined;
   // Ordinary input must not immediately drain the offscreen work left by a
   // font update. Keep the current document in this demand presentation mode.
   // Non-caret/unknown cases retain the authoritative full renderer.
   const fontPresentation = fontViewportActive() && editor.selection.kind === 'caret' && reusePages;
-  const previousPages = reusePages ? Array.from(pages.children) as HTMLElement[] : [];
+  const previousPages = reusePageSurfaces ? Array.from(pages.children) as HTMLElement[] : [];
   // Core supplies every current page's dimensions even when only visible ink
   // is consumed first. Body paste reuses the existing guarded IME page drain,
   // but remain SVG; Canvas/composition policy is unchanged.
@@ -527,7 +537,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const worksetPresentation=openingWorkset || standaloneText;
   const prioritize = worksetPresentation || fontPresentation || resize || localTextScreen ||
     reusePages && (compositionSurface || visibleBodyEdit && !composing && selection.kind === "caret");
-  const paperSizes = worksetPresentation ? readPaperSizes(pageCount) : undefined;
+  const paperSizes = worksetPresentation || resize ? readPaperSizes(pageCount) : undefined;
   const fullInfos = prioritize && !paperSizes
     ? Array.from({length: pageCount}, (_, page) => viewAdapter.call<BodyPageInfo>("getPageInfo", page)) : undefined;
   const infos = paperSizes ?? fullInfos;
@@ -557,9 +567,11 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
       // An edit only needs the visible viewport and caret. Scroll retains
       // the adjacent-page buffer and fills pending pages on demand.
       needed = activePageRange(pages, viewport, focusPage, bounds, openingWorkset || textEditPresentation || compositionSurface ? 0 : 1) ?? new Set(infos.map((_, i) => i));
+    } else if (resize) {
+      needed = activePageRange(pages, viewport, focusPage, bounds, 0) ?? new Set(infos.map((_, i) => i));
+      for (const r of editor.rectangles()) needed.add(r.pageIndex);
     } else {
       needed = new Set([focusPage]);
-      if (resize) for (const r of editor.rectangles()) needed.add(r.pageIndex);
       for (let page = 0; page < infos.length; page++) {
         const rect = previousPages[page].getBoundingClientRect();
         if (rect.bottom > bounds.top && rect.top < bounds.bottom && rect.right > bounds.left && rect.left < bounds.right)
@@ -601,20 +613,27 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const frameCurrent=()=>screenInputs?.()===true && generation===renderGeneration &&
     document.fonts.status===fontStatus && fontRevision===fontSupplyRevision() && dpr===devicePixelRatio &&
     zoom===pages.style.zoom && renderedDocument===renderId;
-  for (let page = 0; page < pageCount; page++) {
+  const workset = worksetPresentation && needed;
+  const targets = workset ? [...workset].filter(page => page >= 0 && page < pageCount).sort((a, b) => a - b) : undefined;
+  if (workset && targets) {
+    // Already-empty workset placeholders need neither hiding nor release.
+    for (const div of pages.querySelectorAll<HTMLElement>(':scope > .page:not([data-render-pending="workset"])')) {
+      if (!workset.has(Number(div.dataset.page))) hideWorksetPage(div);
+    }
+    deferredCompositionPages = pages.children.length > targets.length;
+  }
+  for (let i = 0; i < (targets?.length ?? pageCount); i++) {
+    const page = targets?.[i] ?? i;
     let div = previousPages[page];
     if (needed && !needed.has(page)) {
       // Keep the validated DOM for byte comparison at flush, but do not expose
       // stale ink/geometry as the current page. Scroll/resize flush before use.
       // Only the already-hidden, fixed-size pending surface may skip its
       // descendant style/layout/paint. Fresh visible pages never retain this.
-      if(worksetPresentation)hideWorksetPage(div);
-      else {
-        if (div.style.contentVisibility !== "hidden") div.style.contentVisibility = "hidden";
-        if (div.style.visibility !== "hidden") div.style.visibility = "hidden";
-        const pending = fontPresentation ? "font" : resize ? "resize" : visibleBodyEdit || localTextScreen ? "body-edit" : "composition";
-        if (div.dataset.renderPending !== pending) div.dataset.renderPending = pending;
-      }
+      if (div.style.contentVisibility !== "hidden") div.style.contentVisibility = "hidden";
+      if (div.style.visibility !== "hidden") div.style.visibility = "hidden";
+      const pending = fontPresentation ? "font" : resize ? "resize" : visibleBodyEdit || localTextScreen ? "body-edit" : "composition";
+      if (div.dataset.renderPending !== pending) div.dataset.renderPending = pending;
       deferredCompositionPages = true;
       continue;
     }
@@ -622,7 +641,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
       // Render the edited page directly. Compare only neighboring pages.
       const compare = receiptPages?.has(page) && page !== editedFocusPage;
       const info = fullInfos?.[page] ?? viewAdapter.call<BodyPageInfo>("getPageInfo", page);
-      renderPage(page, info, div, fontRevision, reusePages, prioritize && visibleComposition && !!composition?.text, resize,
+      renderPage(page, info, div, fontRevision, reusePageSurfaces, prioritize && visibleComposition && !!composition?.text, resize,
         compare ? receiptView : undefined);
     } catch (error) {
       // Presentation fallback only: never replay the already committed command.
@@ -634,6 +653,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   viewport.scrollTop = previous;
   viewport.scrollLeft = previousLeft;
   renderedDocument = adapter.documentId;
+  renderedCore = adapter.doc;
   qaInputBoundary?.("screen-published");
   if(infos&&deferredCompositionPages&&!fontPresentation&&!resize&&!composing&&!adapter.transientEdit&&
       (visibleBodyEdit||localTextScreen)&&adapter.localBodyTextIdentified&&document.fonts.status!=="loading"){
@@ -1653,7 +1673,8 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
     const captured = editor.capture();
     restoreTarget = captured;
     if (kind !== "copy") editor.assertVisibleTextEdit(captured.selection);
-    const support = clipboardSupport(editor, kind === "paste-text" ? "paste" : kind);
+    const support = clipboardSupport(editor, kind === "paste-text" ? "paste" : kind,
+      kind === "paste" && hancomFragmentRequested() && native?.hancomQaPrepared === true && !native.structured);
     if (!support.supported) {
       // Known selection limits are admission decisions, not failed OS work.
       // Keep them explicit and do not enter a clipboard transport or Command.
@@ -1682,22 +1703,88 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
         generation = editor.currentSelectionGeneration, undo = editor.history.undoStack.length,
         redo = editor.history.redoStack.length;
       let plain = kind === "paste-text", data: ClipboardRead | undefined, refused: PasteFormatUnavailable | undefined;
-      try { data = native ? await readNativePaste(native) : await readClipboard(plain); }
+      const dest = captured.selection;
+      const blankTarget = dest.kind === "caret" && dest.focus.kind === "body" &&
+        dest.focus.sec === 0 && dest.focus.para === 0 && dest.focus.offset === 0 &&
+        undo === 0 && redo === 0 && captured.revision === 0 &&
+        wasCreatedBlank(nativeDoc) && nativeDoc.isEmptyDocument();
+      const nativeFragment = !plain && hancomFragmentRequested();
+      const qaNative = !plain && (blankTarget || nativeFragment) ? await readHancomQaHwpx(native) : undefined;
+      if (qaNative && nativeFragment &&
+          ((dest.kind !== "caret" && dest.kind !== "text" && dest.kind !== "cells") ||
+           (dest.kind === "text" && !sameContainer(dest.anchor, dest.focus))))
+        throw Error("한/글 조각은 같은 본문 구역 또는 같은 셀의 커서나 텍스트 범위에 붙여넣으세요.");
+      unchanged();
+      const fragment = qaNative && nativeFragment ? encodeHancomNativeRange(origin, qaNative.bytes) : undefined;
+      if (dest.kind === "cells" && editor.cells(dest).length > 1 && !fragment)
+        throw Error("확인된 한/글 셀 범위가 필요합니다.");
+      const qaLinked = !fragment && qaNative?.sourceFormat === "hwpx" && native
+        ? await restoreHancomNativeLink(qaNative.bytes, native.html, native.text) : undefined;
+      const qaBytes = fragment ? undefined : qaLinked?.bytes ?? qaNative?.bytes;
+      try {
+        data = (fragment || qaBytes) && native ? {html: native.html, text: native.text, structured: fragment} :
+          native ? await readNativePaste(native) : await readClipboard(plain);
+      }
       catch (e) { if (!(e instanceof PasteFormatUnavailable)) throw e; refused = e; }
       unchanged();
-      const markdown = !plain && data && !data.image && !data.structured
-        ? clipboardMarkdownTable(data.text) : undefined;
+      let markdown: ReturnType<typeof clipboardMarkdown>;
       if (data?.image) {
         const size = clipboardPictureSize(data.image);
         editor.execute({type:"picture",change:{action:"insert",file:data.image,...size,placement:"inline",replaceSelection:true}},captured);
       } else if (data) {
         try {
-          editor.execute({ type: "paste", text: data.text, html: data.html, structured: data.structured,
-            markdownTable: markdown }, captured);
+          if (!plain && !data.structured && !data.html.includes("data-rhwp-next-clipboard") && (data.markdown || !data.html))
+            markdown = clipboardMarkdown(data.text, data.markdown);
+          const wholeNative=!qaBytes && !plain && !data.structured && !data.mixedPicture &&
+            !markdown && blankTarget
+            ? await prepareHancomLinkedHwpx(data.html,data.text,()=>siblingDocument(nativeDoc)).catch(() => {
+                throw new PasteFormatUnavailable("한/글 링크 포함 붙여넣기를 확인하지 못했습니다.");
+              })
+            : undefined;
+          const preparedBytes = qaBytes ?? wholeNative?.bytes;
+          const expected = qaLinked?.expected ?? wholeNative?.expected;
+          const zOrder = preparedBytes && (expected?.zOrder !== undefined || qaNative?.sourceFormat === "hwp")
+            ? await extractLinkZOrder(preparedBytes) : undefined;
+          if (expected?.zOrder !== undefined && zOrder?.value !== expected.zOrder)
+            throw Error("붙여넣을 링크의 순서 값을 확인하지 못했습니다.");
+          const printSettings = qaBytes ? await readPrintSettings(qaBytes) : undefined;
+          unchanged();
+          if(preparedBytes){
+            if(origin.doc!==nativeDoc||editor.currentSelectionGeneration!==generation||
+               origin.scope!=="edit"||origin.documentLocked||composing||origin.transientEdit||
+               files.busy||document.querySelector("dialog[open]"))
+              throw new PasteFormatUnavailable("붙여넣을 위치가 변경되었습니다.");
+            const prepared=siblingDocument(nativeDoc,preparedBytes);
+            let adopted=false;
+            try {
+              const next=new RhwpAdapter(prepared);
+              next.scope=origin.scope;
+              if(prepared.getSectionCount()!==1||prepared.getParagraphCount(0)<1)throw Error("구역을 확인하지 못했습니다.");
+              files.ui.prepareDisplay?.(next,true);
+              if (expected) {
+                const found=next.call<{links:{uri:string;text:string;start:number;end:number}[]}>(
+                  "getHyperlinkContext",JSON.stringify({section:0,para:expected.paragraph,cellPath:[]}));
+                const match=found.links.length===1&&found.links[0];
+                if(!match||match.uri!==expected.uri||match.text!==expected.label||
+                   match.start!==expected.start||match.end!==expected.end)
+                  throw Error("붙여넣은 링크의 범위를 확인하지 못했습니다.");
+              }
+              rememberLinkZOrder(prepared,zOrder);
+              rememberPrintSettings(prepared,printSettings);
+              next.exportChecked();
+              const para=prepared.getParagraphCount(0)-1;
+              const focus={kind:"body" as const,sec:0,para,offset:0};
+              focus.offset=next.length(focus);
+              next.validate(focus);
+              editor.selection=editor.history.adoptPreparedPaste(prepared,dest,{kind:"caret",focus});
+              adopted=true;
+            } finally {if(!adopted) prepared.free();}
+          } else editor.execute({ type: "paste", text: data.text, html: data.html, structured: data.structured,
+            markdown, mixedPicture: data.mixedPicture, nativeHancomRange: !!fragment }, captured);
         } catch (e) {
           const refusedRichScope = e instanceof UnsupportedTableOperation &&
             ["clipboard-target-scope", "clipboard-owner-width", "clipboard-body-oversized-table"].includes(e.code);
-          if (plain || !(data.html || data.structured || markdown) ||
+          if (plain || !(data.html || data.structured || markdown || e instanceof PasteFormatUnavailable && e.alternativeText) ||
               !(e instanceof PasteFormatUnavailable || refusedRichScope)) throw e;
           refused = e instanceof PasteFormatUnavailable ? e : new PasteFormatUnavailable(e.message);
         }
@@ -1738,7 +1825,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
         $("clipboard-status").textContent = "";
         fallbackDialog = true;
         restoreTarget = captured;
-        if (!await offerPlainPaste(document)) {
+        if (!await offerPlainPaste(document, markdown || data?.mixedPicture || refused.alternativeText && !data?.html ? editorFeedbackText(refused) : undefined)) {
           $("clipboard-status").textContent = "붙여넣기 취소";
           return;
         }
@@ -1746,13 +1833,15 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
         plain = true;
         data = {text, html: ""};
         pasteResult.start(true);
-        editor.execute({type: "paste", ...data}, captured);
+        editor.execute({type: "paste", text, html: ""}, captured);
       }
       if (!data) return;
       pasteApplied = adapter.revision !== captured.revision;
-      publishBodyPaste(captured, !data.image);
+      if(adapter.doc!==nativeDoc) files.ui.change(true);
+      else publishBodyPaste(captured, !data.image);
       const markdownApplied = !!markdown && !plain;
-      const detail = markdownApplied ? "마크다운 표 붙여넣기 완료" : data.image ? "클립보드 그림 삽입 완료" : pasteCompletion(data);
+      const detail = markdownApplied ? "마크다운 붙여넣기 완료" : data.image ? "클립보드 그림 삽입 완료"
+        : data.mixedPicture ? "한/글 본문과 그림 붙여넣기 완료" : pasteCompletion(data);
       $("clipboard-status").textContent = pasteApplied ? `${plain ? "텍스트만" : "서식 포함"} 붙이기 · ${detail}` : "붙여넣기 · 문서 변경 없음";
       pasteResult.applied({ detail, changed: pasteApplied, formatted: !!(markdownApplied || data.image || data.structured || data.html),
         extensionMetadata: !markdownApplied && !data.structured && !data.html.includes("data-rhwp-next-clipboard") && /hwpEditorBoardContent|data-hjsonver|hwpjson/i.test(data.html) });

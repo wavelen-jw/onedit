@@ -10,7 +10,7 @@ import {OwnerProjection,ownerLists} from './owner-projection.js';
 import {insertCellTable} from './cell-table-insert.js';
 import {freezeDiagnosticFor} from './diagnostics/runtime.js';
 import {prepareMergedGridResize,type MergedGridResizePlan} from './merged-grid-resize.js';
-import {coreRuntimeHasCapability,coreRuntimeIdentity} from './core-runtime.js';
+import {coreRuntimeHasCapability,coreRuntimeIdentity,wasCreatedBlank} from './core-runtime.js';
 import {resizeHeightBases,resizeTableFrame,validateResizeTableFrame,partialHeightFloor,canonicalPartialHeightFloor,draggedHeightFloor,checkedReopenFrame} from './resize-height-bases.js';
 import {prepareNativeTrackResize} from './table-track-resize.js';
 import {prepareParentTableCut,type ParentTableCut} from './parent-table-cut.js';
@@ -22,9 +22,9 @@ import {autofillPlan} from './table-autofill.js';
 import { prepareTextboxEdit } from "./textbox-edit.js";
 import {prepareTableObject} from './table-object-command.js';
 import {prepareRemainingEdit} from './remaining-shortcut-commands.js';
-import { externalTextFormat, externalCoreHTML } from "./external-text-format.js";
+import { externalTextFormat, externalCoreHTML, hancomTextDocumentModel, hasHancomClipboardMetadata, normalizeHancomClipboardText } from "./external-text-format.js";
 import { PasteFormatUnavailable } from "./paste-format-fallback.js";
-import { isClipboardMarkdownTable } from "./clipboard-markdown-table.js";
+import { pasteClipboardMarkdown } from "./clipboard-markdown.js";
 import {preparePaper,columnPosition} from './shortcut-supported2.js';
 import {prepareUngroup} from './object-ungroup.js';
 import {prepareEqualCells} from './cell-equal.js';
@@ -47,7 +47,7 @@ import { preparePageBreak } from "./page-break.js";
 import { prepareColumnBreak } from "./column-break.js";
 import { prepareColumnDefinitionBreak } from "./column-definition-break.js";
 import { prepareColumns } from "./columns.js";
-import { preparePicture, pictureSelectionRect } from "./pictures.js";
+import { preparePicture, pictureCatalog, pictureSelectionRect } from "./pictures.js";
 import { bodyClipboardObjects, prepareObjectCut, selectedCutObject } from './object-clipboard.js';
 import { assertMixedCellPictureRange, mixedCellPictureBoxes, ownsMixedCellPictureHit } from './mixed-cell-picture.js';
 import { inlineCellPicture, inlineCellPictureBoxes, cellPictureSelectionBoxes, crossesPicture } from './inline-cell-picture.js';
@@ -1429,7 +1429,7 @@ export class Interaction {
       // Text motion exhausts the current cell's own lines before considering
       // another cell. A vertically centered neighbour can lie between these
       // lines but is not an intermediate caret stop inside this cell.
-      const cellArrow = p.kind === 'cell' && !selecting && (key === 'ArrowUp' || key === 'ArrowDown');
+      const cellArrow = p.kind === 'cell' && (key === 'ArrowUp' || key === 'ArrowDown');
       const step = key === 'ArrowDown' ? 1 : -1;
       const base = rect.pageIndex * 100000 + rect.y;
       const inDirection = (line: {page: number; y: number}) =>
@@ -1437,7 +1437,7 @@ export class Interaction {
       const hostPages = cellArrow && !nested(p) && typeof a.doc.tableNavigationPages === 'function'
         ? a.doc.tableNavigationPages(p.sec, p.para, p.control) : undefined;
       const bounded = hostPages?.includes(rect.pageIndex);
-      let ownLines = cellArrow ? this.lines(p, bounded ? rect.pageIndex : undefined) : [];
+      let ownLines = cellArrow && (!selecting || bounded) ? this.lines(p, bounded ? rect.pageIndex : undefined) : [];
       if (bounded && !ownLines.some(inDirection)) {
         for (const page of (step > 0 ? hostPages! : hostPages!.slice().reverse())) {
           if ((page - rect.pageIndex) * step <= 0) continue;
@@ -1463,7 +1463,9 @@ export class Interaction {
             : line.runs,
       })).filter((line) => line.runs.length > 0);
       let lines: typeof ownLines;
-      if (ownLines.some(inDirection)) {
+      // Selection extension stays in the same cell even at its last line.
+      // If the root table range is verified, there is no body fallback.
+      if (ownLines.some(inDirection) || selecting && bounded) {
         lines = filterLines(ownLines);
       } else if (bounded) {
         // Only the nearest eligible line can win. Do not read layout in later sections
@@ -2899,65 +2901,52 @@ export class Interaction {
     return false;
   }
   private executePreparedPasteCommand(command: Command, s: Selection, a: RhwpAdapter, captured?: ExecutionCapture): boolean {
-    if (command.type === "paste" && command.markdownTable) {
-      const plan = command.markdownTable, p = s.focus;
-      if (!isClipboardMarkdownTable(plan) || command.structured)
-        throw Error("마크다운 표 붙여넣기 계획을 확인할 수 없습니다.");
-      if (p.kind !== "body" || !(s.kind === "caret" || s.kind === "text" && samePosition(s.anchor, p)))
-        throw new PasteFormatUnavailable("마크다운 표는 일반 본문의 커서 위치에 붙일 수 있습니다.");
-      a.assertEditable(p);
-      if (a.hasBodyLayoutObject(p))
-        throw new PasteFormatUnavailable("표와 개체가 없는 본문 문단에 붙여넣으세요.");
-      const html = externalCoreHTML(plan.html, command.text);
-      if (!html) throw Error("마크다운 표의 변환 결과를 확인할 수 없습니다.");
-      const offset = a.textOffset(p), original = Array.from(a.text(p));
-      const left = original.slice(0, offset).join(""), right = original.slice(offset).join("");
-      const expected = [...(left ? [{text: left}] : []), ...plan.blocks, ...(right ? [{text: right}] : [])];
-      const count = a.doc.getParagraphCount(p.sec);
-      this.selection = this.history.transact("paste", s, () => {
-        const r = a.call("pasteHtml", p.sec, p.para, offset, html);
-        if (r.ok !== true || !Number.isSafeInteger(r.paraIdx) || !Number.isSafeInteger(r.charOffset) ||
-            r.paraIdx !== p.para + expected.length - 1 ||
-            a.doc.getParagraphCount(p.sec) !== count + expected.length - 1)
-          throw Error("마크다운 표의 삽입 위치나 원래 문단을 확인할 수 없습니다.");
-        let finalTableEnd: number | undefined;
-        for (const [i, block] of expected.entries()) {
-          const body = { ...p, para: p.para + i, offset: 0 };
-          if ("text" in block) {
-            if (a.text(body) !== block.text) throw Error("붙여넣기 전후 문단 내용을 확인할 수 없습니다.");
-            continue;
-          }
-          const tables = a.inline(body);
-          if (tables.length !== 1) throw Error("새 표의 소유 위치를 확인할 수 없습니다.");
-          const table = tables[0], {controlIndex} = table;
-          const dims = a.call("getTableDimensions", body.sec, body.para, controlIndex);
-          if (dims.rowCount !== block.rows.length || dims.colCount !== block.rows[0].length)
-            throw Error("붙여넣은 표의 행과 열이 원본과 다릅니다.");
-          for (const [row, cells] of block.rows.entries()) {
-            for (const [col, text] of cells.entries()) {
-              const index = row * cells.length + col;
-              const cell = {kind: "cell" as const, sec: body.sec, para: body.para,
-                control: controlIndex, cell: index, cellPara: 0, offset: 0};
-              const grid = a.call("getCellInfo", body.sec, body.para, controlIndex, index);
-              if (grid.row !== row || grid.col !== col || grid.rowSpan !== 1 || grid.colSpan !== 1 ||
-                  a.doc.getCellParagraphCount(body.sec, body.para, controlIndex, index) !== 1 ||
-                  a.text(cell) !== text) throw Error("붙여넣은 표의 셀 내용이 원본과 다릅니다.");
-            }
-          }
-          if (i === expected.length - 1) finalTableEnd = table.offset + 1;
-        }
-        const next = { ...p, para: r.paraIdx, offset: 0 };
-        next.offset = finalTableEnd ?? a.logical(next, r.charOffset);
-        a.validate(next); a.exportChecked();
-        return {kind: "caret", focus: next};
-      });
+    if (command.type === "paste" && command.nativeHancomRange && command.structured && s.kind === "cells") {
+      const cells = this.cells(s).map(c => c.cellIdx);
+      let boundary: [number,number,number,number] | null = null;
+      if (s.phase !== 3) {
+        const geometry = a.cells(s.focus);
+        const first = geometry.find(c => c.cellIdx === s.anchor.cell);
+        const last = geometry.find(c => c.cellIdx === s.focus.cell);
+        if (!first || !last) throw Error("붙여넣기 선택 경계를 확인할 수 없습니다.");
+        boundary = [Math.min(first.row, last.row), Math.min(first.col, last.col),
+          Math.max(first.row + first.rowSpan, last.row + last.rowSpan),
+          Math.max(first.col + first.colSpan, last.col + last.colSpan)];
+      }
+      const wire = command.structured;
+      this.selection = this.history.transact("paste", s, () => ({
+        kind: "caret", focus: this.clipboard.pasteHancomGrid(a, s.focus, cells, boundary, wire),
+      }));
+      this.preferredX = undefined;
+      this.typing = {};
+      return true;
+    }
+    if (command.type === "paste" && command.nativeHancomRange && command.structured &&
+        (s.focus.kind === "cell" || s.kind === "text" && s.anchor.para !== s.focus.para)) {
+      if (s.kind !== "caret" && s.kind !== "text")
+        throw Error("같은 표 셀 또는 같은 본문 구역의 텍스트를 선택하세요.");
+      const [from, to] = s.kind === "text" ? ordered(s.anchor, s.focus) : [s.focus, s.focus];
+      if (!sameContainer(from, to)) throw Error("서로 다른 편집 영역에 붙여넣을 수 없습니다.");
+      a.assertEditable(from);
+      a.assertEditable(to);
+      a.assertTextOnly(from, paraIndex(to));
+      const wire = command.structured;
+      this.selection = this.history.transact("paste", s, () => ({
+        kind: "caret", focus: this.clipboard.pasteHancomRange(a, from, to, wire),
+      }));
+      this.preferredX = undefined;
+      this.typing = {};
+      return true;
+    }
+    if (command.type === "paste" && command.markdown) {
+      this.selection = pasteClipboardMarkdown(this, s, command.markdown);
       this.preferredX = undefined;
       this.typing = {};
       return true;
     }
     if (
       command.type === "paste" &&
-      this.clipboard.isNested(command.html ?? "", command.structured)
+      !command.nativeHancomRange && this.clipboard.isNested(command.html ?? "", command.structured)
     ) {
       if (
         s.kind !== "caret" ||
@@ -3003,21 +2992,28 @@ export class Interaction {
         "NOT_SUPPORTED: D Studio의 셀 구조화 붙여넣기 연결은 미지원입니다. 텍스트 붙여넣기는 지원합니다.",
       );
     if (command.type === "paste" && !command.structured) {
-      const html = externalCoreHTML(command.html ?? "", command.text);
+      const picture = command.mixedPicture;
+      if (picture && s.focus.kind !== "body")
+        throw new PasteFormatUnavailable("본문과 그림이 포함된 한/글 내용은 일반 본문에 붙이세요.");
+      const html = externalCoreHTML(command.html ?? "", command.text, picture, picture ? a.doc.getDpi() : undefined);
       if (html) {
+        const hancom = hasHancomClipboardMetadata(command.html ?? "");
+        const containsTable = /<table[\s>]/i.test(html);
         // A click with sub-character pointer motion can leave a text range
         // whose validated endpoints are identical. It replaces no content and
         // owns the same exact insertion point as a caret. Keep the original
         // selection for History/Undo; nonempty ranges keep their refusal.
         const insertionOnly = s.kind === "caret" ||
           s.kind === "text" && samePosition(s.anchor, s.focus);
-        if (insertionOnly && s.focus.kind === "cell" &&
-            s.focus.offset === a.length(s.focus) && !/<table[\s>]/i.test(html)) {
+        const range = s.kind === "text" && !insertionOnly ? ordered(s.anchor, s.focus) : undefined;
+        if (s.focus.kind === "cell" && !containsTable &&
+            (insertionOnly && s.focus.offset === a.length(s.focus) ||
+              hancom && !nested(s.focus) && (insertionOnly || range))) {
           // The existing path-aware HTML importer owns whitespace and definitions.
-          // Keep the same text-only paragraph-end boundary and caller History.
-          const p = s.focus;
-          a.assertEditable(p); a.assertTextOnly(p);
+          const p = range?.[0] ?? s.focus;
+          a.assertEditable(p); a.assertTextOnly(p, range && paraIndex(range[1]));
           this.selection = this.history.transact("paste", s, () => {
+            if (range) a.remove(range[0], range[1]);
             const r = a.call("pasteHtmlInCellByPath", p.sec, p.para, a.path(p), a.textOffset(p), html);
             if (!Number.isSafeInteger(r.cellParaIdx) || !Number.isSafeInteger(r.charOffset))
               throw Error("외부 HTML 셀 붙여넣기 커서 결과를 확인할 수 없습니다.");
@@ -3031,12 +3027,11 @@ export class Interaction {
         }
         // Sanitize HTML and validate every ordinary body owner before mutation.
         // Only the outer History transaction may delete and insert this range.
-        const range = s.kind === "text" && !samePosition(s.anchor,s.focus)
-          ? ordered(s.anchor,s.focus) : undefined;
         if (range) {
-          // This new connection certifies formatted text, not replacement of
-          // object/table graphs. Preserve the existing caret importer separately.
-          if(/<table[\s>]/i.test(html))throw new PasteFormatUnavailable("NOT_SUPPORTED: 표가 포함된 외부 HTML의 선택 대체는 별도 지원 범위입니다.");
+          // Imported tables may replace a Hancom paste's plain-text range.
+          // Selections containing existing objects remain outside this path.
+          if (containsTable && !hancom)
+            throw new PasteFormatUnavailable("NOT_SUPPORTED: 표가 포함된 외부 HTML의 선택 대체는 별도 지원 범위입니다.");
           const [from,to]=range;
           if(from.kind!=="body"||to.kind!=="body"||from.sec!==to.sec)
             throw new PasteFormatUnavailable("NOT_SUPPORTED: 외부 HTML 선택 대체는 같은 구역의 일반 본문에서 지원합니다.");
@@ -3053,11 +3048,41 @@ export class Interaction {
             // Existing Core pasteHtml splits the text-only host at this exact
             // scalar boundary and merges its preserved suffix into the final
             // imported paragraph. No preliminary deletion or caret relocation.
-            // Interior table/object imports remain outside this connection.
-            if (/<table[\s>]/i.test(html))
+            // The native table importer keeps both sides of an ordinary text
+            // paragraph as separate owners when inserting a Hancom table.
+            if (containsTable && !hancom)
               throw new PasteFormatUnavailable("NOT_SUPPORTED: 표가 포함된 외부 HTML은 문단 끝 커서에 붙여넣으세요.");
             a.assertTextOnly(s.focus);
           }
+        }
+        const target = s.focus;
+        const nativeModel = !picture && !containsTable && s.kind === "caret" && target.kind === "body" &&
+          wasCreatedBlank(a.doc) && a.revision === 0 && !this.history.undoStack.length && !this.history.redoStack.length &&
+          target.sec === 0 && target.para === 0 && target.offset === 0 && a.length(target) === 0 &&
+          a.doc.getSectionCount() === 1 && a.doc.getParagraphCount(0) === 1 &&
+          typeof a.doc.pasteHwpJson === "function"
+          ? hancomTextDocumentModel(command.html ?? "", command.text)
+          : undefined;
+        if (nativeModel && target.kind === "body") {
+          this.selection = this.history.transact("paste", s, () => {
+            const r = a.call("pasteHwpJson", 0, 0, 0, nativeModel.wire);
+            if (r.ok !== true || r.paraIdx !== nativeModel.paragraphs.length - 1 ||
+                !Number.isSafeInteger(r.charOffset) || a.doc.getSectionCount() !== 1 ||
+                a.doc.getParagraphCount(0) !== nativeModel.paragraphs.length ||
+                nativeModel.paragraphs.some((expected, para) =>
+                  normalizeHancomClipboardText(a.text({ ...target, para })) !== normalizeHancomClipboardText(expected)))
+              throw Error("붙여넣은 한/글 본문과 클립보드 내용이 일치하지 않습니다.");
+            const next = { ...target, para: r.paraIdx };
+            next.offset = a.logical(next, r.charOffset);
+            if (next.offset !== a.length(next))
+              throw Error("붙여넣은 한/글 문서 끝의 커서 위치를 확인할 수 없습니다.");
+            a.validate(next);
+            a.exportChecked();
+            return { kind: "caret", focus: next };
+          });
+          this.typing = {};
+          this.preferredX = undefined;
+          return true;
         }
         a.assertEditable(s.focus);
         this.selection = this.history.transact("paste", s, () => {
@@ -3066,6 +3091,17 @@ export class Interaction {
           const r = a.call("pasteHtml", p.sec, p.para, a.textOffset(p), html);
           if (!Number.isSafeInteger(r.paraIdx) || !Number.isSafeInteger(r.charOffset))
             throw Error("외부 HTML 붙여넣기 커서 결과를 확인할 수 없습니다.");
+          if (picture) {
+            const imported = pictureCatalog(a).filter(entry =>
+              entry.sec === p.sec && entry.para >= p.para && entry.para <= r.paraIdx);
+            const entry = imported[0];
+            if (imported.length !== 1 || !entry.props.treatAsChar ||
+                Math.abs(entry.props.width - picture.width) > 1 || Math.abs(entry.props.height - picture.height) > 1)
+              throw Error("붙여넣은 한/글 그림의 위치 또는 크기를 확인할 수 없습니다.");
+            const bytes = a.doc.getControlImageData(entry.sec, entry.para, "[]", entry.control);
+            if (bytes.length !== picture.file.bytes.length || !bytes.every((value, i) => value === picture.file.bytes[i]))
+              throw Error("붙여넣은 한/글 그림의 원본이 일치하지 않습니다.");
+          }
           const next = { ...p, para: r.paraIdx, offset: 0 };
           next.offset = a.logical(next, r.charOffset);
           a.validate(next); a.exportChecked();
@@ -3581,7 +3617,7 @@ export class Interaction {
           this.clipboard.recognizes(command.html ?? "") ||
           /<table[\s>]/i.test(command.html ?? "")
         )
-          return collapse(this.clipboard.paste(a, p, command.html ?? "", command.structured, s.kind==='caret'));
+          return collapse(this.clipboard.paste(a, p, command.html ?? "", command.structured, s.kind==='caret', command.nativeHancomRange));
         if (!command.text)
           throw Error("외부 HTML은 텍스트 대체 데이터가 필요합니다.");
       }

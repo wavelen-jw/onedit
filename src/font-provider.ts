@@ -248,11 +248,24 @@ function rememberNominal(family:string,weight:string,bytes:Uint8Array<ArrayBuffe
     faces.set(weight,widths);exactNominal.set(name,faces);nominalGeneration++;
   }catch{/* A face can load in the browser without usable standalone metrics. */}
 }
+// A missing font's alternate is part of the document, not a property of
+// the family name. Conflicting declarations cannot be projected into the
+// Core's family-wide environment; keep its slot-specific chains in that case.
+const declaredFontAlternates=new WeakMap<object,Map<string,string|null>>();
 function authoredFonts(a:RhwpAdapter){
   if(sourceRevisions.get(a.doc)!==a.revision){
     const info=JSON.parse(a.doc.getDocumentInfo());
     originalNames.set(a.doc,new Set<string>((info.fontsUsed??[])
       .filter((n:unknown):n is string=>typeof n==='string'&&safe(n))));
+    const alternates=new Map<string,string|null>();
+    for(const pair of Array.isArray(info.fontSubstitutions)?info.fontSubstitutions:[]){
+      if(!Array.isArray(pair)||pair.length!==2)continue;
+      const [name,face]=pair;
+      if(typeof name!=='string'||typeof face!=='string'||!safe(name)||!safe(face))continue;
+      const prior=alternates.get(name);
+      alternates.set(name,prior===undefined||prior===face?face:null);
+    }
+    declaredFontAlternates.set(a.doc,alternates);
     if(Array.isArray(info.embeddedFontFamilies))
       embeddedFontFamilies.set(a.doc,new Set<string>(info.embeddedFontFamilies));
     sourceRevisions.set(a.doc,a.revision);
@@ -271,8 +284,9 @@ export async function loadOpenFonts(a:RhwpAdapter){
   }catch{hftByDocument.delete(a.doc);}
   await restoreLocalFaces(authored.filter(name=>name!==substitutedHanyang));
   await Promise.all([...(hftByDocument.get(a.doc)??[])].map(loadHft));
+  const alternates=declaredFontAlternates.get(a.doc);
   const names=authored.filter(n=>nominalFamily(n)||serviceFont(n)||localFaceFor(n,'400')||
-    n===substitutedHanyang);
+    alternates?.has(n)||n===substitutedHanyang);
   // Reuse the source-backed style query on a cold server-font decision.
   // A missing or incomplete inventory keeps the existing preload behavior.
   let usage: Map<string, boolean> | undefined;
@@ -312,7 +326,12 @@ export async function loadOpenFonts(a:RhwpAdapter){
     if(face&&!localSources.has(name)&&attemptedLocal.get(name)!==face){
       attemptedLocal.set(name,face);pending.delete(name);await ensureFont(name);
     }
-    if(fontSupply(name)?.status==='unavailable')await ensureFont(fallbackFamily(name));
+    if(fontSupply(name)?.status==='unavailable'){
+      const alternate=alternates?.get(name);
+      if(alternate)await ensureFont(alternate);
+      if(alternate===undefined||(alternate&&fontSupply(alternate)?.status!=='loaded'))
+        await ensureFont(fallbackFamily(name));
+    }
   }));
   await document.fonts.ready;
   // The detached document cannot be edited by the UI. If an installed face
@@ -439,7 +458,7 @@ let bindingSupplyRevision=0;
 // encoding lazy and share its completed CSS source, without retaining extra bytes.
 const printSources=new WeakMap<Uint8Array<ArrayBuffer>,Map<string,string>>();
 const originalNames=new WeakMap<object,Set<string>>(),sourceRevisions=new WeakMap<object,number>();
-const cssFallbacks=new Map<string,string[]>();
+const cssFallbacksByDocument=new WeakMap<object,Map<string,string[]>>();
 let revision=0, started=false;
 const familyKey=(family:string)=>family.trim().replace(/^(['"])(.*)\1$/,'$2').normalize('NFC').toLowerCase();
 function loadedFaces(family:string){return typeof document==='undefined'?[]:[...document.fonts].filter(f=>familyKey(f.family)===familyKey(family)&&f.status==='loaded');}
@@ -605,8 +624,6 @@ export function startFontSupply(){
 export function displayFont(family:string):string|undefined{
   if(fontSupply(family)?.status==='loaded')return family;
   if(family===substitutedHanyang&&fontSupply(hanyangDisplayFace)?.status==='loaded')return hanyangDisplayFace;
-  const supplied=(cssFallbacks.get(family)??[]).find(n=>fontSupply(n)?.status==='loaded');
-  if(supplied)return supplied;
   const fallback=fallbackFamily(family);
   return fontSupply(fallback)?.status==='loaded'?fallback:undefined;
 }
@@ -670,6 +687,8 @@ export function requestPageFonts(a:RhwpAdapter,pages:HTMLElement,presentedOnly=f
     }
     return parsed.get(value);
   };
+  let cssFallbacks=cssFallbacksByDocument.get(a.doc);
+  if(!cssFallbacks){cssFallbacks=new Map();cssFallbacksByDocument.set(a.doc,cssFallbacks);}
   let fontValues = changedPages ? changedPages.flatMap(page => fontFamilyValues(page)) : fontFamilyValues(pages);
   // A changed chain may also appear on an untouched page. In that case keep
   // the established document-order fallback resolution.
@@ -777,6 +796,7 @@ function bindLocalFontSources(a:RhwpAdapter,pages:HTMLElement,presentedOnly:bool
 }
 export function applyFontEnvironment(a:RhwpAdapter, source = a):boolean{
   const substitutions:Record<string,string>={};
+  const alternates=declaredFontAlternates.get(source.doc);
   for(const name of originalNames.get(source.doc)??[]){
     // Pending or verified local/document faces keep priority. Core independently
     // protects embedded sources; a supplied family is not a glyph-coverage claim.
@@ -785,7 +805,10 @@ export function applyFontEnvironment(a:RhwpAdapter, source = a):boolean{
       continue;
     }
     if(hftByDocument.get(source.doc)?.has(name)||fontSupply(name)?.status!=='unavailable')continue;
-    const target=displayFont(name);if(target&&target!==name)substitutions[name]=target;
+    const alternate=alternates?.get(name);
+    if(alternate===null)continue;
+    const target=alternate&&fontSupply(alternate)?.status==='loaded'?alternate:displayFont(name);
+    if(target&&target!==name)substitutions[name]=target;
   }
   // Detached layout checks need the live document's display substitutions,
   // but an empty mapping leaves the sibling's default environment alone.

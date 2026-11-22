@@ -162,10 +162,16 @@ export function coreRuntimeHasCapability(doc: HwpDocument | undefined, capabilit
 }
 
 
+const coreGeneratedBlankDocuments = new WeakSet<HwpDocument>();
+export function wasCreatedBlank(doc: HwpDocument): boolean {
+  return coreGeneratedBlankDocuments.has(doc);
+}
+
 function blank(doc: HwpDocument) {
   try {
     const result = JSON.parse(doc.createBlankDocument());
     if (result.error || result.ok === false) throw Error(result.error || '빈 문서 초기화 실패');
+    coreGeneratedBlankDocuments.add(doc);
     return doc;
   } catch (error) { doc.free(); throw error; }
 }

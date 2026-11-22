@@ -10,7 +10,7 @@ export const CLIPBOARD_MIME = "web application/vnd.rhwp-next.body+json";
 export const MAX_CLIPBOARD_BYTES = 8 * 1024 * 1024;
 const marker = "data-rhwp-next-clipboard";
 export type ClipboardData = { text: string; html: string; structured?: string; image?: import("./clipboard-image.js").ClipboardPicture };
-const encode = (bytes: Uint8Array) => {
+export const encodeClipboardBytes = (bytes: Uint8Array) => {
   let text = "";
   for (let i = 0; i < bytes.length; i += 8192)
     text += String.fromCharCode(...bytes.subarray(i, i + 8192));
@@ -26,7 +26,7 @@ const decode = (text: string, limit = MAX_CLIPBOARD_BYTES) => {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 };
-export function decodeEnvelope(wire: string) {
+export function decodeEnvelope(wire: string, nativeHancomRange = false) {
   if (wire.length > MAX_CLIPBOARD_BYTES * 1.4)
     throw Error("클립보드 크기 제한을 초과했습니다.");
   const data = JSON.parse(wire);
@@ -38,7 +38,7 @@ export function decodeEnvelope(wire: string) {
   )
     throw Error("지원하지 않거나 손상된 RHWP 클립보드 형식입니다.");
   if (data.paragraphMode !== undefined &&
-      data.paragraphMode !== "retain-target-at-body-end" && data.paragraphMode !== "retain-target-for-inline-text")
+      data.paragraphMode !== "retain-target-at-body-end" && data.paragraphMode !== "retain-target-for-inline-text" && (data.paragraphMode !== "retain-target-for-native-range" || !nativeHancomRange))
     throw Error("지원하지 않는 클립보드 문단 결합 방식입니다.");
   const bytes = decode(data.payload);
   if (bytes.length > MAX_CLIPBOARD_BYTES)
@@ -92,6 +92,31 @@ function fragmentExternalHTML(a:RhwpAdapter,bytes:Uint8Array){
   }finally{source.free();}
 }
 
+// The detached input already contains only the selection delivered by Hancom.
+// Capture its logical range, including inline object slots, before touching the target.
+export function encodeHancomNativeRange(a: RhwpAdapter, bytes: Uint8Array): string {
+  const source = siblingDocument(a.doc, bytes);
+  try {
+    const last = source.getParagraphCount(0) - 1;
+    if (source.getSectionCount() !== 1 || last < 0)
+      throw Error("한/글 복사 범위의 구역을 확인할 수 없습니다.");
+    const clip = source.captureBodyClipboard(0, 0, 0, last, source.getLogicalLength(0, last));
+    try {
+      const fragment = clip.toFragmentBytes();
+      if (fragment.length > MAX_CLIPBOARD_BYTES)
+        throw Error("클립보드 크기 제한은 8 MiB입니다.");
+      return JSON.stringify({
+        format: "rhwp-next-body", version: 1, encoding: "hwpx-fragment",
+        paragraphMode: "retain-target-for-native-range", payload: encodeClipboardBytes(fragment),
+      });
+    } finally {
+      clip.free();
+    }
+  } finally {
+    source.free();
+  }
+}
+
 /** No source document, token cache or cross-tab shared memory. Each paste imports
  * a fresh immutable fragment. Core resolves its local IDs against the target pool. */
 export class StructuredClipboard {
@@ -102,9 +127,9 @@ export class StructuredClipboard {
     const clip=captureFragmentObject(a,row);
     try {
       const bytes=clip.toFragmentBytes();assertFragmentScope(a,clip);if(bytes.length>MAX_CLIPBOARD_BYTES)throw Error('클립보드 크기 제한은 8 MiB입니다.');
-      const structured=JSON.stringify({format:'rhwp-next-body',version:1,encoding:'hwpx-fragment',payload:encode(bytes)});
+      const structured=JSON.stringify({format:'rhwp-next-body',version:1,encoding:'hwpx-fragment',payload:encodeClipboardBytes(bytes)});
       const text=`[${row.kind}]`;
-      return Object.freeze({text,structured,html:`<div ${marker}="${encode(new TextEncoder().encode(structured))}">${text}</div>`});
+      return Object.freeze({text,structured,html:`<div ${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}">${text}</div>`});
     }finally{clip.free();}
   }
   capture(a: RhwpAdapter, from: Position, to: Position): ClipboardData {
@@ -123,7 +148,7 @@ export class StructuredClipboard {
         format: "rhwp-next-body",
         version: 1,
         encoding: "hwpx-fragment",
-        payload: encode(payload),
+        payload: encodeClipboardBytes(payload),
         ...(from.para === to.para && !a.hasBodyLayoutObject(from) ? {paragraphMode:"retain-target-for-inline-text"} : {}),
       });
       const data = a.call(
@@ -140,7 +165,7 @@ export class StructuredClipboard {
       return Object.freeze({
         text: external?external.text:data.text,
         structured,
-        html: `<div ${marker}="${encode(new TextEncoder().encode(structured))}">${body}</div>`,
+        html: `<div ${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}">${body}</div>`,
       });
     } finally {
       fragment.free();
@@ -171,7 +196,7 @@ export class StructuredClipboard {
     const structured = JSON.stringify(envelope);
     // Only the wrapper scope changes. Keep the already-exported same fragment
     // HTML instead of importing/serializing that identical payload a second time.
-    const html=captured.html.replace(`${marker}="${encode(new TextEncoder().encode(captured.structured!))}"`,`${marker}="${encode(new TextEncoder().encode(structured))}"`);
+    const html=captured.html.replace(`${marker}="${encodeClipboardBytes(new TextEncoder().encode(captured.structured!))}"`,`${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}"`);
     if(html===captured.html)throw Error('셀 클립보드 wrapper 갱신 실패');
     return Object.freeze({
       text, structured,
@@ -252,13 +277,13 @@ export class StructuredClipboard {
         version: 1,
         encoding: "hwpx-fragment",
         scope: "nested",
-        payload: encode(bytes),
+        payload: encodeClipboardBytes(bytes),
       });
       const external=fragmentExternalHTML(a,bytes);
       return Object.freeze({
         text: external.text,
         structured,
-        html: `<div ${marker}="${encode(new TextEncoder().encode(structured))}">${external.html}</div>`,
+        html: `<div ${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}">${external.html}</div>`,
       });
     } finally {
       fragment.free();
@@ -390,14 +415,58 @@ export class StructuredClipboard {
       return end;
     } finally { fragment.free(); }
   }
-  paste(a: RhwpAdapter, p: Position, html: string, wire?: string, allowObject=true): Position {
+  pasteHancomGrid(a: RhwpAdapter, p: Extract<Position, {kind: "cell"}>, cells: number[], boundary: [number,number,number,number] | null, wire: string): Position {
+    const fragment = fragmentForDocument(a.doc, decodeEnvelope(wire, true));
+    try {
+      assertFragmentScope(a, fragment);
+      const focus = {...p, cellPara: 0, offset: 0};
+      const target = a.clipboardTarget(focus);
+      const result = a.call("pasteCapturedCellGrid", fragment, JSON.stringify({...target, after: false}),
+        JSON.stringify(cells), JSON.stringify(boundary));
+      if (!result.ok || JSON.stringify(result.cells) !== JSON.stringify(cells) ||
+          !Number.isSafeInteger(result.focusCell) || result.focusCell < 0)
+        throw Error("붙여넣은 표 범위를 확인하지 못했습니다.");
+      const next = {...focus, cell: result.focusCell};
+      a.validate(next);
+      a.exportChecked();
+      return next;
+    } finally {
+      fragment.free();
+    }
+  }
+  pasteHancomRange(a: RhwpAdapter, from: Position, to: Position, wire: string): Position {
+    const fragment = fragmentForDocument(a.doc, decodeEnvelope(wire, true));
+    try {
+      assertFragmentScope(a, fragment);
+      let next: Position;
+      if (from.kind === "cell" && to.kind === "cell") {
+        const target = a.clipboardTarget(from);
+        const result = a.call("pasteCapturedCellRange", fragment, JSON.stringify({...target, after: false}),
+          from.offset, to.cellPara, to.offset);
+        next = {...from, cellPara: result.cellParaIdx, offset: result.charOffset};
+      } else if (from.kind === "body" && to.kind === "body") {
+        const result = a.call("replaceCapturedBodyRetainingOwners", fragment, from.sec, from.para,
+          from.offset, to.para, to.offset);
+        next = {...from, para: result.paraIdx, offset: result.bodyLogicalOffset};
+      } else {
+        throw Error("한/글 조각의 붙여넣기 대상이 바뀌었습니다.");
+      }
+      if (!sameContainer(from, next)) throw Error("붙여넣기 후 편집 대상이 바뀌었습니다.");
+      a.validate(next);
+      a.exportChecked();
+      return next;
+    } finally {
+      fragment.free();
+    }
+  }
+  paste(a: RhwpAdapter, p: Position, html: string, wire?: string, allowObject = true, nativeHancomRange = false): Position {
     if (p.kind !== "body") throw Error("본문 블록은 본문 위치에 붙여넣으세요.");
     const envelope = wire ?? envelopeFromHTML(html);
     if (!envelope)
       throw Error(
         "외부 HTML 표 가져오기는 아직 지원하지 않습니다. 텍스트 전용으로 복사한 내용을 붙여넣으세요.",
       );
-    const payload = decodeEnvelope(envelope);
+    const payload = decodeEnvelope(envelope, nativeHancomRange);
     const paragraphMode = JSON.parse(envelope).paragraphMode;
     const retainParagraph = paragraphMode === "retain-target-for-inline-text" ||
       paragraphMode === "retain-target-at-body-end" && p.offset === a.length(p);
@@ -421,10 +490,12 @@ export class StructuredClipboard {
         object=controls.some(c=>c.ctrlId==='gso');
         objectOnly=object&&source.getSectionCount()===1&&source.getParagraphCount(0)===1&&source.getParagraphLength(0,0)===0;
       }finally{source.free();}
-      if(object&&!allowObject)throw Error('개체 fragment는 본문 커서 위치에서 붙여넣으세요. 선택 대체는 별도 지원 범위입니다.');
+      if(object&&!allowObject && paragraphMode !== "retain-target-for-native-range")throw Error('개체 fragment는 본문 커서 위치에서 붙여넣으세요. 선택 대체는 별도 지원 범위입니다.');
       const paragraphProperties=()=>Object.fromEntries(Object.entries(a.paraProps(p)).filter(([key])=>!['paraShapeId','borderFillId'].includes(key)));
       const originalParagraph=objectOnly?JSON.stringify(paragraphProperties()):undefined;
-      const r = a.call("pasteCapturedBody", fragment, p.sec, p.para, p.offset);
+      const pasteMethod = paragraphMode === "retain-target-for-native-range"
+        ? "pasteCapturedBodyRetainingOwner" : "pasteCapturedBody";
+      const r = a.call(pasteMethod, fragment, p.sec, p.para, p.offset);
       // Object-only clipboard contents do not authorize changing the existing
       // destination text's paragraph format. Preserve the real Core failure;
       // roll back this History transaction instead of overwriting its format.

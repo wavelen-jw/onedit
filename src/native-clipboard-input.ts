@@ -1,6 +1,7 @@
+import { materializeHancomQaClipboard } from "./hancom-native-qa.js";
 import { CLIPBOARD_MIME } from "./clipboard.js";
 import { pasteFiles } from "./clipboard-image.js";
-import type { NativePastePayload } from "./clipboard-transport.js";
+import { MARKDOWN_FLAVORS, type NativePastePayload } from "./clipboard-transport.js";
 
 type ClipboardAction = (kind: "copy" | "cut" | "paste" | "paste-text", native?: NativePastePayload) => Promise<void>;
 
@@ -18,7 +19,8 @@ export function mountNativeClipboardInput(input: HTMLTextAreaElement, clipboardA
       const hasFiles = !!data && (data.types.includes("Files") || Array.from(data.items).some(i=>i.kind === "file"));
       // Snapshot the native event payload while it exists. A menu-generated paste
       // has no DataTransfer and retains the explicit Clipboard API path.
-      const native = data ? {files:hasFiles&&!html.includes("data-rhwp-next-clipboard")?images:[],advertisedFiles:hasFiles,html,text:data.getData("text/plain"),structured:data.getData(CLIPBOARD_MIME)||undefined} : undefined;
+      const native = data ? {files:hasFiles&&!html.includes("data-rhwp-next-clipboard")?images:[],advertisedFiles:hasFiles,hancomQaPrepared:materializeHancomQaClipboard(data, html, e.isTrusted),html,text:data.getData("text/plain"),structured:data.getData(CLIPBOARD_MIME)||undefined,
+        markdown:data.getData(MARKDOWN_FLAVORS[0])||data.getData(MARKDOWN_FLAVORS[1])||undefined} : undefined;
       void clipboardAction(kind, native);
     });
 }

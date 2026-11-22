@@ -10,6 +10,7 @@ import { selectedCutObject, selectedFragmentObject } from './object-clipboard.js
 export function clipboardSupport(
   editor: Interaction,
   action: "copy" | "cut" | "paste",
+  verifiedNativeEvent = false,
 ) {
   const s = editor.selection;
   const doc = editor.adapter.doc as unknown as Record<string, unknown>;
@@ -55,7 +56,7 @@ export function clipboardSupport(
   if (nestedText && action !== "paste" && !coreNested)
     reason = "이 버전에서는 중첩 셀의 텍스트 서식까지 복사할 수 없습니다.";
   if (nested(s.focus) && s.kind === "table" && action !== "copy"){reason="자식 표 전체 삭제/선택 대체는 아직 지원하지 않습니다. 복사는 지원합니다.";expectedUnsupported=true;}
-  if(action==='paste'&&s.kind==='cells'&&editor.cells(s).length>1){reason='복수 셀을 대신하는 붙여넣기는 아직 지원하지 않습니다.';expectedUnsupported=true;}
+  if(action==='paste'&&!verifiedNativeEvent&&s.kind==='cells'&&editor.cells(s).length>1){reason='복수 셀을 대신하는 붙여넣기는 아직 지원하지 않습니다.';expectedUnsupported=true;}
   if(action!=='paste'&&(s.kind==='table'&&nested(s.focus)||s.kind==='cells'&&(nested(s.focus)||editor.cells(s).length>1))){
     const refusal=wholeInlineCellBlock(editor.adapter,s,editor.cells(s))?undefined:tableCaptureRefusal(editor.adapter,s.focus,s.kind==='cells'?'cells':'table');
     if(refusal){reason=refusal.message;expectedUnsupported=true;}

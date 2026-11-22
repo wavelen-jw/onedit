@@ -1,5 +1,9 @@
 # Onedit Host SDK changelog
 
+## 1.1.0
+
+- Provide the checked-open SDK sample runtime as a companion archive. The 20 methods, eight events and wire version are retained.
+
 ## 1.0.0-rc7
 
 - Update the sample runtime inventory for the RC7 notices. The 20 methods, eight events and wire version are unchanged.

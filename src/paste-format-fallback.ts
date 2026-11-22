@@ -8,7 +8,7 @@ export class PasteFormatUnavailable extends Error {
 }
 
 /** The clipboard payload stays in the caller. No new read or edit on open. */
-export async function offerPlainPaste(doc: Document): Promise<boolean> {
+export async function offerPlainPaste(doc: Document, reason?: string): Promise<boolean> {
   const dialog = doc.createElement("dialog");
   dialog.id = "paste-format-fallback";
   dialog.className = "manager-dialog";
@@ -18,7 +18,7 @@ export async function offerPlainPaste(doc: Document): Promise<boolean> {
   title.id = "paste-format-fallback-title";
   title.textContent = "붙여넣기";
   message.id = "paste-format-fallback-message";
-  message.textContent = "원본 형식을 적용하기 어렵습니다. 텍스트만 붙일까요?";
+  message.textContent = reason ? `${reason} 텍스트만 붙일까요?` : "원본 형식을 적용하기 어렵습니다. 텍스트만 붙일까요?";
   const form = doc.createElement("form"), actions = doc.createElement("footer");
   actions.className = "dialog-actions";
   const confirm = doc.createElement("button"), cancel = doc.createElement("button");

@@ -1,5 +1,5 @@
-# Onedit RC7 Core binary provenance
+# Onedit 1.1.0 Core binary provenance
 
-The browser editor includes a modified downstream RHWP 0.8.7 Core, built with Rust 1.93.1 for `wasm32-unknown-unknown`. RC7 ships public App build `a0d430e31f8015836029bc03ca71084d8fcdd98aafb36a5523a1a02df46a053b` and WASM SHA-256 `78845dc759ebeabdaa36feee2271d9112eb72e6fe6f57ad8d4117b587e181890`. JavaScript glue, WASM and both declaration files are supplied together and pinned in `PUBLIC_CORE_BINARY_MANIFEST.json`.
+The standalone browser editor uses a modified downstream RHWP 0.8.7 Core, built with Rust 1.93.1 for `wasm32-unknown-unknown`. The public build remaps local compiler paths. Its App identity is `73b479b7bfa96ea3402c938aab848dbe694e4419f7c9c5eac5add1e3af11eb7f` and its WASM SHA-256 is `5f9553b45707abac54f440a7192f6c59d011c8149be71abda8c5e25e18f58447`. `PUBLIC_CORE_BINARY_MANIFEST.json` pins the four matched binary and binding files.
 
-[RHWP](https://github.com/edwardkim/rhwp) is Copyright (c) 2025–2026 Edward Kim. Core and dependency notices ship with the browser runtime and Core binary. The publicly available TypeScript build recreates the browser assets with the supplied Core; modified downstream Rust source is not part of this release.
+[RHWP](https://github.com/edwardkim/rhwp) is Copyright (c) 2025–2026 Edward Kim. The runtime and Core binary kit include the upstream MIT terms, dependency notices and Rust standard library notices. The SDK companion archive carries the separately pinned checked-open runtime.

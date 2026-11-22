@@ -15,11 +15,11 @@ Open http://127.0.0.1:4173/ in a browser. Standalone editing does not require an
 To install the SDK into a separate consumer directory:
 
 ```sh
-npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc7.tgz
+npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.1.0.tgz
 node --input-type=module -e 'import { OneditHostClient, version } from "onedit-ai-host-sdk"; console.log(typeof OneditHostClient, version)'
 ```
 
-Run the SDK contract tests from the source workspace or from the unpacked SDK archive. There is no registry publication. The local sample uses its own pinned editor runtime and does not depend on an older private editor build.
+Run the SDK contract tests from the source workspace or from the unpacked SDK archive. For the SDK embedded editor example, extract `onedit-sdk-editor-runtime.tar.gz` and use its `runtime/` directory as described in the SDK quickstart. This companion carries the checked-open build pinned by the SDK sample.
 
 ## Reproduce the browser assets and SDK modules
 

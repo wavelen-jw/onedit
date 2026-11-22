@@ -2,7 +2,7 @@ import { editorFeedbackText } from "./editor-feedback-text.js";
 // Display-only receipts for the existing clipboard commands. No clipboard read,
 // document query, policy conversion, focus change or second edit lives here.
 export const pastePolicyHelp = {
-  source: "원본 서식 중 기존 지원 범위를 붙입니다. 서식 데이터가 없으면 텍스트만 붙입니다.",
+  source: "원본 서식을 붙이고, 마크다운이면 제목·목록·표 등을 문서 서식으로 변환합니다.",
   text: "클립보드 서식은 제외하고 기존 입력 서식을 사용합니다. 대상 서식 맞춤 정책과는 다릅니다.",
   target: "대상 서식에 맞추는 별도 정책은 아직 지원하지 않습니다.",
 };

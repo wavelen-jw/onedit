@@ -1,4 +1,4 @@
-import type { ClipboardMarkdownTable } from "./clipboard-markdown-table.js";
+import type { MarkdownPlan } from "./markdown-import.js";
 
 // Body offsets count inline objects as one logical slot; cell offsets count Unicode scalars.
 // getCursorRect consumes logical offsets, hitTest/format APIs use text offsets.
@@ -231,7 +231,9 @@ export type Command =
       text: string;
       html?: string;
       structured?: string;
-      markdownTable?: ClipboardMarkdownTable;
+      nativeHancomRange?: boolean;
+      markdown?: MarkdownPlan;
+      mixedPicture?: import("./clipboard-image.js").HancomMixedPicture;
     };
 export const start = (): Position => ({
   kind: "body",

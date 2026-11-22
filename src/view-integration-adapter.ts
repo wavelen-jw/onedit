@@ -104,10 +104,10 @@ export function connectViewIntegration(
   const readLocation = (): Located | null => { try { return locate(); } catch { return null; } };
   const inputPosition = (reveal = false, location = readLocation) => {
     // ui.ts positions the native IME anchor at the isolated preview caret.
-    if (input.dataset.imePreview === "true") return;
+    if (input.dataset.imePreview === "true") return false;
     try {
       const current = location();
-      if (!current) return;
+      if (!current) return false;
       const { rect, page } = current, point = viewportPoint(page, viewport, rect.x, rect.y);
       input.style.left = `${point.x}px`;
       input.style.top = `${point.y}px`;
@@ -124,8 +124,10 @@ export function connectViewIntegration(
         else if (point.x > viewport.scrollLeft + viewport.clientWidth - 16)
           viewport.scrollLeft = point.x - viewport.clientWidth + 16;
       }
+      return true;
     } catch {
       /* Invalid paths are already reported by the existing state adapter. */
+      return false;
     }
   };
   // Ruler is absent from the product UI. Do not mount a hidden projection or
@@ -236,12 +238,18 @@ export function connectViewIntegration(
   });
   // Scroll and the IME anchor use viewport geometry, while the status needs
   // the selection page. One native location suffices within this callback.
+  let revealed = 0;
   const revealAndPublish = () => {
     const current = readLocation();
-    inputPosition(true, () => current);
+    const positioned = inputPosition(true, () => current);
     publishLocation(() => current);
+    if (positioned) revealed++;
+    return positioned;
   };
-  document.addEventListener("rhwp:reveal-selection", revealAndPublish);
+  document.addEventListener("rhwp:reveal-selection", event => {
+    const onReveal = (event as CustomEvent<{onReveal?:()=>void}>).detail?.onReveal;
+    if (revealAndPublish() && typeof onReveal === "function") onReveal();
+  });
   viewport.addEventListener("scroll", publish, { passive: true });
   pageObserver = new MutationObserver((records) => {
     // Caret/highlight and owner-registered absolute page chrome do not change
@@ -625,12 +633,32 @@ export function connectViewIntegration(
         !e.isComposing && e.keyCode !== 229 && !e.getModifierState("AltGraph");
       // Modifier-only keydown must not reveal the anchor before Shift-click.
       const modifierKey = ["Shift", "Control", "Alt", "Meta", "AltGraph"].includes(e.key);
-      if (target === input && !nativeTextKey && !modifierKey && !blocked())
+      // A paragraph split publishes and reveals its new caret from Command.
+      // Looking up its old position here can force layout before the edit.
+      const paragraphBreak = e.key === "Enter" && (selection.kind === "caret" || selection.kind === "text") &&
+        !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey &&
+        !e.isComposing && e.keyCode !== 229 && !e.getModifierState("AltGraph");
+      if (target === input && !nativeTextKey && !paragraphBreak && !modifierKey && !blocked())
         queueMicrotask(revealAndPublish);
     },
     true,
   );
-  input.addEventListener("input", () => queueMicrotask(revealAndPublish));
+  let nativeInputReveal: { event: InputEvent; before: number } | undefined;
+  input.addEventListener("input", event => {
+    // Record the exact browser event before the editor handles it. A
+    // committed plain insertion already reveals from the safe command path.
+    if (event.bubbles && event.isTrusted && event.inputType === "insertText" && !event.isComposing && !composing)
+      nativeInputReveal = {event, before:revealed};
+  }, true);
+  input.addEventListener("input", event => {
+    if (nativeInputReveal?.event !== event) queueMicrotask(revealAndPublish);
+  });
+  document.addEventListener("input", event => {
+    const observed = nativeInputReveal;
+    if (!observed || observed.event !== event || event.target !== input) return;
+    nativeInputReveal = undefined;
+    if (observed.before === revealed) queueMicrotask(revealAndPublish);
+  });
   refresh();
 }
 

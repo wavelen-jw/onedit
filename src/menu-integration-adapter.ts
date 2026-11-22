@@ -125,7 +125,10 @@ function legacyTableToolbarDemand(doc:Document,current:()=>boolean, mountedContr
     root.open||root.contains(doc.activeElement))return "active-or-unknown";
   const controls = mountedControls ?? Array.from(doc.querySelectorAll(legacyTableControlSelector));
   if(!controls.length||controls.some(control=>!root.contains(control)))return "rehosted-or-missing";
-  if(doc.defaultView?.getComputedStyle(root).display!=="none")return "visible-or-unknown";
+  // The standalone workspace explicitly hides this toolbar. Only ask
+  // computed style when that presentation did not set the hidden attribute.
+  if(!(activeWorkset(doc)&&root.hidden===true)&&doc.defaultView?.getComputedStyle(root).display!=="none")
+    return "visible-or-unknown";
   return current()?"dormant":"stale";
 }
 

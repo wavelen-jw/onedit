@@ -198,7 +198,10 @@ export function runHistory(editor: Interaction, redo = false, busy = false) {
 
 // D view adapter owns scaled coordinates; command dispatch never guesses pixels.
 export function revealCommandSelection(root: Document, before: Parameters<typeof sameFormatTarget>[0], after: typeof before) {
-  if (sameFormatTarget(before, after)) return;
+  if (sameFormatTarget(before, after)) return false;
   const Event = root.defaultView?.CustomEvent;
-  if (Event) root.dispatchEvent(new Event("rhwp:reveal-selection"));
+  if (!Event) return false;
+  let revealed = false;
+  root.dispatchEvent(new Event("rhwp:reveal-selection", {detail:{onReveal:()=>{revealed=true;}}}));
+  return revealed;
 }

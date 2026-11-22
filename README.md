@@ -2,18 +2,18 @@
 
 브라우저에서 **HWP·HWPX 문서를 열고 편집한 결과를 HWPX로 저장**할 수 있는 한글 문서 편집기입니다. 독립 편집기와 다른 앱에 편집 화면을 연결하는 JavaScript·TypeScript Host SDK를 제공합니다.
 
-[온라인 편집기](https://edit.govpress.cloud/) · [v1.0.0-rc7 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc7) · [Host SDK](sdk/QUICKSTART.md)
+[온라인 편집기](https://edit.govpress.cloud/) · [v1.1.0 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.1.0) · [Host SDK](sdk/QUICKSTART.md)
 
 ## 주요 기능
 
 - **문서 편집** — 본문과 표 셀 편집, 글자·문단 서식, 찾기·바꾸기, 실행 취소·다시 실행
 - **모바일 편집** — 두 번 탭 또는 길게 눌러 단어 선택, 선택 손잡이로 범위 확장, 본문·선택·표에 맞춘 하단 편집 도구
 - **표 테두리** — 색·굵기·실선·파선·점선 설정. ‘하나의 셀처럼 적용’에서 ‘바깥 전체’를 선택하면 안쪽 선을 유지하며 바깥 네 방향을 설정할 수 있습니다.
-- **작성과 저장** — Markdown 가져오기, HWPX 저장, 파일 메뉴의 ‘HWPX 사본 다운로드’
+- **작성과 저장** — Markdown 가져오기와 GFM 클립보드 붙여넣기, HWPX 저장, 파일 메뉴의 ‘HWPX 사본 다운로드’
 
 ## 로컬 실행
 
-[프리릴리스 v1.0.0-rc7](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc7)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
+[v1.1.0](https://github.com/wavelen-jw/onedit/releases/tag/v1.1.0)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
@@ -27,11 +27,13 @@ node start-ai-editor.mjs 4173
 
 ## 다른 앱에 연결
 
-[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc7/onedit-ai-host-sdk-1.0.0-rc7.tgz)를 설치합니다.
+[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.1.0/onedit-ai-host-sdk-1.1.0.tgz)를 설치합니다.
 
 ```bash
-npm install --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc7.tgz
+npm install --ignore-scripts ./onedit-ai-host-sdk-1.1.0.tgz
 ```
+
+승인된 파일 열기를 사용하는 SDK 예제는 같은 릴리스의 `onedit-sdk-editor-runtime.tar.gz`로 실행합니다. 독립 편집에는 `onedit-browser-runtime.tar.gz`를 사용합니다.
 
 Host가 iframe의 온편집과 연결해 승인된 파일을 `openDocument`로 열고 `exportDocument({ format: "hwpx" })`로 편집 결과를 받습니다. Host가 사용자 인증, 열기·수정 승인과 저장을 담당합니다. SDK v1은 20개 메서드와 8개 이벤트를 제공합니다. [연동 예제](sdk/EXTERNAL-HOST.md) · [API 레퍼런스](sdk/API_REFERENCE.md)
 

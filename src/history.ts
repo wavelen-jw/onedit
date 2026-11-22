@@ -1,9 +1,11 @@
 import { type Selection, type SelectionReference, copy } from "./model.js";
 import { RhwpAdapter } from "./adapter.js";
+import { wasCreatedBlank } from "./core-runtime.js";
+type NativeDocument = RhwpAdapter["doc"];
 type Entry = {
   // The snapshot is the destination state of this stack entry. Successful
   // travel swaps it with the current state for the opposite stack.
-  snapshot: number;
+  state: { kind: "snapshot"; doc: NativeDocument; id: number } | { kind: "document"; doc: NativeDocument };
   selectionBefore: Selection;
   selectionAfter: Selection;
   referenceBefore: SelectionReference;
@@ -29,7 +31,8 @@ export class History {
     if (prior && prior.documentId === before.documentId && prior.revision === before.revision &&
         this.undoStack.at(-2) === prior.entry &&
         JSON.stringify(prior.entry.selectionAfter) === JSON.stringify(before.selection)) {
-      this.adapter.doc.discardSnapshot(current.snapshot);
+      if(current.state.kind!=="snapshot"||current.state.doc!==this.adapter.doc) return;
+      current.state.doc.discardSnapshot(current.state.id);
       this.undoStack.pop();
       prior.entry.selectionAfter = current.selectionAfter;
       prior.entry.referenceAfter = current.referenceAfter;
@@ -48,11 +51,43 @@ export class History {
     this.maxEntries = capacity - 2;
   }
   private discard(entries: Entry[]) {
-    for (const e of entries) this.adapter.doc.discardSnapshot(e.snapshot);
+    for (const entry of entries) if(entry.state.kind==="snapshot")
+      entry.state.doc.discardSnapshot(entry.state.id);
+    this.releaseAlternateDocuments(entries);
+  }
+  private releaseAlternateDocuments(entries: Entry[]) {
+    for(const entry of entries) if(entry.state.kind==="document") entry.state.doc.free();
   }
   private trim() {
     while (this.undoStack.length > this.maxEntries)
-      this.adapter.doc.discardSnapshot(this.undoStack.shift()!.snapshot);
+      this.discard([this.undoStack.shift()!]);
+  }
+  /** A full-document paste is admitted only for an untouched, new document.
+   * History owns the inactive Core handle after the synchronous commit. */
+  adoptPreparedPaste(replacement: NativeDocument, before: Selection, after: Selection): Selection {
+    this.admit();
+    const a=this.adapter, current=a.doc;
+    if(this.transient||this.grouped||a.scope!=="edit"||a.documentLocked||
+       a.revision!==0||this.undoStack.length||this.redoStack.length||
+       replacement===current||!wasCreatedBlank(current)||!current.isEmptyDocument()||
+       replacement.snapshotCapacity()!==current.snapshotCapacity())
+      throw Error("새 빈 문서 상태가 바뀌어 전체 붙여넣기를 취소했습니다.");
+    a.completeLocalBodyFlow();
+    const referenceBefore=a.captureSelection(before);
+    try {
+      a.doc=replacement;
+      a.invalidateUpdateReads();
+      const referenceAfter=a.captureSelection(after);
+      this.undoStack.push({state:{kind:"document",doc:current},selectionBefore:copy(before),
+        selectionAfter:copy(after),referenceBefore,referenceAfter,label:"paste"});
+    } catch(error) {
+      a.doc=current;
+      a.invalidateUpdateReads();
+      throw error;
+    }
+    this.endTypingRun();
+    a.revision++;
+    return after;
   }
   private admit() {
     if (this.adapter.transientEdit && !this.transient)
@@ -100,8 +135,13 @@ export class History {
   }
   /** @internal The old Core owns disposal, whether still live until commit or
    * already freed by Host.open. clear() would discard IDs through the new Core. */
-  detachForDocumentReplacement() {
+  retireDetachedDocuments() {
+    const entries=[...this.undoStack,...this.redoStack];
+    return ()=>this.releaseAlternateDocuments(entries);
+  }
+  detachForDocumentReplacement(keepForRollback=false) {
     this.endTypingRun();
+    if(!keepForRollback) this.releaseAlternateDocuments([...this.undoStack,...this.redoStack]);
     this.undoStack = [];
     this.redoStack = [];
   }
@@ -176,7 +216,7 @@ export class History {
       this.discard(this.redoStack);
       this.redoStack = [];
       this.undoStack.push({
-        snapshot: before,
+        state: {kind:"snapshot",doc:this.adapter.doc,id:before},
         selectionBefore: copy(selection),
         selectionAfter: copy(restored),
         referenceBefore,
@@ -213,10 +253,31 @@ export class History {
     // A transient rollback snapshot protects canonical IR only. Native restore
     // rebuilds layout; it must still work if preview completion itself failed.
     if (!this.transient) this.adapter.completeLocalBodyFlow();
+    const ref=redo ? e.referenceAfter : e.referenceBefore;
+    if(e.state.kind==="document"){
+      const previous=this.adapter.doc;
+      let selection: Selection;
+      try {
+        this.adapter.doc=e.state.doc;
+        this.adapter.invalidateUpdateReads();
+        selection=this.adapter.resolveSelection(ref);
+      } catch(error) {
+        this.adapter.doc=previous;
+        this.adapter.invalidateUpdateReads();
+        throw error;
+      }
+      e.state.doc=previous;
+      from.pop();
+      (redo ? this.undoStack : this.redoStack).push(e);
+      this.adapter.revision++;
+      this.completedTravels++;
+      return selection;
+    }
+    if(e.state.doc!==this.adapter.doc) throw Error("편집 이력의 Core 문서가 바뀌었습니다.");
     const current = this.adapter.doc.saveSnapshot();
     let selection: Selection;
     try {
-      this.adapter.call("restoreSnapshot", e.snapshot);
+      this.adapter.call("restoreSnapshot", e.state.id);
       selection = this.adapter.resolveSelection(
         redo ? e.referenceAfter : e.referenceBefore,
       );
@@ -226,8 +287,8 @@ export class History {
       throw error;
     }
     from.pop();
-    this.adapter.doc.discardSnapshot(e.snapshot);
-    e.snapshot = current;
+    e.state.doc.discardSnapshot(e.state.id);
+    e.state.id = current;
     (redo ? this.undoStack : this.redoStack).push(e);
     this.adapter.revision++;
     this.completedTravels++;

@@ -1,12 +1,14 @@
-import { clipboardPicture, imageOnly } from "./clipboard-image.js";
+import { clipboardPicture, hancomMixedPicture, imageOnly, type HancomMixedPicture } from "./clipboard-image.js";
+import { hasHancomClipboardMetadata } from "./external-text-format.js";
 import { PasteFormatUnavailable } from "./paste-format-fallback.js";
 import {
   CLIPBOARD_MIME,
   MAX_CLIPBOARD_BYTES,
   type ClipboardData,
 } from "./clipboard.js";
-export type ClipboardRead = ClipboardData & { plainAlternative?: string };
-export type NativePastePayload = {files: File[]; advertisedFiles?: boolean; html: string; text: string; structured?: string};
+export const MARKDOWN_FLAVORS = ["text/markdown", "web text/markdown"] as const;
+export type ClipboardRead = ClipboardData & { plainAlternative?: string; markdown?: string; mixedPicture?: HancomMixedPicture };
+export type NativePastePayload = {files: File[]; advertisedFiles?: boolean; hancomQaPrepared?: boolean; html: string; text: string; structured?: string; markdown?: string};
 
 async function permission(name: "clipboard-read" | "clipboard-write") {
   if (!document.hasFocus())
@@ -84,17 +86,31 @@ function validateImageOnly(html: string, text: string, fileName?: string) {
   try { imageOnly(html, text, fileName); }
   catch (e) { throw new PasteFormatUnavailable(e instanceof Error ? e.message : String(e), text); }
 }
+async function readHancomMixed(html: string, text: string, images: readonly Blob[], fileName?: string): Promise<ClipboardRead | undefined> {
+  if (!hasHancomClipboardMetadata(html) || !/<img\b/i.test(html)) return;
+  try {
+    if (images.length > 1) throw Error("한/글 본문과 함께 복사된 그림 파일이 여러 개입니다.");
+    const mixedPicture = await bounded(hancomMixedPicture(html, text, images[0], fileName));
+    if (mixedPicture && mixedPicture.file.bytes.length > MAX_CLIPBOARD_BYTES)
+      throw Error("혼합 붙여넣기의 그림 크기 제한은 8 MiB입니다.");
+    if (mixedPicture) return { html, text, mixedPicture };
+  } catch (error) {
+    throw new PasteFormatUnavailable(error instanceof Error ? error.message : "한/글 그림 원본을 확인할 수 없습니다.", text);
+  }
+}
 // No second clipboard read, permission request, URL fetch or source substitution.
 // These strings/files were synchronously supplied by the browser paste event.
-export async function readNativePaste(data:NativePastePayload):Promise<ClipboardData>{
-  for(const value of [data.html,data.text,data.structured??""])
+export async function readNativePaste(data:NativePastePayload):Promise<ClipboardRead>{
+  for(const value of [data.html,data.text,data.structured??"",data.markdown??""])
     if(new TextEncoder().encode(value).byteLength>MAX_CLIPBOARD_BYTES*2)throw Error("클립보드 크기 제한을 초과했습니다.");
   if(data.structured)return{text:data.text,html:data.html,structured:data.structured};
+  const mixed = await readHancomMixed(data.html, data.text, data.files, data.files[0]?.name);
+  if (mixed) return mixed;
   if(data.files.length)return readPasteFiles(data.files,data.html,data.text);
   if(data.advertisedFiles && !data.html.includes("data-rhwp-next-clipboard"))
     throw new PasteFormatUnavailable("브라우저에서 클립보드 파일 데이터를 읽을 수 없습니다.",data.text);
-  if(!data.html&&!data.text)throw new PasteFormatUnavailable("붙일 수 있는 클립보드 내용이 없습니다.");
-  return{text:data.text,html:data.html};
+  if(!data.html&&!data.text&&!data.markdown)throw new PasteFormatUnavailable("붙일 수 있는 클립보드 내용이 없습니다.");
+  return{text:data.text || data.markdown || "",html:data.html,markdown:data.markdown};
 }
 export async function readClipboard(plainOnly = false): Promise<ClipboardRead> {
   if (!navigator.clipboard?.read)
@@ -111,7 +127,7 @@ export async function readClipboard(plainOnly = false): Promise<ClipboardRead> {
     return blob.text();
   };
   if (plainOnly) {
-    const text = await read("text/plain");
+    const text = await read("text/plain") || await read("text/markdown") || await read("web text/markdown");
     if (!text) throw Error("클립보드에 붙일 일반 텍스트가 없습니다.");
     return {text,html:""};
   }
@@ -126,12 +142,16 @@ export async function readClipboard(plainOnly = false): Promise<ClipboardRead> {
   // Preserve existing immutable RHWP fragments before alternate raster data.
   if (html.includes("data-rhwp-next-clipboard")) return {text,html};
   const imageType = ["image/png", "image/jpeg"].find(type => item.types.includes(type));
-  if (imageType) {
+  const raster = imageType ? await bounded(item.getType(imageType)) : undefined;
+  const mixed = await readHancomMixed(html, text, raster ? [raster] : []);
+  if (mixed) return mixed;
+  if (raster) {
     validateImageOnly(html,text);
-    return {text:"",html:"",image:await bounded(clipboardPicture(await bounded(item.getType(imageType)),html))};
+    return {text:"",html:"",image:await bounded(clipboardPicture(raster,html))};
   }
   if (item.types.some(type=>type.startsWith("image/")))
     throw new PasteFormatUnavailable("브라우저가 제공한 그림 형식을 지원하지 않습니다. PNG/JPEG 데이터가 필요합니다.", text);
-  if (!html && !text) throw new PasteFormatUnavailable("붙일 수 있는 클립보드 내용이 없습니다.");
-  return { text, html };
+  const markdown = await read("text/markdown") || await read("web text/markdown");
+  if (!html && !text && !markdown) throw new PasteFormatUnavailable("붙일 수 있는 클립보드 내용이 없습니다.");
+  return { text: text || markdown, html, markdown };
 }

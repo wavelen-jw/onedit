@@ -3,6 +3,7 @@ type Anchor={page:number;x:number;y:number;screenX:number;screenY:number};
 /** Layout only: actual page boxes and editor width decide each wrapping row. */
 export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
   let signature='',remembered:Anchor|undefined;
+  let boxInputs='', pageGeometryChanged=true;
   const pageStyles=new WeakMap<HTMLElement,{inline:string|null;pending:boolean;layout:string}>();
   // Pending fixed-size ink changes visibility, not page packing. Compare inline
   // layout inputs before asking the browser for computed style/geometry.
@@ -34,10 +35,15 @@ export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
     return{page:Number(page.dataset.page),x:(x-r.left)/s,y:(y-r.top)/s,screenX:x-v.left,screenY:y-v.top};
   };
   const refresh=(keep?:Anchor)=>{
-    const all=list();for(const page of all)updatePageStyle(page);
+    readPageChanges(observer.takeRecords());
     const s=scale(),vp=getComputedStyle(viewport),box=getComputedStyle(pages);
-    const n=(v:string)=>parseFloat(v)||0, widths=all.map(p=>n(p.style.width)),heights=all.map(p=>n(p.style.height));
+    const n=(v:string)=>parseFloat(v)||0;
     const available=(viewport.clientWidth-n(vp.paddingLeft)-n(vp.paddingRight))/s-n(box.paddingLeft)-n(box.paddingRight);
+    const inputs=JSON.stringify([available,s,box.paddingLeft,box.paddingRight]);
+    if(!pageGeometryChanged && boxInputs===inputs)return false;
+    const all=list();for(const page of all)updatePageStyle(page);
+    const widths=all.map(p=>n(p.style.width)),heights=all.map(p=>n(p.style.height));
+    boxInputs=inputs;pageGeometryChanged=false;
     const key=JSON.stringify([available,s,widths,heights,box.paddingLeft,box.paddingRight]);if(key===signature)return false;
     const before=keep??remembered??anchor();signature=key;
     // An oversized page may overflow by itself; it must not enlarge the
@@ -52,8 +58,25 @@ export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
   const note=()=>{remembered=anchor();};viewport.addEventListener('scroll',note,{passive:true});
   // Page/SVG production is owned by render. Geometry is laid out before the
   // next viewport refresh; highlight/caret mutations are not layout inputs.
-  const observer=new MutationObserver(records=>{if(records.some(r=>r.target===pages||r.type==='attributes'&&
-    r.target instanceof HTMLElement&&r.target.matches('.page')&&updatePageStyle(r.target)))refresh();});
-  observer.observe(pages,{childList:true,subtree:true,attributes:true,attributeFilter:['style']});
+  function readPageChanges(records: MutationRecord[]) {
+    for(const {target,type,attributeName,addedNodes,removedNodes} of records){
+      if(target===pages){
+        if(type!=='childList'){pageGeometryChanged=true;continue;}
+        const [added]=addedNodes, [removed]=removedNodes;
+        const old=removed instanceof HTMLElement ? pageStyles.get(removed) : undefined;
+        // SVG publication can replace the page at the same slot. Its last
+        // observed box is sufficient only for a one-for-one equal replacement.
+        if(addedNodes.length===1&&removedNodes.length===1&&added instanceof HTMLElement&&
+          added.matches('.page')&&old&&old.layout===layoutStyle(added))updatePageStyle(added);
+        else pageGeometryChanged=true;
+      }
+      if(type!=='attributes'||!(target instanceof HTMLElement)||target.parentElement!==pages)continue;
+      if(target.matches('.page')){
+        if(updatePageStyle(target))pageGeometryChanged=true;
+      }else if(attributeName==='class'&&pageStyles.delete(target))pageGeometryChanged=true;
+    }
+  }
+  const observer=new MutationObserver(records=>{readPageChanges(records);if(pageGeometryChanged)refresh();});
+  observer.observe(pages,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class','data-render-pending']});
   return{anchor,refresh,dispose(){observer.disconnect();viewport.removeEventListener('scroll',note);}};
 }

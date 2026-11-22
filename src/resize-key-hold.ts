@@ -32,8 +32,11 @@ export class ResizeKeyHold {
     // still match the current owner/revision, but need not accumulate or replay.
     if (!this.matches(key, context)) { this.cancel(); return; }
     if (timestamp < this.held!.completed) return;
-    this.held!.step = step;
-    this.schedule();
+    const held = this.held!;
+    // Start a fresh repeat immediately in an idle frame. A second event can
+    // replace one pending step, but cannot run before the paint boundary.
+    if (this.frame) held.step = step;
+    else this.run(held, step);
   }
   completed(key: string, context: Context) {
     // A synchronous focus/owner cancellation must not be rearmed on return.
@@ -42,15 +45,14 @@ export class ResizeKeyHold {
     this.held.context = JSON.stringify(context);
     this.held.completed = performance.now();
   }
-  private schedule() {
-    if (this.frame || !this.held?.step) return;
-    const held = this.held;
+  private run(held: NonNullable<ResizeKeyHold['held']>, step: () => void) {
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       if (this.held !== held) return;
-      const step = held.step;
+      const pending = held.step;
       held.step = undefined;
-      step?.(); // Only a subsequent fresh native repeat can schedule again.
+      if (pending) this.run(held, pending);
     });
+    step();
   }
 }
