@@ -1,5 +1,9 @@
 # Onedit Host SDK changelog
 
+## 1.0.0-rc7
+
+- Update the sample runtime inventory for the RC7 notices. The 20 methods, eight events and wire version are unchanged.
+
 ## 1.0.0-rc6
 
 - Pair with the RC6 browser runtime and wider bounded GFM preparation. The 20 methods, eight events and wire version are retained.

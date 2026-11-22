@@ -2,7 +2,7 @@
 
 브라우저에서 **HWP·HWPX 문서를 열고 편집한 결과를 HWPX로 저장**할 수 있는 한글 문서 편집기입니다. 독립 편집기와 다른 앱에 편집 화면을 연결하는 JavaScript·TypeScript Host SDK를 제공합니다.
 
-[온라인 편집기](https://edit.govpress.cloud/) · [v1.0.0-rc6 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc6) · [Host SDK](sdk/QUICKSTART.md)
+[온라인 편집기](https://edit.govpress.cloud/) · [v1.0.0-rc7 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc7) · [Host SDK](sdk/QUICKSTART.md)
 
 ## 주요 기능
 
@@ -13,7 +13,7 @@
 
 ## 로컬 실행
 
-[프리릴리스 v1.0.0-rc6](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc6)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
+[프리릴리스 v1.0.0-rc7](https://github.com/wavelen-jw/onedit/releases/tag/v1.0.0-rc7)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
@@ -27,10 +27,10 @@ node start-ai-editor.mjs 4173
 
 ## 다른 앱에 연결
 
-[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc6/onedit-ai-host-sdk-1.0.0-rc6.tgz)를 설치합니다.
+[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.0.0-rc7/onedit-ai-host-sdk-1.0.0-rc7.tgz)를 설치합니다.
 
 ```bash
-npm install --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc6.tgz
+npm install --ignore-scripts ./onedit-ai-host-sdk-1.0.0-rc7.tgz
 ```
 
 Host가 iframe의 온편집과 연결해 승인된 파일을 `openDocument`로 열고 `exportDocument({ format: "hwpx" })`로 편집 결과를 받습니다. Host가 사용자 인증, 열기·수정 승인과 저장을 담당합니다. SDK v1은 20개 메서드와 8개 이벤트를 제공합니다. [연동 예제](sdk/EXTERNAL-HOST.md) · [API 레퍼런스](sdk/API_REFERENCE.md)
@@ -53,6 +53,8 @@ npm --prefix sdk test
 
 [빌드 가이드](BUILDING-PUBLIC.md) · [Core 출처](CORE-BUILD-PROVENANCE.md)
 
-## 라이선스
+## 라이선스와 공개 범위
 
-온편집 소스와 SDK는 [MIT](LICENSE)입니다. 편집기는 [RHWP](https://github.com/edwardkim/rhwp)를 기반으로 수정한 Core를 사용합니다. Core·의존성·글꼴에는 각 구성요소의 조건이 적용됩니다. [Core 고지](THIRD_PARTY_CORE_NOTICE.md) · [제3자 고지](THIRD_PARTY_NOTICES.md)
+- **편집기와 Host SDK**의 공개 소스에는 [MIT 라이선스](LICENSE)가 적용됩니다.
+- **온편집 Core**는 MIT 라이선스인 [RHWP](https://github.com/edwardkim/rhwp)를 기반으로 합니다. 온편집에서 수정한 Rust 소스와 패치 이력은 비공개로 관리합니다. 공개 릴리스는 컴파일된 WASM과 실행에 필요한 바인딩을 제공합니다. [Core 고지](THIRD_PARTY_CORE_NOTICE.md)
+- **Core 바이너리와 브라우저 실행 패키지**에는 RHWP와 Rust 표준 라이브러리의 저작권 및 라이선스 고지가 포함됩니다. 의존성과 글꼴에는 각 구성 요소의 조건이 적용됩니다. [제3자 고지](THIRD_PARTY_NOTICES.md)
