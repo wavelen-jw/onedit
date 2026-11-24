@@ -1,16 +1,15 @@
+import { contextMenuAnchor, showContextMenuAt } from "./context-menu-placement.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
-import {captionTarget} from './captions.js';
 import {registerPopupLifetime} from './menu-lifetime.js';
-import {prepareControlKey} from './control-shortcuts.js';
 import type { Interaction } from "./interaction.js";
 import { pictureCanvasBoxes, pictureCanvasHit } from "./picture-canvas.js";
 import { selectedPicture } from "./pictures.js";
 import { clipboardSupport } from "./clipboard-ui-state.js";
 import { sameFormatTarget } from "./integration/a-format-input-guard.js";
-import { pagePoint, pageScale } from "./integration/a-view-menu.js";
+import { pagePoint } from "./integration/a-view-menu.js";
 import { tableContextKey } from "./table-context.js";
 import { bodyContextAppShortcut } from "./body-context.js";
-import { objectContextItems, renderObjectContextItems } from "./object-context-menu.js";
+import { objectContextItems, renderObjectContextItems, sharedObjectMenuCommands, type ObjectMenuCommand } from "./object-context-menu.js";
 import { controlPoint, onControlOutline,controlClientPoint,type ControlPointer } from "./object-hit-point.js";
 import type { CellPathEntry, Selection } from "./model.js";
 import { inlineCellPictureBoxes, selectedCellPicture } from "./inline-cell-picture.js";
@@ -18,7 +17,7 @@ import { inlineCellPictureBoxes, selectedCellPicture } from "./inline-cell-pictu
 // A view of existing single-body-picture commands and the shared OS copy entry.
 export function mountPictureContext(doc: Document, editor: Interaction, actions: {
   busy: () => boolean; changed: () => void; focus: () => void;
-  properties: () => void; error: (error: unknown) => void; selectionChanged?:()=>void;
+  properties: () => void; line: ObjectMenuCommand; error: (error: unknown) => void; selectionChanged?:()=>void;
 }) {
   const win = doc.defaultView!, pages = doc.getElementById("pages")!, input = doc.getElementById("input")!;
   const popup = doc.createElement("div"); popup.id = "picture-context-menu"; popup.hidden = true;
@@ -33,10 +32,10 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
         !!selectedPicture(editor.adapter, editor.selection);
     } catch { return false; }
   };
+  const shared = sharedObjectMenuCommands(doc, editor, actions);
   const reason = (id: string) => {
-    if(id==='caption'){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');captionTarget(editor.adapter,editor.selection);return '';}catch(error){return editorFeedbackText(error);}}
-    if(['front','back','inFrontOfText','behindText'].includes(id)){try{if(actions.busy())throw Error('현재 작업을 마친 후 사용하세요.');prepareControlKey(editor.adapter,editor.selection,id as 'front'|'back'|'inFrontOfText'|'behindText');return '';}catch(error){return editorFeedbackText(error);}}
-    if(id==='line')return actions.busy()?'현재 작업을 마친 후 사용하세요.':'';
+    const command = shared.get(id);
+    if (command) return command.reason();
     if (!["properties","description","delete","copy","cut"].includes(id)) return id==="placement" ? "개체 속성 기본 탭에서 지원하는 본문 배치를 변경하세요. 이 하위 메뉴는 미연결입니다." : "이 그림 명령의 UI 연결은 미지원입니다. 원본 개체를 유지합니다.";
     if (id === "copy" || id === "cut" || id === "paste") return clipboardSupport(editor, id).reason ?? "";
     if (actions.busy()) return "입력·저장·대화상자를 마친 후 사용하세요.";
@@ -68,9 +67,8 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
     const why = reason(id); if (why) { actions.error(why); sync(); return; }
     const target = captured!; close();
     try {
-      if(id==='caption')doc.dispatchEvent(new CustomEvent('rhwp:remaining-open',{detail:'caption'}));
-      else if(['front','back','inFrontOfText','behindText'].includes(id)){editor.execute({type:'control-key',action:id as 'front'|'back'|'inFrontOfText'|'behindText'},target);actions.changed();actions.focus();}
-      else if(id==='line'){actions.properties();doc.querySelector<HTMLButtonElement>('#picture-dialog [data-object-tab="2"]')?.click();}
+      const command = shared.get(id);
+      if (command) command.run(target);
       else if (id === "copy" || id === "cut") {
         actions.focus();
         input.dispatchEvent(new ClipboardEvent(id, { bubbles: true, cancelable: true }));
@@ -86,10 +84,7 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
     editor.adapter.assertEditable(editor.selection.focus); selectedPicture(editor.adapter, editor.selection);
     for (const menu of doc.querySelectorAll<HTMLDetailsElement>("#main-menu details[open]")) menu.open = false;
     captured = editor.capture(); sync(); if (!captured) return;
-    popup.hidden = false; popup.style.left = popup.style.top = "8px";
-    const b = popup.getBoundingClientRect();
-    popup.style.left = `${Math.max(8, Math.min(x, win.innerWidth - b.width - 8))}px`;
-    popup.style.top = `${Math.max(8, Math.min(y, win.innerHeight - b.height - 8))}px`;
+    showContextMenuAt(popup, x, y);
     [...buttons.values()].find(b => !b.disabled)?.focus();
   };
   const cellHit = (page: HTMLElement, x: number, y: number) => {
@@ -177,8 +172,8 @@ export function mountPictureContext(doc: Document, editor: Interaction, actions:
           pictureCanvasBoxes(editor, Number(page.dataset.page)).map(box => ({ page, box })))
           .filter(({ box }) => box.sec === s.focus.sec && box.para === s.focus.para && box.control === s.control);
         if (boxes.length !== 1) throw Error("이 그림의 바로 가기 메뉴 좌표는 확인되지 않았습니다. 기존 그림 목록/속성을 사용하세요.");
-        const { page, box } = boxes[0], rect = page.getBoundingClientRect(), scale = pageScale(page);
-        open(rect.left + box.x * scale, rect.top + (box.y + box.h) * scale);
+        const { page, box } = boxes[0];
+        open(...contextMenuAnchor(page, box.x, box.y + box.h));
       } catch (error) { close(true); actions.error(error); }
       return;
     }

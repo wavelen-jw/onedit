@@ -144,4 +144,5 @@ export function syncFileRecovery(files: FileLifecycle, doc: Document) {
   // The file menu also invokes this command; only the recovery notice is conditional.
   copy.hidden = !files.canDownloadCopy;
   copy.disabled = files.busy || !!transition;
+  copy.title = files.canDownloadTrackedOriginal ? "변경 추적 이력을 포함한 원본 파일을 내려받습니다." : "";
 }

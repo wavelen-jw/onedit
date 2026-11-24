@@ -1,3 +1,5 @@
+import { rowColumnItems } from "../table-menu-items.js";
+import { sameFormatTarget } from "./a-format-input-guard.js";
 import {activeWorkset, activeMenuDemand} from "../active-workset.js";
 import type {Position} from "../model.js";
 import {stage5OwnerBatchOptIn,passiveBatchScreenWitness,PassiveOwnerBatchRetired} from "../passive-owner-batch.js";
@@ -48,14 +50,8 @@ export const tableItems: Item[] = [
   ).map(
     (operation, n): Item => ({
       id: operation,
-      label: [
-        "선택 셀 병합",
-        "셀 나누기",
-        "아래 행 추가",
-        "현재 행 삭제 (내용 포함)",
-        "오른쪽 열 추가",
-        "현재 열 삭제 (내용 포함)",
-      ][n],
+      label: operation === "merge" ? "선택 셀 병합" :
+        operation === "split" ? "셀 나누기" : rowColumnItems[operation].label,
       key: n === 0 ? "M (F5 블록)" : undefined,
       command: { type: "table-edit", operation },
     }),
@@ -84,8 +80,8 @@ export const tableItems: Item[] = [
   ),
   ...([['left',-300,0,'현재 셀 너비 줄이기','Shift+←'],['right',300,0,'현재 셀 너비 늘리기','Shift+→'],['up',0,-300,'현재 셀 높이 줄이기','Shift+↑'],['down',0,300,'현재 셀 높이 늘리기','Shift+↓']]as const).map(([id,width,height,label,key]):Item=>({id:'local-'+id,label:label+' (3pt · 이웃 셀 보상)',key,command:undefined})),
   {id:'split-dialog',label:'셀 나누기…',key:'S (일반 셀 블록)'},
-  {id:'add-dialog',label:'줄/칸 추가하기…',key:'Alt+Insert'},
-  {id:'delete-dialog',label:'줄/칸 지우기…',key:'Alt+Delete'},
+  {id:'add-dialog', ...rowColumnItems['add-dialog']},
+  {id:'delete-dialog', ...rowColumnItems['delete-dialog']},
   ...([['front','맨 앞으로','Shift+Page Up'],['back','맨 뒤로','Shift+Page Down'],['inFrontOfText','글 앞으로','Shift+Home'],['behindText','글 뒤로','Shift+End']]as const).map(([action,label,key]):Item=>({id:'control-'+action,label,key,command:{type:'control-key',action}})),
   { id: "table-object-pagination", label: "표 쪽 나누기…" },
   { id: "auto-fit", label: "내용에 맞춰 자동 크기", unsupported: true },
@@ -228,9 +224,7 @@ export function mountTableMenu(
       const now = editor.capture();
       if (
         target &&
-        (target.documentId !== now.documentId ||
-          target.revision !== now.revision ||
-          JSON.stringify(target.selection) !== JSON.stringify(now.selection) ||
+        (!sameFormatTarget(target, now) ||
           activeMenuDemandIsScoped() && JSON.stringify(target.paths) !== JSON.stringify(now.paths))
       ) {
         root.open = false;

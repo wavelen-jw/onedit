@@ -173,8 +173,8 @@ export function createPagePresenter({adapter, document, pages, invalidateSelecti
     // projection writes; unrelated DOM mutations retain the existing fallback.
     const displayed=div.querySelector<SVGSVGElement>(':scope > svg');
     if(displayed){projectParagraphMarks(displayed,adapter.presentationDpi());renderedPages.get(div)?.observer.takeRecords();}
-    div.className = "page";
-    div.dataset.page = String(page);
+    if (div.className !== "page") div.className = "page";
+    if (div.dataset.page !== String(page)) div.dataset.page = String(page);
     // Identical dimensions are not a page-layout change. Avoid waking the
     // layout observer for a write that leaves its input unchanged.
     if (div.style.width !== `${info.width}px`) div.style.width = `${info.width}px`;

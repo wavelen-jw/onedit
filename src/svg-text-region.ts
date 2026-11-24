@@ -19,6 +19,21 @@ export function rememberSvgTextSource(svg: SVGSVGElement, markup: string): void 
   })) });
 }
 
+// The range was validated before any DOM changes. Unchanged leaves keep their
+// node and parent identity. Only their source offsets after the edit may move.
+function commitLeafRange(source: Source, after: string, first: number, last: number, replacement: Leaf[]) {
+  const leaves = source.leaves;
+  const delta = after.length - source.markup.length;
+  if (delta) {
+    for (let i = last + 1; i < leaves.length; i++) {
+      leaves[i].start += delta;
+      leaves[i].end += delta;
+    }
+  }
+  source.leaves = leaves.slice(0, first).concat(replacement, leaves.slice(last + 1));
+  source.markup = after;
+}
+
 // Only plain drawing leaves, separated by XML whitespace, form a patch. A group,
 // definition, resource, namespace or complex-text change takes the full parser.
 function plainTexts(value: string): boolean {
@@ -111,20 +126,20 @@ export function updateSvgTextRegion(
   const length = Math.min(before.length, after.length);
   // SVG repeats long font chains for every glyph. Let the string engine compare
   // exact spans instead of executing a JS loop for every unchanged code unit.
-  // Equality is monotonic in span length; binary search finds the identical
+  // Each probe skips the span already known equal. Equality is monotonic; binary search finds the identical
   // UTF-16 boundary, including surrogate/entity interiors. The existing XML
   // leaf admission below still widens and validates the complete replacement.
   let head = 0, limit = length;
   while (head < limit) {
     const mid = head + Math.ceil((limit - head) / 2);
-    if (before.slice(0, mid) === after.slice(0, mid)) head = mid;
+    if (before.slice(head, mid) === after.slice(head, mid)) head = mid;
     else limit = mid - 1;
   }
   let tail = 0;
   limit = length - head;
   while (tail < limit) {
     const mid = tail + Math.ceil((limit - tail) / 2);
-    if (before.slice(before.length - mid) === after.slice(after.length - mid)) tail = mid;
+    if (before.slice(before.length - mid, before.length - tail) === after.slice(after.length - mid, after.length - tail)) tail = mid;
     else limit = mid - 1;
   }
   const oldTail = before.length - tail, newTail = after.length - tail;
@@ -145,7 +160,9 @@ export function updateSvgTextRegion(
   start = source.leaves[first].start;
   end = source.leaves[last].end;
   const nextEnd = newTail + end - oldTail;
-  if (before.slice(0, start) !== after.slice(0, start) || before.slice(end) !== after.slice(nextEnd)) return false;
+  // head and tail are exact source comparisons. Widening the leaf range must
+  // leave both outer spans inside those already proven equal regions.
+  if (start > head || end < oldTail || nextEnd > after.length) return false;
   const oldLeaves = source.leaves.slice(first, last + 1), parent = oldLeaves[0].parent;
   if (!svg.contains(parent) || oldLeaves.some(leaf => leaf.parent !== parent || !independentLeaf(leaf.node))) return false;
   // Detached space markers are the only allowed missing leaves. A boundary
@@ -197,11 +214,10 @@ export function updateSvgTextRegion(
       offset = row.raw.index! + row.raw[0].length;
     }
     while (at && at !== cursor) { const next: ChildNode | null = at.nextSibling; parent.removeChild(at); at = next; }
-    const delta = nextEnd - end;
-    sources.set(svg, {markup: after, leaves: [
-      ...source.leaves.slice(0, first), ...positioned.map(row => ({start: start + row.raw.index!, end: start + row.raw.index! + row.raw[0].length, node: row.node, parent})),
-      ...source.leaves.slice(last + 1).map(leaf => ({...leaf, start: leaf.start + delta, end: leaf.end + delta})),
-    ]});
+    const replacement = positioned.map(({raw, node}) => ({
+      start: start + raw.index!, end: start + raw.index! + raw[0].length, node, parent,
+    }));
+    commitLeafRange(source, after, first, last, replacement);
     return true;
   }
   let fresh: SVGSVGElement;
@@ -220,10 +236,6 @@ export function updateSvgTextRegion(
   const range = svg.ownerDocument.createRange();
   range.setStartBefore(attached[0].node); range.setEndAfter(attached.at(-1)!.node);
   range.deleteContents(); range.insertNode(fragment);
-  const delta = nextEnd - end;
-  sources.set(svg, {markup: after, leaves: [
-    ...source.leaves.slice(0, first), ...newLeaves,
-    ...source.leaves.slice(last + 1).map(leaf => ({...leaf, start: leaf.start + delta, end: leaf.end + delta})),
-  ]});
+  commitLeafRange(source, after, first, last, newLeaves);
   return true;
 }

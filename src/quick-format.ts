@@ -1,3 +1,5 @@
+import { readFontSize, readTracking } from "./character-number-fields.js";
+import { lineSpacingMode, lineSpacingModes, readLineSpacing } from "./line-spacing.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import {selectNumericDraftOnClick} from "./numeric-draft-selection.js";
 import { activeWorkset } from "./active-workset.js";
@@ -24,15 +26,9 @@ export function quickFormatDelta(scope: string, initial: {font: string; size: st
     if (!draft.font.trim() || draft.font.length > 200 || /[\x00-\x1f]/.test(draft.font)) throw Error("글꼴 이름을 확인하세요.");
     out[scope === "all" ? "fontFamily" : `fontLanguage${scope}`] = draft.font;
   }
-  if (draft.size && draft.size !== initial.size) {
-    const value = Number(draft.size);
-    if (!Number.isFinite(value) || value < 1 || value > 200) throw Error("글자 크기는 1~200pt로 입력하세요.");
-    out.fontSize = value;
-  }
+  if (draft.size && draft.size !== initial.size) out.fontSize = readFontSize(draft.size);
   if (draft.tracking && draft.tracking !== initial.tracking) {
-    const value = Number(draft.tracking);
-    if (!/^[+-]?\d+$/.test(draft.tracking) || !Number.isSafeInteger(value) || value < -100 || value > 100)
-      throw Error("자간은 -100~100%의 정수로 입력하세요.");
+    const value = readTracking(draft.tracking);
     if (!initial.tracking || value !== Number(initial.tracking)) out.spacings = value;
   }
   if (draft.color && draft.color.toLowerCase() !== initial.color?.toLowerCase()) {
@@ -42,18 +38,11 @@ export function quickFormatDelta(scope: string, initial: {font: string; size: st
   return toCoreCharacter(out);
 }
 
-export const quickSpacingTypes = [
-  ["Percent", "글자에 따라 (%)"], ["Fixed", "고정값 (pt)"],
-  ["Minimum", "최소 (pt)"], ["SpaceOnly", "여백만 (pt)"],
-] as const;
 export function quickSpacingDelta(initial: {type: string; value: string}, draft: typeof initial): Props {
   if (draft.type === initial.type && draft.value === initial.value) return {};
   if (draft.type === initial.type && !draft.value) return {};
   if (!draft.type && !draft.value) return {};
-  if (!quickSpacingTypes.some(([type]) => type === draft.type)) throw Error("줄 간격 방식을 선택하세요.");
-  if (!draft.value || !Number.isFinite(Number(draft.value)) || Number(draft.value) < 1 || Number(draft.value) > 1000)
-    throw Error("줄 간격은 1~1000으로 입력하세요. 방식 변경 후 값을 다시 입력하세요.");
-  return toCoreParagraph({lineSpacingType: draft.type, lineSpacing: Number(draft.value)});
+  return toCoreParagraph(readLineSpacing(draft.type, draft.value));
 }
 
 /** Only the non-live spacing suffix can omit a repeat write. Titles,
@@ -222,10 +211,10 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
   const sizes = [6,7,8,9,10,11,12,13,14,15,16,20,24];
   // An editable combo keeps native text selection and its preset list. Validate
   // its numeric draft on submit, before the existing captured-target command.
-  size.type = "text"; size.pattern = "(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)";
+  size.type = "text";
   size.inputMode = "decimal"; size.autocomplete = "off";
   selectNumericDraftOnClick(size);selectNumericDraftOnClick(tracking);
-  tracking.name = "quickTracking"; tracking.type = "text"; tracking.autocomplete = "off"; tracking.pattern = "[+-]?[0-9]+";
+  tracking.name = "quickTracking"; tracking.type = "text"; tracking.autocomplete = "off";
   tracking.setAttribute("aria-label", "자간 (%)"); tracking.dataset.hint = "자간 -100~100% · Enter 적용 / Esc 취소";
   size.dataset.hint = "글자 크기 1~200pt · 직접 입력 또는 목록 선택 · Enter 적용 / Esc 취소";
   const sizeList = doc.createElement("datalist"); sizeList.id = "quick-font-sizes";
@@ -292,11 +281,7 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
   };
   font.dataset.hint = "글꼴 이름 일부로 검색 · 목록 선택 또는 Enter 적용 / Esc 취소";
   const character = bindQuickDraft(form, editor, busy, "char", [scope, font, size, tracking, color, apply], reset,
-    () => {
-      if (size.validity.patternMismatch) throw Error("글자 크기는 1~200pt의 숫자로 입력하세요.");
-      if (tracking.validity.patternMismatch) throw Error("자간은 -100~100%의 정수로 입력하세요.");
-      return quickFormatDelta(scope.value, initial, {font: font.value, size: size.value, color: color.value, tracking: tracking.value});
-    },
+    () => quickFormatDelta(scope.value, initial, {font: font.value, size: size.value, color: color.value, tracking: tracking.value}),
     (props, target) => execute({ type: "char", props }, target), restoreFocus, note, blockedReason, readBusy);
   // Native change commits a chosen font/size. Typing remains a draft until
   // change or Enter; composing text and invalid targets still use the guard.
@@ -319,8 +304,8 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
   const spacing = doc.createElement("form"); spacing.id = "quick-paragraph"; spacing.noValidate = true; spacing.setAttribute("aria-label", "빠른 문단 줄 간격");
   const type = doc.createElement("select"), value = doc.createElement("input"), unit = doc.createElement("span");
   type.name = "quickSpacingType"; type.add(new Option("혼합 / 유지", ""));
-  for (const [v, label] of quickSpacingTypes) type.add(new Option(label, v));
-  value.name = "quickSpacing";value.type="text";value.inputMode="decimal";value.autocomplete="off";value.pattern="(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)";
+  for (const [v, label] of lineSpacingModes) type.add(new Option(label, v));
+  value.name = "quickSpacing";value.type="text";value.inputMode="decimal";value.autocomplete="off";
   selectNumericDraftOnClick(value);
   const percentages = [100,110,120,130,140,150,160,170,180];
   for (const [name, control] of [["줄 간격", type], ["값", value]] as const) { const label = doc.createElement("label"); label.append(name, control); spacing.append(label); }
@@ -336,7 +321,7 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
   const suffix = spacingSuffixPublisher(unit,spacing,!!doc.defaultView && doc.defaultView.parent===doc.defaultView &&
     qaSpacingSuffixFlag(doc.defaultView.location.href));
   const spacingHint = () => {
-    suffix.write(type.value === "Percent" ? "%" : type.value ? "pt" : "% / pt");
+    suffix.write(lineSpacingMode(type.value)?.[2] ?? "% / pt");
     spacingNote.textContent = type.value === "Percent" ? "문단 전체 · 백분율" : type.value ? "문단 전체 · 근사 pt 조회 · 미변경 시 원본 유지" : formatValueHint(formatValueState(spacingState,"lineSpacingType"))+" · 방식과 값을 함께 지정";
     spacingNote.title = spacingNote.textContent;
   };
@@ -346,7 +331,7 @@ export function mountQuickFormat(doc: Document, editor: Interaction, busy: () =>
     type.value = spacingInitial.type;
     value.value=spacingInitial.value;
     markFormatValue(type,formatValueState(s,"lineSpacingType"));markFormatValue(value,formatValueState(s,"lineSpacing"));spacingHint();
-  }, () => {if(value.validity.patternMismatch)throw Error("줄 간격은 숫자로 입력하세요.");return quickSpacingDelta(spacingInitial, {type: type.value||'Percent', value: value.value});},
+  }, () => quickSpacingDelta(spacingInitial, {type: type.value || "Percent", value: value.value}),
   (props, target) => execute({ type: "paragraph", props }, target), restoreFocus, spacingNote, blockedReason, readBusy);
   const spacingCombo=mountEditableCombo(value,()=>[{label:"줄 간격 (%)",values:percentages.map(String)}],()=>{type.value="Percent";});
   type.addEventListener("change", spacingHint);

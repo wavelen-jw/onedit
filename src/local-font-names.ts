@@ -1,3 +1,4 @@
+import { normalizeFontName } from './font-name.js';
 // Localized names belong to the selected FontData, not an invented substitute.
 // Detection reads only bounded SFNT header/directory/name slices. Full face bytes
 // are still acquired and verified by localFaceBytes only when actually selected.
@@ -25,10 +26,10 @@ export async function readLocalFontNames(face:{postscriptName:string;blob?:()=>P
         if(platform===0||platform===3){if(size%2)continue;for(let k=0;k<size;k+=2)value+=String.fromCharCode(table.getUint16(from+k));}
         else if(platform===1){for(let k=0;k<size;k++){const b=table.getUint8(from+k);if(b>=128){value='';break;}value+=String.fromCharCode(b);}}
         if(!valid(value))continue;
-        value=value.normalize('NFC').trim();names.add(value);
+        value=normalizeFontName(value);names.add(value);
         if(id===6)postscript.add(value.toLocaleLowerCase('en-US'));
       }
-      return postscript.has(face.postscriptName.normalize('NFC').trim().toLocaleLowerCase('en-US'))?[...names]:[];
+      return postscript.has(normalizeFontName(face.postscriptName).toLocaleLowerCase('en-US'))?[...names]:[];
     }
   }catch{/* A name-table failure must not discard the native metadata or old document. */}
   return [];

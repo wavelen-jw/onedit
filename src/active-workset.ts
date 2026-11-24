@@ -3,29 +3,55 @@ export function activeWorkset(doc: Document): boolean {
   const w=doc.defaultView;
   return !!w && w.parent===w;
 }
+// An index hint only. Scrolling, zoom, reflow and page replacement can change both neighbors.
+const rowEndHints = new WeakMap<HTMLElement, number>();
+
 // Page tops in the wrapping layout are ordered. The first page intersecting Y
 // can be an earlier sibling of a shorter page in the same mixed-size row.
 export function* pageRectsFromY(pages: HTMLElement, top: number, bottom = Infinity) {
   const nodes = pages.children;
   const css = nodes.length > 16 ? pages.ownerDocument.defaultView?.getComputedStyle(pages) : undefined;
+  // Chromium can serialize the editor's align-items:flex-start as flow-start.
+  // Both align each page to the top of its row in this horizontal wrapping layout.
   const ordered = css?.display === 'flex' && css.flexDirection === 'row' &&
-    css.flexWrap === 'wrap' && css.alignItems === 'flex-start' && css.writingMode === 'horizontal-tb';
+    css.flexWrap === 'wrap' && (css.alignItems === 'flex-start' || css.alignItems === 'flow-start') &&
+    css.writingMode === 'horizontal-tb';
   let start = 0;
+  let firstRect: DOMRect | undefined;
   if (ordered) {
-    let lo = 0, hi = nodes.length;
-    while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2);
-      if (nodes[mid].getBoundingClientRect().top <= top) lo = mid + 1;
-      else hi = mid;
+    // Reuse the last upper bound only when it still brackets this Y in the live layout.
+    let end = rowEndHints.get(pages);
+    if (end !== undefined && end > 0 && end <= nodes.length)
+      firstRect = nodes[end - 1].getBoundingClientRect();
+    if (end === undefined || end > nodes.length ||
+        (firstRect && !(firstRect.top <= top)) ||
+        (end < nodes.length && !(nodes[end].getBoundingClientRect().top > top))) {
+      let lo = 0, hi = nodes.length;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (nodes[mid].getBoundingClientRect().top <= top) lo = mid + 1;
+        else hi = mid;
+      }
+      end = lo;
+      firstRect = undefined;
+      rowEndHints.set(pages, end);
     }
-    if (lo) {
-      start = lo - 1;
-      const rowTop = nodes[start].getBoundingClientRect().top;
-      while (start > 0 && nodes[start - 1].getBoundingClientRect().top === rowTop) start--;
+    if (end) {
+      start = end - 1;
+      firstRect ??= nodes[start].getBoundingClientRect();
+      while (start > 0) {
+        const previous = nodes[start - 1].getBoundingClientRect();
+        if (previous.top !== firstRect.top) break;
+        start--;
+        firstRect = previous;
+      }
     }
   }
   for (let i = start; i < nodes.length; i++) {
-    const page = nodes[i] as HTMLElement, rect = page.getBoundingClientRect();
+    const page = nodes[i] as HTMLElement, rect = firstRect ?? page.getBoundingClientRect();
+    // A caller may change the layout between yields. Only the first box was
+    // measured in the uninterrupted search above.
+    firstRect = undefined;
     if (ordered && rect.top >= bottom) break;
     if (rect.bottom > top && rect.top < bottom) yield {page, rect, index: i};
   }

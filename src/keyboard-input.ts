@@ -1,3 +1,4 @@
+import { openEditorSearch } from "./integration/a-search.js";
 import { ResizeKeyHold } from "./resize-key-hold.js";
 import { routeKey } from "./keyboard.js";
 import { isDialogShortcutPrefix } from "./browser-shortcut-scope.js";
@@ -302,6 +303,8 @@ export function mountKeyboardInput(context: KeyboardInputContext) {
       return;
     }
     let revealed = false;
+    const textDelete = route.kind === "command" && route.command.type === "delete" &&
+      (editor.selection.kind === "caret" || editor.selection.kind === "text");
     if (route.kind === "view")
       updateView(() => {
         switch (route.operation) {
@@ -387,7 +390,8 @@ export function mountKeyboardInput(context: KeyboardInputContext) {
           case "print":
             document.getElementById("print-button")?.click();break;
           case "search":
-            document.querySelector<HTMLButtonElement>(`[data-edit-action="${route.replace?"replace":"find"}"]`)?.click();break;
+            if (!e.repeat) openEditorSearch(editor, route.replace);
+            break;
           case "save":
             if (!e.repeat) void save(route.as === true);
             break;
@@ -401,7 +405,7 @@ export function mountKeyboardInput(context: KeyboardInputContext) {
       else resizeKeyHold.cancel(); // content floor/refusal/error must not spin
     }
     if (!dialog.open) {
-      if (!(revealed && route.kind === "command" && route.command.type === "break") &&
+      if (!(revealed && (textDelete || (route.kind === "command" && route.command.type === "break"))) &&
           !(route.kind === "view" && ["all", "block", "f5"].includes(route.operation))) revealCursor();
       if (route.kind === "view" && ["document", "paragraph-start", "paragraph-end", "page-start", "word", "paragraph"].includes(route.operation))
         document.dispatchEvent(new CustomEvent("rhwp:reveal-selection"));

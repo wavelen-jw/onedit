@@ -5,11 +5,10 @@ import type {MarkdownRequest} from './markdown-import.js';
 import { initializeBlankDocument } from './blank-document-defaults.js';
 import { assertSafeHwpxEntryNames } from "./hwpx-open-boundary.js";
 import { isCheckedExternalSibling, siblingDocument } from "./core-runtime.js";
+import { verifySavedHwpxMetadata, verifySavedHwpxBytes } from "./saved-hwpx-verification.js";
 import { RhwpAdapter, UnsupportedTableOwner } from "./adapter.js";
 import { finishResponsiveWork } from "./responsive-work.js";
-import { exportCheckedLocalHwpx } from "./adapter-save.js";
-import { extractLinkZOrder, rememberLinkZOrder } from "./hwpx-link-zorder.js";
-import { readPrintSettings, rememberPrintSettings } from "./hwpx-print-settings.js";
+import { exportCheckedDocumentHwpx, inspectHwpxPreservation, rememberHwpxPreservation } from "./adapter-save.js";
 import { projectSemanticParts } from "./adapter-semantic.js";
 import { Interaction } from "./interaction.js";
 import { start } from "./model.js";
@@ -32,6 +31,8 @@ type Download = {
     | "superseded";
 };
 type SavedFile = Pick<File, "name" | "size" | "arrayBuffer">;
+const trackedChangesRestriction = "변경 추적 이력이 있는 문서입니다. HWPX 사본 다운로드로 원본을 받을 수 있습니다";
+const trackedSaveRestriction = "변경 추적 이력이 있는 문서는 편집·저장할 수 없습니다. HWPX 사본 다운로드로 원본을 받아 주세요.";
 export type NativeSaveTarget = {
   name: string;
   createWritable: () => Promise<{
@@ -43,6 +44,7 @@ export type NativeSaveTarget = {
 };
 type UI = {
   standalone: boolean;
+  localWorkspace?: boolean;
   confirm: (message: string) => boolean;
   chooseUnsaved?: (message: string) => Promise<"save" | "continue" | "cancel">;
   prompt: (message: string, name: string) => string | null;
@@ -72,25 +74,6 @@ export function hwpxName(name: string) {
   return result;
 }
 
-/** Filename evidence only; request identity and checked export bytes remain mandatory.
- * Match the literal name or a bounded browser collision suffix. Never normalize,
- * trim, case-fold, parse a path or infer the user's download directory.
- */
-function matchesDownloadedHwpxName(requested: string, selected: string) {
-  if (typeof selected !== "string" || /[\\/\x00-\x1f\x7f]/.test(selected))
-    return false;
-  const extension = requested.slice(-5);
-  if (!/^\.hwpx$/i.test(extension)) return false;
-  if (selected === requested) return true;
-  if (new TextEncoder().encode(selected).length > 255) return false;
-  const prefix = requested.slice(0, -5) + " (";
-  const suffix = ")" + extension;
-  if (!selected.startsWith(prefix) || !selected.endsWith(suffix)) return false;
-  return /^[1-9][0-9]{0,5}$/.test(
-    selected.slice(prefix.length, -suffix.length),
-  );
-}
-
 /** Standalone file metadata only. Core and the existing History own all content. */
 export class FileLifecycle {
   filename = "새 문서.hwpx";
@@ -100,6 +83,7 @@ export class FileLifecycle {
   private nativeTarget: { documentId: string; target: NativeSaveTarget } | null = null;
   private request: Download | null = null;
   private exported: Uint8Array | null = null;
+  private trackedOriginal: { documentId: string; bytes: Uint8Array } | null = null;
   private continuation: {
     requestId: string;
     documentId: string;
@@ -223,7 +207,12 @@ export class FileLifecycle {
     });
   }
   private classifyReplacement(next: RhwpAdapter) {
-    next.call("getDocumentInfo");
+    const info = next.call<{ hwpxHasTrackedChanges?: boolean }>("getDocumentInfo");
+    if (info.hwpxHasTrackedChanges === true) {
+      next.viewerOnlyReason = trackedChangesRestriction;
+      next.scope = "readonly";
+      return;
+    }
     next.documentLocked = next.call<any[]>("getControls").some(c => c.props?.Lock);
     next.scope = next.documentLocked ? "readonly" : "edit";
   }
@@ -246,10 +235,10 @@ export class FileLifecycle {
   private async validateLocalReplacement(next: RhwpAdapter) {
     this.classifyReplacement(next);
     try {
-      await finishResponsiveWork(projectSemanticParts.call(next));
+      await finishResponsiveWork(projectSemanticParts.call(next, "validate-open"));
     } catch (error) {
       this.enterViewerOnly(next, error);
-      await finishResponsiveWork(projectSemanticParts.call(next));
+      await finishResponsiveWork(projectSemanticParts.call(next, "validate-open"));
     }
     next.rect(start());
   }
@@ -275,7 +264,7 @@ export class FileLifecycle {
   private replace(bytes: Uint8Array | undefined, name: string, unsaved = false, prepareCommands?:()=>void, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"]) {
     this.adoptCandidate(this.replacementCandidate(bytes, admit, prepared), name, unsaved, prepareCommands);
   }
-  private adoptCandidate(next: RhwpAdapter, name: string, unsaved = false, prepareCommands?:()=>void, localOpen = false) {
+  private adoptCandidate(next: RhwpAdapter, name: string, unsaved = false, prepareCommands?:()=>void, localOpen = false, originalBytes?: Uint8Array) {
     let adopted = false;
     try {
       const state = this.captureReplacementState();
@@ -283,7 +272,7 @@ export class FileLifecycle {
       const retireDetached=history.retireDetachedDocuments();
       try {
         this.localOpenPaint=localOpen;
-        this.adoptReplacement(next, name, history, unsaved, prepareCommands);
+        this.adoptReplacement(next, name, history, unsaved, prepareCommands, originalBytes);
       } catch (error) {
         this.localOpenPaint=false;
         this.restoreReplacementState(state);
@@ -308,7 +297,7 @@ export class FileLifecycle {
   /** Internal AI integration: request policy/digest/current state were checked
    * by the opt-in bridge. Existing replacement owns the old document rollback. */
   adoptPreparedAI(bytes: Uint8Array) {
-    if (this.ui.standalone || this.busy || this.continuation || this.adapter.transientEdit ||
+    if ((this.ui.standalone && !this.ui.localWorkspace) || this.busy || this.continuation || this.adapter.transientEdit ||
         this.adapter.scope !== "edit" || this.adapter.documentLocked)
       throw Error("연결된 편집기에서 준비된 문서를 적용할 수 없습니다.");
     this.replace(bytes, "새 문서.hwpx", true);
@@ -320,7 +309,7 @@ export class FileLifecycle {
       if (prepared !== this.adapter.doc) prepared.free();
       throw Error("문서 검사 경로를 확인할 수 없습니다.");
     }
-    if (this.ui.standalone || this.busy || this.continuation || this.adapter.transientEdit || this.dirty) {
+    if ((this.ui.standalone && !this.ui.localWorkspace) || this.busy || this.continuation || this.adapter.transientEdit || this.dirty) {
       prepared.free();
       throw Error("현재 작업본은 교체할 수 없습니다.");
     }
@@ -346,6 +335,7 @@ export class FileLifecycle {
         filename: this.filename,
         request: this.request,
         exported: this.exported,
+        trackedOriginal: this.trackedOriginal,
         notice: this.notice,
         continuation: this.continuation,
         nativeTarget: this.nativeTarget,
@@ -354,7 +344,7 @@ export class FileLifecycle {
       const restoreHistory = history.captureDocumentReplacementRollback();
     return { old, restoreSelection, files, history, restoreHistory };
   }
-  private adoptReplacement(next: RhwpAdapter, name: string, history: Interaction["history"], unsaved = false, prepareCommands?:()=>void) {
+  private adoptReplacement(next: RhwpAdapter, name: string, history: Interaction["history"], unsaved = false, prepareCommands?:()=>void, originalBytes?: Uint8Array) {
         // Detach old snapshots without discarding them. UI sees only candidate
         // history; the old Core remains its snapshots' owner until commit.
         history.detachForDocumentReplacement(true);
@@ -372,6 +362,10 @@ export class FileLifecycle {
         this.nativeTarget = null;
         this.request = null;
         this.exported = null;
+        this.trackedOriginal = originalBytes && this.ui.standalone &&
+          next.viewerOnlyReason === trackedChangesRestriction
+          ? { documentId: next.documentId, bytes: originalBytes }
+          : null;
         this.continuation = null;
         this.notice = next.viewerOnlyReason ? `읽기 전용 표시 · ${next.viewerOnlyReason} · 편집/저장 미지원, 원본 파일 보존` : "";
         // Build through the real editor while the old document and snapshot
@@ -422,7 +416,7 @@ export class FileLifecycle {
       () => {
         const next = candidate ?? this.replacementCandidate(bytes, undefined, undefined, true);
         candidate = undefined; // adoptCandidate now owns the handle, including rollback.
-        this.adoptCandidate(next, file.name, false, undefined, true);
+        this.adoptCandidate(next, file.name, false, undefined, true, bytes);
         return true;
       },
       async () => {
@@ -435,16 +429,12 @@ export class FileLifecycle {
         if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
           throw Error("파일을 읽는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
         assertSafeHwpxEntryNames(bytes);
-        const [zOrder, printSettings] = this.ui.standalone ? await Promise.all([
-          extractLinkZOrder(bytes).catch(() => undefined),
-          readPrintSettings(bytes).catch(() => undefined),
-        ]) : [undefined, undefined];
+        const metadata = this.ui.standalone ? await inspectHwpxPreservation(bytes) : undefined;
         if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
           throw Error("파일을 검사하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
         const doc = siblingDocument(this.adapter.doc, bytes);
         try {
-          rememberLinkZOrder(doc,zOrder);
-          rememberPrintSettings(doc,printSettings);
+          if (metadata) rememberHwpxPreservation(doc, metadata);
           candidate = new RhwpAdapter(doc);
         }
         catch (error) { doc.free(); throw error; }
@@ -496,20 +486,47 @@ export class FileLifecycle {
       const checked=composeMarkdownHwpx(this.adapter.doc,draft);assertSafeHwpxEntryNames(checked.bytes);validate();
     });
   }
+  get transitionBlockReason() {
+    if (this.busy) return "BUSY";
+    return this.continuation ? "AWAITING_TRANSITION_SAVE" : null;
+  }
+
+  get saveBlockReason() {
+    return this.canDownloadTrackedOriginal ? "READONLY" : this.transitionBlockReason;
+  }
+
   save(as = false) {
+    const reason = this.saveBlockReason;
+    if (reason) {
+      if (reason === "READONLY" && !this.busy) this.reportError(Error(trackedSaveRestriction));
+      return Promise.resolve(false);
+    }
     return this.run(() => this.prepareSave(as));
   }
+  get canDownloadTrackedOriginal() {
+    return this.ui.standalone && this.trackedOriginal?.documentId === this.adapter.documentId;
+  }
   get canDownloadCopy() {
+    if (this.canDownloadTrackedOriginal) return true;
     const r = this.request;
     return this.ui.standalone && r?.documentId === this.adapter.documentId && r.status === "failed" &&
       r.failure !== undefined && r.failure !== "export";
   }
   downloadCopy() {
     if (!this.ui.standalone || this.continuation) return Promise.resolve(false);
-    return this.run(() => this.prepareSave(false, true));
+    return this.run(() => {
+      if (this.trackedOriginal?.documentId === this.adapter.documentId) {
+        const name = hwpxName(this.filename);
+        this.ui.download(this.trackedOriginal.bytes, name, `${this.adapter.documentId}:original:${++this.sequence}`);
+        this.notice = "변경 추적 이력이 그대로 포함된 원본 사본을 내려받았습니다.";
+        return true;
+      }
+      return this.prepareSave(false, true);
+    });
   }
   private async prepareSave(as: boolean, copy = false) {
-    this.continuation = null; // A fresh save supersedes any deferred switch.
+    if (this.canDownloadTrackedOriginal)
+      throw Error(trackedSaveRestriction);
     if (as && !this.ui.standalone) return false;
     // Every accepted attempt supersedes the old token, including prompt cancel
     // and export/dispatch failure. Never fall back to a previous download.
@@ -566,7 +583,7 @@ export class FileLifecycle {
         throw Error("저장 창이 열린 동안 문서 또는 저장 요청이 변경되었습니다. 다시 저장하세요.");
       phase = "export";
       const { bytes, documentId, revision } = this.ui.standalone
-        ? await exportCheckedLocalHwpx(this.adapter, current)
+        ? await exportCheckedDocumentHwpx(this.adapter, current)
         : this.adapter.exportChecked();
       Object.assign(request, { filename: name, documentId, revision });
       // Keep a private copy of the checked export, independent of the transport.
@@ -662,24 +679,12 @@ export class FileLifecycle {
     if (!pending || !exported || !file || !current()) return false;
     const selectedName = file.name;
     try {
-      if (
-        !matchesDownloadedHwpxName(pending.filename, selectedName) ||
-        file.size !== exported.length
-      )
-        throw Error(
-          "확인 대상의 파일명·크기가 다릅니다. 해당 요청으로 저장한 파일을 선택하세요.",
-        );
+      verifySavedHwpxMetadata(pending.filename, selectedName, exported.length, file.size);
       const bytes = new Uint8Array(await file.arrayBuffer());
       // Save/cancel/replace or another completion may have invalidated the token
       // while this file was being read. No old callback may promote a new request.
       if (!current()) return false;
-      if (
-        bytes.length !== exported.length ||
-        bytes.some((b, i) => b !== exported[i])
-      )
-        throw Error(
-          "저장 파일이 해당 요청의 HWPX와 다릅니다. 다시 저장하세요.",
-        );
+      verifySavedHwpxBytes(exported, bytes);
     } catch (error) {
       if (current()) {
         if (duringNativeSave) throw error;

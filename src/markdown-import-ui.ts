@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import {analyzeMarkdown,decodeMarkdownFile,markdownLimits,type MarkdownPlan} from './markdown-import.js';
 import type {FileLifecycle} from './file-lifecycle.js';
@@ -37,7 +38,7 @@ export function installMarkdownImport(host:NextHostAdapter,files:FileLifecycle){
         // The normal file transition owns preflight and atomic replacement.
         // Ordinary editor commands retain one live import Undo entry.
         closeEditorDialog(dialog, false);if(await files.openMarkdownCommands({source:text,mode:'report',acceptedDiagnostics:plan.diagnostics.map(d=>d.id),fitShortLastLine:true},context))host.binding=null;
-      }catch(error){if(dialog.open){message(String(error).replace(/^Error: /,''));lock(false);}else files.ui.error(error);}
+      }catch(error){if(dialog.open){message(editorFeedbackText(error));lock(false);}else files.ui.error(error);}
       finally{if(!doc.querySelector('dialog[open]')&&!files.busy)inputFocus();}
     };
     const select=(text:string)=>{
@@ -52,7 +53,7 @@ export function installMarkdownImport(host:NextHostAdapter,files:FileLifecycle){
           message('지원하지 않는 그림·링크·HTML은 마크다운 원문으로 남습니다.');confirm.focus();return;
         }
         void create(text,plan);
-      }catch(error){message(String(error).replace(/^Error: /,''));}
+      }catch(error){message(editorFeedbackText(error));}
     };
     source.addEventListener('input',()=>{choice=undefined;confirm.hidden=true;message('');});
     form.onsubmit=e=>{e.preventDefault();select(source.value);};
@@ -64,7 +65,7 @@ export function installMarkdownImport(host:NextHostAdapter,files:FileLifecycle){
         const text=decodeMarkdownFile(new Uint8Array(await file.arrayBuffer()));
         if(!dialog.open)return;if(!current())throw Error('문서가 변경되었습니다. 다시 가져오세요.');
         source.value=text;choice=undefined;confirm.hidden=true;lock(false);select(text);
-      }catch(error){if(dialog.open){message(String(error).replace(/^Error: /,''));lock(false);}}
+      }catch(error){if(dialog.open){message(editorFeedbackText(error));lock(false);}}
     };
     picker.onchange=()=>{const file=picker.files?.[0];picker.value='';void acceptFile(file);};
     dialog.addEventListener('dragover',e=>{if(e.dataTransfer?.types.includes('Files'))e.preventDefault();});

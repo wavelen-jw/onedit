@@ -1,3 +1,4 @@
+import { hasOpenDialog } from "./dialog-support.js";
 import {activeWorkset} from "./active-workset.js";
 import {subscribeWhileOpen} from "./ui-demand-lifetime.js";
 import { sidebarActionFor } from "./integration/a-view-menu.js";
@@ -44,7 +45,7 @@ export function mountPropertiesPresentation(doc:Document,editor:Interaction,pane
   let anchor:ReturnType<Interaction["capture"]>|undefined,scroll:{left:number;top:number}|undefined;
   const temporary=()=>mode!=="wide"||!pinned;
   const focusNode=()=>doc.getElementById("ui2-context-title")!;
-  const allowed=()=>!options.busy()&&!doc.querySelector("dialog[open]");
+  const allowed=()=>!options.busy()&&!hasOpenDialog(doc);
   const view=()=>sidebarActionFor(doc);
   const cancelDrafts=()=>{for(const form of panel.querySelectorAll("form"))form.dispatchEvent(new Event("rhwp:cancel-panel-draft"));};
   function restore(){

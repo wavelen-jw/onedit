@@ -1,3 +1,4 @@
+import { contextMenuAnchor, showContextMenuAt } from "./context-menu-placement.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import { subscribeWhileOpen } from "./ui-demand-lifetime.js";
 import { activeWorkset } from "./active-workset.js";
@@ -8,7 +9,7 @@ import {registerPopupLifetime} from './menu-lifetime.js';
 import type { Interaction } from "./interaction.js";
 import type { EditAction } from "./integration/a-edit-menu.js";
 import { ordered, sameContainer, type Position, type Selection } from "./model.js";
-import { pagePoint, pageScale } from "./integration/a-view-menu.js";
+import { pagePoint } from "./integration/a-view-menu.js";
 import { sameTableContextTarget, tableContextKey } from "./table-context.js";
 
 export function keepBodyContextSelection(selection: Selection, hit: Position) {
@@ -87,11 +88,7 @@ export function mountBodyContext(doc: Document, editor: Interaction, busy: () =>
   const open = (x: number, y: number) => {
     if (busy() || !eligible()) return;
     for (const menu of doc.querySelectorAll<HTMLDetailsElement>("#main-menu details[open]")) menu.open = false;
-    captured = editor.capture(); sync(); popup.hidden = false;
-    popup.style.left = popup.style.top = "8px";
-    const box = popup.getBoundingClientRect();
-    popup.style.left = `${Math.max(8, Math.min(x, win.innerWidth - box.width - 8))}px`;
-    popup.style.top = `${Math.max(8, Math.min(y, win.innerHeight - box.height - 8))}px`;
+    captured = editor.capture(); sync(); showContextMenuAt(popup, x, y);
     [...items.values()].find(i => !i.button.disabled&&!i.button.hidden)?.button.focus();
   };
   const openKeyboard = () => {
@@ -99,8 +96,7 @@ export function mountBodyContext(doc: Document, editor: Interaction, busy: () =>
     try {
       const rect = editor.adapter.rect(editor.selection.focus), page = pages.querySelector<HTMLElement>(`[data-page="${rect.pageIndex}"]`);
       if (!page) return;
-      const box = page.getBoundingClientRect(), scale = pageScale(page);
-      open(box.left + rect.x * scale, box.top + (rect.y + rect.height) * scale);
+      open(...contextMenuAnchor(page, rect.x, rect.y + rect.height));
     } catch (error) { close(true); feedback(String(error)); }
   };
   const pointer = (e: PointerEvent) => {

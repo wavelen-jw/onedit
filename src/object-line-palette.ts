@@ -1,3 +1,4 @@
+import { dismissPaletteOnEscape, fitPaletteAxis, paletteGridIndex } from "./palette-navigation.js";
 // UI-only color draft. The existing object Command remains the sole writer.
 // Common native palette presentation is observed; keyboard policy is Edit's.
 type PaletteOptions = { id: string; label: string; caption: string; allowNone?: boolean;
@@ -59,21 +60,12 @@ export function objectLinePalette(initial: string, signal: AbortSignal, config?:
     if (!validHex(color)) { b.className = 'color-sentinel'; b.textContent = color === 'none' ? '없음' : '유지'; b.setAttribute('aria-label', color === 'none' ? '단색 없음' : '혼합 / 유지'); }
     b.addEventListener('click', () => commit(color), {signal});
     b.addEventListener('keydown', e => {
-      if (e.isComposing || e.altKey || e.ctrlKey || e.metaKey) return;
-      const i = options.indexOf(b); let n: number;
-      switch (e.key) {
-        case 'ArrowLeft': n = Math.max(0, i - 1); break;
-        case 'ArrowRight': n = Math.min(options.length - 1, i + 1); break;
-        case 'ArrowUp': case 'ArrowDown': {
-          const columns = getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length;
-          n = Math.max(0, Math.min(options.length - 1, i + (e.key === 'ArrowUp' ? -columns : columns)));
-          break;
-        }
-        case 'Home': n = 0; break;
-        case 'End': n = options.length - 1; break;
-        default: return;
-      }
-      e.preventDefault(); e.stopPropagation(); focusOption(n);
+      if (e.isComposing || e.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey) return;
+      const columns = e.key === 'ArrowUp' || e.key === 'ArrowDown'
+        ? getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length : 1;
+      const next = paletteGridIndex(e.key, options.indexOf(b), options.length, columns);
+      if (next === undefined) return;
+      e.preventDefault(); e.stopPropagation(); focusOption(next);
     }, {signal});
     options.push(b); grid.append(b);
   }
@@ -104,7 +96,7 @@ export function objectLinePalette(initial: string, signal: AbortSignal, config?:
       popup.style.top='100%';popup.style.maxHeight=`${config.boundary.clientHeight}px`;popup.style.overflowY='auto';
       const clip=config.boundary.getBoundingClientRect(),anchor=row.getBoundingClientRect(),height=popup.getBoundingClientRect().height;
       const top=clip.top+config.boundary.clientTop,bottom=top+config.boundary.clientHeight;
-      popup.style.top=`${Math.max(top,Math.min(anchor.bottom,bottom-height))-anchor.top}px`;
+      popup.style.top=`${fitPaletteAxis(anchor.bottom,top,bottom,height)-anchor.top}px`;
     }
     focusOption(Math.max(0, options.findIndex(b => b.dataset.color === value)));
   };
@@ -115,9 +107,7 @@ export function objectLinePalette(initial: string, signal: AbortSignal, config?:
     }
   }, {signal});
   popup.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault(); e.stopImmediatePropagation(); close();
-    }
+    dismissPaletteOnEscape(e, close);
   }, {signal});
   // During native Tab, activeElement can transiently be body between blur/focus.
   // relatedTarget is the actual next focus; do not hide its input mid-transfer.

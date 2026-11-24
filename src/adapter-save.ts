@@ -3,8 +3,22 @@ import { siblingDocument } from "./core-runtime.js";
 import { result } from "./adapter-core.js";
 import { projectSemanticParts } from "./adapter-semantic.js";
 import { finishResponsiveWork } from "./responsive-work.js";
-import { retainLinkZOrder } from "./hwpx-link-zorder.js";
-import { retainPrintSettings } from "./hwpx-print-settings.js";
+import { extractLinkZOrder, rememberLinkZOrder, retainLinkZOrder } from "./hwpx-link-zorder.js";
+import { readPrintSettings, rememberPrintSettings, retainPrintSettings } from "./hwpx-print-settings.js";
+
+// Optional metadata already supported by the archive helpers is tracked per Core handle.
+export async function inspectHwpxPreservation(bytes: Uint8Array) {
+    const [zOrder, printSettings] = await Promise.all([
+        extractLinkZOrder(bytes, "local-open").catch(() => undefined),
+        readPrintSettings(bytes).catch(() => undefined),
+    ]);
+    return {zOrder, printSettings};
+}
+
+export function rememberHwpxPreservation(doc: object, metadata: Awaited<ReturnType<typeof inspectHwpxPreservation>>) {
+    rememberLinkZOrder(doc, metadata.zOrder);
+    rememberPrintSettings(doc, metadata.printSettings);
+}
 
 // Internal responsibility only; no state ownership or policy changes.
 function exportLosslessHwpx(this: RhwpAdapter) {
@@ -26,38 +40,38 @@ function exportLosslessHwpx(this: RhwpAdapter) {
     return bytes;
 }
 
-export function exportCheckedHwpx(this: RhwpAdapter) {
-    const bytes = exportLosslessHwpx.call(this);
-    const reopened = new RhwpAdapter(siblingDocument(this.doc, bytes));
+function* verifyCheckedReopen(a: RhwpAdapter, bytes: Uint8Array) {
+    const reopened = new RhwpAdapter(siblingDocument(a.doc, bytes));
     try {
-      const comparison = compareSemanticRows(reopened.semantic(), this.semantic());
-      let step = comparison.next();
-      while (!step.done) step = comparison.next();
-      if (!step.value) throw Error("HWPX 재열기 내용·서식 검사 실패");
+      const actual = yield* projectSemanticParts.call(reopened);
+      const expected = yield* projectSemanticParts.call(a);
+      if (!(yield* compareSemanticRows(actual, expected)))
+        throw Error("HWPX 재열기 내용·서식 검사 실패");
     } finally {
       reopened.doc.free();
     }
-    return { bytes, documentId: this.documentId, revision: this.revision };
-  }
+}
 
-// Retain the packed archive and cold semantic verification, with each
-// top-level list compared row by row so one large JSON string is unnecessary.
-export async function exportCheckedLocalHwpx(a: RhwpAdapter, current: () => boolean) {
-    const {documentId, revision} = a;
+export function exportCheckedHwpx(this: RhwpAdapter) {
+    const bytes = exportLosslessHwpx.call(this);
+    const verification = verifyCheckedReopen(this, bytes);
+    while (!verification.next().done) { /* Synchronous command verification. */ }
+    return {bytes, documentId: this.documentId, revision: this.revision};
+}
+
+export async function exportCheckedDocumentHwpx(a: RhwpAdapter, current: () => boolean) {
+    const {documentId, revision, doc} = a;
     if (!a.transientEdit && !a.viewerOnlyReason) a.completeLocalBodyFlow();
-    const linked = await retainLinkZOrder(a.doc,exportLosslessHwpx.call(a));
-    const bytes = await retainPrintSettings(a.doc,linked);
+    const linked = await retainLinkZOrder(doc, exportLosslessHwpx.call(a));
+    const bytes = await retainPrintSettings(doc, linked);
     if (!current()) throw Error("문서 작업 대상이 변경되었습니다. 다시 시도하세요.");
-    const reopened = new RhwpAdapter(siblingDocument(a.doc, bytes));
+    const verification = verifyCheckedReopen(a, bytes);
     try {
-      const actual = await finishResponsiveWork(projectSemanticParts.call(reopened), current);
-      const expected = await finishResponsiveWork(projectSemanticParts.call(a), current);
-      const equal = await finishResponsiveWork(compareSemanticRows(actual, expected), current);
-      if (!equal) throw Error("HWPX 재열기 내용·서식 검사 실패");
+      await finishResponsiveWork(verification, current);
       if (!current()) throw Error("문서 작업 대상이 변경되었습니다. 다시 시도하세요.");
       return {bytes, documentId, revision};
     } finally {
-      reopened.doc.free();
+      verification.return(undefined);
     }
 }
 

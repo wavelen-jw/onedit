@@ -109,16 +109,36 @@ export function markdownInlineFormat(run:MarkdownRun):Props {
   };
 }
 
+function markdownDraft(source: HwpDocument) {
+  const doc = siblingDocument(source);
+  try {
+    const adapter = new RhwpAdapter(doc), editor = new Interaction(adapter);
+    initializeBlankDocument(adapter);
+    return {doc, adapter, editor, dispose() {
+      try { editor.history.clear(); }
+      finally { doc.free(); }
+    }};
+  } catch (error) {
+    doc.free();
+    throw error;
+  }
+}
+
+function exportMarkdownDraft(a: RhwpAdapter, plan: NativeDocumentPlan) {
+  const {bytes} = a.exportChecked();
+  verifyMergedRoundtrip(a.doc, a, plan, bytes);
+  return {bytes, pageCount: a.pageCount};
+}
+
 export function captureMarkdownBody(target:RhwpAdapter,section:number,plan:NativeDocumentPlan){
-  const doc=siblingDocument(target.doc),a=new RhwpAdapter(doc),editor=new Interaction(a);
+  const {doc,adapter:a,editor,dispose}=markdownDraft(target.doc);
   try{
-    initializeBlankDocument(a);
     a.call('setPageDef',0,JSON.stringify(target.call('getPageDef',section)));
     const {locations}=applyDocumentPlan(editor,plan);
     const end=editor.selection.focus;
     if(end.kind!=='body'||end.sec!==0)throw Error('마크다운 끝 위치를 확인할 수 없습니다.');
     return {fragment:doc.captureBodyClipboard(0,0,0,end.para,end.offset),locations};
-  }finally{editor.history.clear();doc.free();}
+  }finally{dispose();}
 }
 
 function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?:boolean){
@@ -382,9 +402,8 @@ function* documentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?
 // Existing edit commands retain their local rollback; the entire draft is
 // discarded on deadline, stale binding, validation failure, or disconnect.
 export async function composeSdkDocument(source:HwpDocument,plan:NativeDocumentPlan,fitShortLines:boolean|undefined,checkpoint:()=>void){
-  const doc=siblingDocument(source),a=new RhwpAdapter(doc),editor=new Interaction(a);
+  const {adapter:a,editor,dispose}=markdownDraft(source);
   try{
-    initializeBlankDocument(a);
     const work=documentPlan(editor,plan,fitShortLines,true);
     let result!:ReturnType<typeof work.next>;
     do{
@@ -398,11 +417,10 @@ export async function composeSdkDocument(source:HwpDocument,plan:NativeDocumentP
       if(!result.done)await new Promise<void>(resolve=>setTimeout(resolve,0));
     }while(!result.done);
     checkpoint();
-    const exported=a.exportChecked();
-    verifyMergedRoundtrip(doc,a,plan,exported.bytes);
+    const exported=exportMarkdownDraft(a,plan);
     checkpoint();
-    return{bytes:exported.bytes,pageCount:a.pageCount,...result.value};
-  }finally{editor.history.clear();doc.free();}
+    return{...exported,...result.value};
+  }finally{dispose();}
 }
 
 export function composeMarkdownHwpx(source:HwpDocument,request:MarkdownRequest){
@@ -411,14 +429,12 @@ export function composeMarkdownHwpx(source:HwpDocument,request:MarkdownRequest){
 
 /** Internal trusted plan; never accept a caller-supplied MarkdownPlan on the wire. */
 export function composeDocumentPlan(source:HwpDocument,plan:NativeDocumentPlan,fitShortLastLine?:boolean){
-  const doc=siblingDocument(source),a=new RhwpAdapter(doc),editor=new Interaction(a);
+  const {adapter:a,editor,dispose}=markdownDraft(source);
   try{
-    initializeBlankDocument(a);
-    const result=applyDocumentPlan(editor,plan,fitShortLastLine),exported=a.exportChecked();
-    verifyMergedRoundtrip(doc,a,plan,exported.bytes);
-    return{bytes:exported.bytes,pageCount:a.pageCount,...result};
+    const result=applyDocumentPlan(editor,plan,fitShortLastLine);
+    return{...exportMarkdownDraft(a,plan),...result};
   }
-  finally{editor.history.clear();doc.free();}
+  finally{dispose();}
 }
 
 function verifyMergedRoundtrip(doc:HwpDocument,a:RhwpAdapter,plan:NativeDocumentPlan,bytes:Uint8Array){

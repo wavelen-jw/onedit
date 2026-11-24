@@ -11,3 +11,14 @@ export function managerTabs(root: HTMLElement, groups: readonly (readonly [strin
 export function visibleManagerControls(form: HTMLElement) {
   return [...form.querySelectorAll<HTMLElement>('button,input,select')].filter(n=>n.tabIndex>=0&&!(n as HTMLInputElement).disabled&&!n.closest('[hidden]'));
 }
+
+export function wrapManagerTab(form: HTMLElement, event: KeyboardEvent) {
+  if (event.key !== 'Tab' || event.isComposing || event.keyCode === 229) return;
+  const controls = visibleManagerControls(form);
+  if (!controls.length) return;
+  const index = controls.indexOf(form.ownerDocument.activeElement as HTMLElement);
+  const last = controls.length - 1;
+  if (index >= 0 && index !== (event.shiftKey ? 0 : last)) return;
+  event.preventDefault();
+  controls[event.shiftKey ? last : 0].focus();
+}

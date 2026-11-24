@@ -12,6 +12,10 @@ const color = (n: unknown) => typeof n === "number" ? `#${(n & 0xffffff).toStrin
 // Shape/picture line getters use COLORREF (low byte red), unlike CSS hex.
 const lineColor = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 0xffffff
   ? '#'+[n&255,(n>>8)&255,(n>>16)&255].map(v=>v.toString(16).padStart(2,'0')).join('') : undefined;
+function cssToColorRef(css: string): number {
+  const rgb = parseInt(css.slice(1), 16);
+  return ((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255);
+}
 export function mountHancomObjectDialog(form: HTMLFormElement, kind: "picture" | "textbox", props: Record<string, any>, f: Fields) {
   resetHancomObjectDialog(form);
   const original = [...form.childNodes], life = new AbortController(), signal = life.signal, dialog = form.closest("dialog")!;
@@ -117,7 +121,8 @@ export function mountHancomObjectDialog(form: HTMLFormElement, kind: "picture" |
     readLine=()=>{
       const validColor=palette.read();
       if(!width.value.trim()||!width.checkValidity()){switchTab(2);width.focus();width.reportValidity();throw Error('선 굵기는 0~25.4mm 범위로 입력하세요.');}
-      const rgb=parseInt(validColor.slice(1),16),borderColor=((rgb&255)<<16)|(rgb&0xff00)|((rgb>>16)&255),borderWidth=width.value===initialWidth?props.borderWidth:Math.round(Number(width.value)*7200/25.4);
+      const borderColor = cssToColorRef(validColor);
+      const borderWidth=width.value===initialWidth?props.borderWidth:Math.round(Number(width.value)*7200/25.4);
       return {...(borderColor!==props.borderColor?{borderColor}:{}),...(borderWidth!==props.borderWidth?{borderWidth}:{}),...readType()};
     };
   } else {
@@ -157,7 +162,26 @@ export function mountHancomObjectDialog(form: HTMLFormElement, kind: "picture" |
     margins(image,"그림 자르기","crop");margins(image,"그림 여백","padding");const effect=group(image,"그림 효과");field(effect,"효과",({RealPic:"효과 없음",GrayScale:"회색조",BlackWhite:"흑백",Pattern8x8:"무늬"}as Record<string,string>)[props.effect]??props.effect,"effect");numeric(effect,"밝기","brightness","%");numeric(effect,"대비","contrast","%");field(effect,"워터마크 효과",undefined,"watermark","checkbox");field(effect,"그림 반전",undefined,"imageInvert","checkbox");numeric(group(image,"투명도 설정"),"투명도","transparency","%");
   }else{
     const fill=group(panels[3],"채우기");field(fill,"색 채우기 없음",props.fillType==="none","fillNone","checkbox");field(fill,"색",props.fillType==="solid","fillSolid","checkbox");if(f.editLine&&props.fillType==='solid'&&props.fillPatType===-1&&lineColor(props.fillBgColor)){
-      const row=document.createElement('label'),input=document.createElement('input');input.type='text';input.value=lineColor(props.fillBgColor)!;input.dataset.objectFillColor='';input.setAttribute('aria-label','글상자 배경색');input.title='색을 #RRGGBB 형식으로 입력하세요.';row.append('면 색 ',input);fill.append(row);const priorRead=readLine;readLine=()=>{const value=input.value.trim();if(!/^#[0-9a-fA-F]{6}$/.test(value)){switchTab(3);input.focus();throw Error('배경색을 #RRGGBB로 입력하세요.');}const v=parseInt(value.slice(1,3),16)|(parseInt(value.slice(3,5),16)<<8)|(parseInt(value.slice(5,7),16)<<16);return{...priorRead(),...(v===props.fillBgColor?{}:{fillBgColor:v})};};
+      const row = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = lineColor(props.fillBgColor)!;
+      input.dataset.objectFillColor = '';
+      input.setAttribute('aria-label', '글상자 배경색');
+      input.title = '색을 #RRGGBB 형식으로 입력하세요.';
+      row.append('면 색 ', input);
+      fill.append(row);
+      const priorRead = readLine;
+      readLine = () => {
+        const value = input.value.trim();
+        if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
+          switchTab(3);
+          input.focus();
+          throw Error('배경색을 #RRGGBB로 입력하세요.');
+        }
+        const fillBgColor = cssToColorRef(value);
+        return {...priorRead(), ...(fillBgColor === props.fillBgColor ? {} : {fillBgColor})};
+      };
     }else field(fill,"면 색",lineColor(props.fillBgColor),"fillBgColor");field(fill,"무늬 색",color(props.fillPatColor),"fillPatColor");field(fill,"무늬 모양",props.fillPatType,"fillPatType");field(fill,"그라데이션",props.fillType==="gradient","fillGradient","checkbox");for(const [l,k]of [["유형","gradientType"],["기울임","gradientAngle"],["가로 중심","gradientCenterX"],["세로 중심","gradientCenterY"],["번짐 정도","gradientBlur"]])field(fill,l,props[k],k);field(fill,"그림",props.fillType==="image","fillImage","checkbox");field(fill,"그림 파일",undefined,"fillImageFile");field(fill,"문서에 포함",undefined,"fillImageEmbedded","checkbox");field(group(panels[3],"투명도 설정"),"투명도",props.fillAlpha,"fillAlpha","text","/255");
     margins(panels[4],"안쪽 여백","tbMargin");const text=group(panels[4],"속성");field(text,"세로 정렬",({Top:"위",Center:"가운데",Bottom:"아래"}as Record<string,string>)[props.tbVerticalAlign]??props.tbVerticalAlign,"tbVerticalAlign");field(text,"글자 방향 설정",undefined,"tbDirection","checkbox");field(text,"한 줄로 입력",undefined,"tbSingleLine","checkbox");const fieldGroup=group(panels[4],"필드");field(fieldGroup,"필드 이름",undefined,"tbFieldName");field(fieldGroup,"양식 모드에서 편집 가능",undefined,"tbForm","checkbox");
   }

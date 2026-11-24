@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
+import {browserRuntimeInventory} from './browser-runtime-inventory.mjs';
 import {bundleDevelopment} from './bundle-development.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));process.chdir(root);
 const sha=b=>createHash('sha256').update(b).digest('hex');
@@ -15,8 +16,20 @@ for(const [name,pin]of Object.entries(manifest.files)){
  catch(e){if(e.code!=='ENOENT')throw e;bytes=await fs.readFile(path.join(manifest.source,name));if(sha(bytes)!==pin)throw Error('Fixed source runtime hash mismatch: '+name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,bytes,{flag:'wx'});}
  if(sha(bytes)!==pin)throw Error('Development runtime hash mismatch: '+name);
 }
+// Standalone editor source packages intentionally do not include the SDK workspace.
+const sdkSource = await fs.stat('sdk/package.json').catch(error => {
+ if (error.code !== 'ENOENT') throw error;
+});
+if (sdkSource) {
+ execFileSync(process.execPath,['scripts/sync-sdk-contract.mjs'],{stdio:'inherit'});
+}
 if(process.argv.includes('--typecheck')){
  execFileSync(process.execPath,['node_modules/typescript/bin/tsc','--noEmit','-p','tsconfig.json'],{stdio:'inherit'});process.exit(0);
+}
+if (sdkSource) {
+ execFileSync(process.execPath,['node_modules/typescript/bin/tsc','-p','sdk/tsconfig.json'],{stdio:'inherit'});
+ execFileSync(process.execPath,['sdk/verify-wire-schema.mjs'],{stdio:'inherit'});
+ execFileSync(process.execPath,['sdk/verify-release-dist.mjs'],{stdio:'inherit'});
 }
 const selected=manifest.rev10FormatSnapshot;
 const runtimeNames=['rhwp.js','rhwp.d.ts','rhwp_bg.wasm','rhwp_bg.wasm.d.ts'];
@@ -25,7 +38,7 @@ if(selected?.sha256!==manifest.files['rhwp_bg.wasm'] ||
  throw Error('Private format snapshot Core mismatch');
 const files=[];
 async function walk(dir){for(const e of await fs.readdir(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isSymbolicLink())throw Error('Source symlink refused: '+p);if(e.isDirectory())await walk(p);else files.push(p);}}
-await walk('src');files.push('index.html','style.css','workspace-ui.css','development-runtime.json','scripts/build-development.mjs','scripts/bundle-development.mjs','scripts/prepare-build-tools.mjs','scripts/static-asset-policy.mjs','build-tools/package.json','build-tools/package-lock.json');
+await walk('src');files.push('index.html','style.css','workspace-ui.css','development-runtime.json','scripts/build-development.mjs','scripts/bundle-development.mjs','scripts/prepare-build-tools.mjs','scripts/static-asset-policy.mjs','scripts/browser-runtime-inventory.mjs','build-tools/package.json','build-tools/package-lock.json');
 const inputs={};for(const p of files.sort())inputs[p]=sha(await fs.readFile(p));
 const source=sha(Buffer.from(JSON.stringify(inputs))),out=path.join(root,'output/unified-development',source.slice(0,16));
 try{const prior=JSON.parse(await fs.readFile(path.join(out,'development-build.json'),'utf8'));if(prior.source!==source)throw Error('Existing candidate differs');for(const[p,pin]of Object.entries(prior.outputs))if(sha(await fs.readFile(path.join(out,p)))!==pin)throw Error('Existing candidate changed: '+p);console.log(JSON.stringify({status:'PASS',runtime:out,source,reused:true,WASM:manifest.files['rhwp_bg.wasm']}));process.exit(0);}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -38,6 +51,7 @@ await fs.mkdir(path.join(out,'development/core'),{recursive:true});for(const nam
 await fs.mkdir(path.join(out,'public'),{recursive:true});for(const e of await fs.readdir('public',{withFileTypes:true}))if(e.name!=='core')await fs.cp(path.join('public',e.name),path.join(out,'public',e.name),{recursive:true});
 for(const name of ['index.html','style.css','workspace-ui.css'])await fs.copyFile(name,path.join(out,name));
 await bundleDevelopment(root,out,source,manifest);
+await fs.writeFile(path.join(out,'runtime-files.json'),JSON.stringify(await browserRuntimeInventory(out),null,2)+'\n');
 const outputs={};async function hashOutputs(dir){for(const e of await fs.readdir(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())await hashOutputs(p);else outputs[path.relative(out,p)]=sha(await fs.readFile(p));}}await hashOutputs(out);
 await fs.writeFile(path.join(out,'development-build.json'),JSON.stringify({scope:'A non-product development; no release/candidate replacement',source,inputs,outputs,runtime:manifest},null,2)+'\n');
 console.log(JSON.stringify({status:'PASS',runtime:out,source,WASM:manifest.files['rhwp_bg.wasm']}));

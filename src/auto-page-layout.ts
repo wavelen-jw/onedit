@@ -4,6 +4,7 @@ type Anchor={page:number;x:number;y:number;screenX:number;screenY:number};
 export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
   let signature='',remembered:Anchor|undefined;
   let boxInputs='', pageGeometryChanged=true;
+  let measuredCount=0, widestPage=NaN;
   const pageStyles=new WeakMap<HTMLElement,{inline:string|null;pending:boolean;layout:string}>();
   // Pending fixed-size ink changes visibility, not page packing. Compare inline
   // layout inputs before asking the browser for computed style/geometry.
@@ -42,7 +43,12 @@ export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
     const inputs=JSON.stringify([available,s,box.paddingLeft,box.paddingRight]);
     if(!pageGeometryChanged && boxInputs===inputs)return false;
     const all=list();for(const page of all)updatePageStyle(page);
-    const widths=all.map(p=>n(p.style.width)),heights=all.map(p=>n(p.style.height));
+    widestPage=0;measuredCount=all.length;
+    const widths=all.map(p=>{
+      const width=parseFloat(p.style.width);
+      widestPage=Math.max(widestPage,width);
+      return width||0;
+    }),heights=all.map(p=>n(p.style.height));
     boxInputs=inputs;pageGeometryChanged=false;
     const key=JSON.stringify([available,s,widths,heights,box.paddingLeft,box.paddingRight]);if(key===signature)return false;
     const before=keep??remembered??anchor();signature=key;
@@ -78,5 +84,10 @@ export function mountAutoPageLayout(pages:HTMLElement,viewport:HTMLElement){
   }
   const observer=new MutationObserver(records=>{readPageChanges(records);if(pageGeometryChanged)refresh();});
   observer.observe(pages,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class','data-render-pending']});
-  return{anchor,refresh,dispose(){observer.disconnect();viewport.removeEventListener('scroll',note);}};
+  // Fit uses this width only while the measured direct pages still make up the whole list.
+  function measuredFitWidth(count:number) {
+    readPageChanges(observer.takeRecords());
+    if(!pageGeometryChanged&&count===measuredCount&&widestPage>0)return widestPage;
+  }
+  return{anchor,refresh,measuredFitWidth,dispose(){observer.disconnect();viewport.removeEventListener('scroll',note);}};
 }

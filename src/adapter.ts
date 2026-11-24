@@ -532,16 +532,21 @@ export class RhwpAdapter {
   open(bytes: Uint8Array) {
     if (this.transientEdit) throw Error("한글 조합을 확정하거나 취소한 뒤 문서를 여세요.");
     this.completeLocalBodyFlow();
-    const candidate = siblingDocument(this.doc, bytes);
+    this.adoptOpenedDocument(siblingDocument(this.doc, bytes));
+  }
+
+  /** Transfer a detached document after the caller's open admission. */
+  adoptOpenedDocument(candidate: HwpDocument) {
+    let locked: boolean;
     try {
+      if (this.transientEdit || candidate === this.doc)
+        throw Error("현재 문서를 교체할 수 없습니다.");
       result(candidate.getDocumentInfo());
-    } catch (e) {
-      candidate.free();
-      throw e;
+      locked = result<any[]>(candidate.getControls()).some(c => c.props?.Lock);
+    } catch (error) {
+      if (candidate !== this.doc) candidate.free();
+      throw error;
     }
-    const locked = result<any[]>(candidate.getControls()).some(
-      (c) => c.props?.Lock,
-    );
     this.doc.free();
     this.doc = candidate;
     this.documentLocked = locked;
@@ -826,16 +831,20 @@ export class RhwpAdapter {
     return result(invokeCore(this.doc,"getClipboardTarget",[p.sec,p.para,JSON.stringify(p.kind==="cell"?cellPath(p):[])]));
   }
   charProps(p: Position): Props {
+    return this.charPropsAtTextOffset(p, this.textOffset(p));
+  }
+  /** Shape runs already carry text offsets. GUI positions include inline control slots. */
+  charPropsAtTextOffset(p: Position, textOffset: number): Props {
     if (nested(p))
       return this.call(
         "getCellCharPropertiesAtByPath",
         p.sec,
         p.para,
         this.path(p),
-        p.offset,
+        textOffset,
       );
     return p.kind === "body"
-      ? this.call("getCharPropertiesAt", p.sec, p.para, this.textOffset(p))
+      ? this.call("getCharPropertiesAt", p.sec, p.para, textOffset)
       : this.call(
           "getCellCharPropertiesAt",
           p.sec,
@@ -843,7 +852,7 @@ export class RhwpAdapter {
           p.control,
           p.cell,
           p.cellPara,
-          p.offset,
+          textOffset,
         );
   }
   paraProps(p: Position): Props {

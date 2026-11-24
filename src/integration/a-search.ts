@@ -258,10 +258,17 @@ export class TextSearch {
     this.refresh(this.query, this.sensitive, this.cells);
   }
 }
+const searchOpeners = new WeakMap<Interaction, (replace: boolean) => void>();
+
+export function openEditorSearch(editor: Interaction, replace = false) {
+  searchOpeners.get(editor)?.(replace);
+}
+
 export function mountSearch(
   editor: Interaction,
   changed: () => void,
   closed: () => void,
+  blocked: () => boolean,
 ) {
   const root = document.createElement("dialog");
   root.id = "search-dialog";
@@ -471,11 +478,33 @@ export function mountSearch(
     }
   });
   root.addEventListener("close", () => { inputGuard.close(); closed(); });
+  function show(replace: boolean) {
+    if (root.open || blocked()) return;
+    inputGuard.open();
+    expired = "";
+    for (const action of ["next", "previous", "replace", "all"])
+      root.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!.disabled = false;
+    signature = "";
+    lastSearchOptions = undefined;
+    scopeError = "";
+    status.textContent = "";
+    dialogTarget = editor.capture();
+    scopeOrigin = editor.capture();
+    scopeSelection = structuredClone(editor.selection);
+    get("scope").value = "document";
+    search.setScope("document");
+    syncAll();
+    mode(replace);
+    root.querySelector("details")!.open = false;
+    showEditorDialog(root);
+    get("query").focus();
+  }
+  searchOpeners.set(editor, show);
   return {
     sync,
     previous() {
       if(root.open)return;
-      if(!get('query').value){this.show();return;}
+      if(!get('query').value){openEditorSearch(editor);return;}
       // Reuse the current dialog options; never reuse stale match addresses.
       search.query=get('query').value;search.sensitive=get('case').checked;search.cells=get('cells').checked;
       const prior=editor.capture();
@@ -486,25 +515,10 @@ export function mountSearch(
     get open() {
       return root.open;
     },
-    show(replace = false) {
-      inputGuard.open();
-      expired = "";
-      for (const action of ["next", "previous", "replace", "all"])
-        root.querySelector<HTMLButtonElement>(`[data-action="${action}"]`)!.disabled = false;
-      signature = "";
-      lastSearchOptions = undefined;
-      scopeError = "";
-      status.textContent = "";
-      dialogTarget = editor.capture();
-      scopeOrigin = editor.capture();
-      scopeSelection = structuredClone(editor.selection);
-      get("scope").value = "document";
-      search.setScope("document");
-      syncAll();
-      mode(replace);
-      root.querySelector("details")!.open = false;
-      showEditorDialog(root);
-      get("query").focus();
+    dispose() {
+      if (searchOpeners.get(editor) === show) searchOpeners.delete(editor);
+      inputGuard.dispose();
+      root.remove();
     },
   };
 }

@@ -1,3 +1,4 @@
+import { bindObjectSizeRatio, objectPointsToHu } from "./object-size-inputs.js";
 import type { Interaction } from "./interaction.js";
 import type { Command } from "./model.js";
 import { bindPanelDraft } from "./panel-draft.js";
@@ -15,13 +16,12 @@ export function mountPanelObjectSize(root:HTMLElement, editor:Interaction, kind:
   const draft=bindPanelDraft(form,editor,{...options,note,cancel,
     reset:s=>{initialWidth=String(s.width/100);initialHeight=String(s.height/100);width.value=initialWidth;height.value=initialHeight;factor=s.width/s.height;},
     command:s=>{
-      const w=width.value&&width.value!==initialWidth?Math.round(Number(width.value)*100):s.width;
-      const h=height.value&&height.value!==initialHeight?Math.round(Number(height.value)*100):s.height;
+      const w=width.value&&width.value!==initialWidth?objectPointsToHu(width.value):s.width;
+      const h=height.value&&height.value!==initialHeight?objectPointsToHu(height.value):s.height;
       if(w===s.width&&h===s.height)return;
       if(![w,h].every(n=>Number.isFinite(n)&&n>=(kind==="shape"?200:100)&&n<=72000))throw Error(`크기는 ${kind==="shape"?2:1}~720pt 범위로 입력하세요. 기존 값은 변경 전 유지됩니다.`);
       return s.command(w,h);
     }});
-  width.addEventListener("input",()=>{if(ratio.checked&&width.value&&Number(width.value)>0)height.value=String(Math.round(Number(width.value)*100/factor)/100);});
-  height.addEventListener("input",()=>{if(ratio.checked&&height.value&&Number(height.value)>0)width.value=String(Math.round(Number(height.value)*100*factor)/100);});
+  bindObjectSizeRatio(width, height, ratio, () => factor);
   return {sync(){if(!root.hidden)draft.sync();},dispose(){draft.dispose();form.remove();}};
 }

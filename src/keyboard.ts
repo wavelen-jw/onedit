@@ -1,6 +1,8 @@
+import { forwardDeleteCommand, lineBreakCommand } from "./text-edit-commands.js";
+import { characterStyleCommand, characterStyleShortcut } from "./character-style-commands.js";
 import { nested, type Command, type Selection } from "./model.js";
 import { relativeCharacterShortcut } from "./character-increments.js";
-import { hangingIndentCommand } from "./paragraph-adjustments.js";
+import { hangingIndentCommand, paragraphAlignmentCommand } from "./paragraph-adjustments.js";
 import { hancomKeyLink } from "./hancom-key-links.js";
 import { hancomWebKey, shortcutPlatform, type ShortcutPlatform } from "./hancom-web-shortcuts.js";
 
@@ -88,18 +90,15 @@ export function routeKey(e: KeyInput, s: Selection, platform = shortcutPlatform(
     const relative = relativeCharacterShortcut(e.key, e.code);
     if (relative) return command({ type: "char-relative", change: relative });
     const letter = /^Key[BIPSU]$/.test(e.code) ? e.code.slice(3).toLowerCase() : key;
-    if (letter === "b") return command({ type: "bold" });
-    if (letter === "i") return command({ type: "toggle-char", property: "italic" });
-    if (letter === "u") return command({ type: "underline" });
-    if (letter === "p" || letter === "s")
-      return command({ type: "script", mode: letter === "p" ? "superscript" : "subscript" });
+    const style = characterStyleShortcut(letter);
+    if (style) return command(style);
   }
   // Hancom paragraph alignment. C/R/M stay browser-owned (DevTools/reload/profile).
   if (e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey) {
     const letter = /^KeyL$/.test(e.code) ? e.code.slice(3).toLowerCase() : key;
     if (letter === "l") {
       if (nested(s.focus)) return { kind: "unsupported", message: "중첩 셀 문단 정렬은 현재 Core 연결에서 미지원입니다." };
-      return command({ type: "paragraph", props: { alignment: "left" } });
+      return command(paragraphAlignmentCommand("left"));
     }
   }
   // User restored native outline shortcut. Ctrl+C remains copy in text contexts;
@@ -129,7 +128,7 @@ export function routeKey(e: KeyInput, s: Selection, platform = shortcutPlatform(
     if (key === "p") return {kind:"print"};
     if (key === "s") return { kind: "save" };
     if (key === "y") return { kind: "history", redo: true };
-    if (key === "b") return command({ type: "bold" });
+    if (key === "b") return command(characterStyleCommand("bold"));
     if (e.metaKey && key === "e" && s.kind === "cells")
       return command({ type: "clear-cells" });
     if (key === "a") return view("all");
@@ -141,7 +140,7 @@ export function routeKey(e: KeyInput, s: Selection, platform = shortcutPlatform(
   if (e.altKey && !ctrl && !e.shiftKey && (key === "l" || key === "t"))
     return { kind: "format", target: key === "l" ? "char" : "paragraph" };
   if (primary && e.shiftKey && e.code === "Backquote")
-    return command(hangingIndentCommand);
+    return command(hangingIndentCommand());
   if (plain && !e.shiftKey) {
     if (e.key === "F5") return view("f5");
     if (e.key === "F3") return view("block");
@@ -186,11 +185,12 @@ export function routeKey(e: KeyInput, s: Selection, platform = shortcutPlatform(
     return view("move");
   if (["Delete", "Backspace", "Enter"].includes(e.key)) {
     if (plain && e.shiftKey && e.key === "Enter")
-      return command({ type: "break", soft: true });
-    if (plain && !e.shiftKey)
-      return e.key === "Enter"
-        ? command({ type: "break" })
-        : command({ type: "delete", backward: e.key === "Backspace" });
+      return command(lineBreakCommand(true));
+    if (plain && !e.shiftKey) {
+      if (e.key === "Enter") return command(lineBreakCommand());
+      if (e.key === "Delete") return command(forwardDeleteCommand(s));
+      return command({ type: "delete", backward: true });
+    }
     // Ctrl+Alt+Delete belongs to the OS.
     if (ctrl && e.altKey)
       return { kind: "browser" };

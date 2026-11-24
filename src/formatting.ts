@@ -1,3 +1,4 @@
+import { lineSpacingMode } from "./line-spacing.js";
 import { cellPaddingKeys } from "./cell-layout.js";
 import { normalizeUnderlineChange } from "./line-position.js";
 import { summarizeFormatValues } from "./format-value-state.js";
@@ -18,9 +19,16 @@ export const borderLineStyles = [
   ["2", "파선", "dashed", "6 3"],
   ["3", "점선", "dotted", "2 2"],
 ] as const;
+export const borderLineStyle = (type: string | number) => borderLineStyles.find(([value]) => value === String(type));
+
 export const borderLineOptions: [string, string][] = borderLineStyles.map(
   ([value, label]) => [value, label],
 );
+// Core stores border widths as indices into this millimetre scale.
+export const borderWidthsMm = [0.1, 0.12, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 1, 1.5, 2, 3, 4, 5] as const;
+export const borderWidthOptions: [string, string][] = borderWidthsMm.map((width, index) => [
+  String(index), `${Number.isInteger(width) ? width.toFixed(1) : width} mm`,
+]);
 export const metricKeys = [
   "ratios",
   "spacings",
@@ -162,7 +170,7 @@ export function toCoreParagraph(p: Props): Props {
   // Core paragraph IR is 2x HWPUNIT; serializer writes pt * 100.
   if (
     "lineSpacing" in out &&
-    ["Fixed", "Minimum", "SpaceOnly"].includes(String(out.lineSpacingType))
+    lineSpacingMode(out.lineSpacingType)?.[2] === "pt"
   )
     out.lineSpacing = Math.round(Number(out.lineSpacing) * 200);
   for (const k of ["indent", "marginLeft", "marginRight"])
@@ -173,6 +181,10 @@ export function toCoreParagraph(p: Props): Props {
       out.spacingUnitScale = 1;
     }
   return out;
+}
+export function assertFormatFontName(name: string) {
+  if (!name.trim() || name.length > 200 || /[\u0000-\u001f]/.test(name))
+    throw Error("글꼴 이름을 확인하세요.");
 }
 export function toCoreCharacter(p: Props): Props {
   const out = { ...p };

@@ -1,7 +1,7 @@
 import type { Interaction } from "./interaction.js";
 import type { Command, Props } from "./model.js";
 import type { ParagraphListChange } from "./paragraph-lists.js";
-import type { ParagraphAdjustment } from "./paragraph-adjustments.js";
+import { paragraphAdjustmentCommand, type ParagraphAdjustment } from "./paragraph-adjustments.js";
 import { sameFormatTarget, type formatInputGuard } from "./integration/a-format-input-guard.js";
 
 // Per-guard synchronous lock; all compatibility exports share this one instance.
@@ -35,7 +35,7 @@ export function submitFormatDraft(
     const adjustment = readAdjustment?.();
     if(adjustment && (list || Object.keys(props).length)) throw Error("문단 증감과 다른 서식은 따로 적용하세요. 초안은 유지됩니다.");
     if (adjustment || list || Object.keys(props).length)
-      execute(adjustment ? { type: "paragraph-relative", change: adjustment } : list ? { type: "paragraph-list", list, props } : kind==='cell'&&cellBlock ? {type:'cell',props,cellScope:'block'} : { type: kind, props }, captured);
+      execute(adjustment ? paragraphAdjustmentCommand(adjustment) : list ? { type: "paragraph-list", list, props } : kind==='cell'&&cellBlock ? {type:'cell',props,cellScope:'block'} : { type: kind, props }, captured);
     guard.consume();
     return true;
   } finally {

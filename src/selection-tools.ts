@@ -209,7 +209,13 @@ export function mountSelectionTools(doc:Document,editor:Interaction,options:{bus
   doc.addEventListener('compositionstart',e=>{if(!popup.contains(e.target as Node)){composing=true;hide();}},{capture:true,signal});
   doc.addEventListener('compositionend',()=>{composing=false;},{capture:true,signal});
   doc.addEventListener('keydown',e=>{
-    if(popup.contains(e.target as Node)){if(e.key==='Escape'&&!e.isComposing&&e.keyCode!==229){e.preventDefault();e.stopPropagation();cancelled=true;dismissed=true;hide();options.focus();}return;}
+    if(popup.contains(e.target as Node)){
+      if(e.key==='Escape'&&!e.isComposing&&e.keyCode!==229){
+        if(e.target instanceof Element&&e.target.closest('.text-color-popup:not([hidden])'))return;
+        e.preventDefault();e.stopPropagation();cancelled=true;dismissed=true;hide();options.focus();
+      }
+      return;
+    }
     if(e.target===doc.getElementById('input')&&!e.isComposing&&e.keyCode!==229&&!e.altKey&&!e.metaKey){
       if(e.ctrlKey&&!e.shiftKey&&e.key.toLowerCase()==='a')cancelled=false;
       if(e.shiftKey&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown'].includes(e.key)){cancelled=false;dismissed=false;return;}

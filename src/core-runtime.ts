@@ -5,7 +5,7 @@ import type {PassiveOwnerBatchPort} from './passive-owner-batch.js';
 import { screenPageReceiptRuntimeSha256 } from "./screen-page-receipt-binding.js";
 import {tablePropertyProjectionRuntimeSha256} from "./table-property-projection-binding.js";
 import { HwpDocument, HwpBodyClipboard } from '../development/core/rhwp.js';
-import { verifiedAssetBytes } from './verified-asset-cache.js';
+import { takeRootCoreModule } from './core-module-loading.js';
 import {startupNow,startupStage} from './startup-timing.js';
 
 import { isB338OwnerTrialDigest } from "./b338-focused-owner-trial.js";
@@ -179,19 +179,17 @@ function blank(doc: HwpDocument) {
 // One checked byte source, one compiled module. Cache metadata, a manifest or
 // a version/user claim never supplies the runtime identity.
 export async function loadCoreRuntime() {
-  let stage=startupNow();
-  const asset = new URL('./'+coreRuntimeSha256+'-rhwp_bg.wasm', import.meta.url);
-  const bytes = await verifiedAssetBytes(asset, coreRuntimeSha256, 'wasm');
-  const sha256 = coreRuntimeSha256; // verifiedAssetBytes checks the actual bytes, including cache hits.
-  startupStage('core-verified-bytes',stage);stage=startupNow();
-  const module = await WebAssembly.compile(bytes);
-  startupStage('core-compile',stage);stage=startupNow();
+  const sha256 = coreRuntimeSha256;
   // wasm-bindgen init/initSync may return a previously initialized instance.
   // A private, fresh glue module has no previous instance to substitute. Pass
   // the exact compiled module; its initialization cannot fetch another WASM.
   const glue = new URL('../development/core/rhwp.js', import.meta.url);
   glue.searchParams.set('ui-runtime', crypto.randomUUID());
-  const api = await import(glue.href) as typeof import('../development/core/rhwp.js');
+  const [module, api] = await Promise.all([
+    takeRootCoreModule(),
+    import(glue.href) as Promise<typeof import('../development/core/rhwp.js')>,
+  ]);
+  const stage=startupNow();
   await api.default({ module_or_path: module });
   startupStage('core-private-init',stage);
   // Active Workset observes native dispatch without enabling the M cache.

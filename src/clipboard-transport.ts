@@ -1,11 +1,8 @@
 import { clipboardPicture, hancomMixedPicture, imageOnly, type HancomMixedPicture } from "./clipboard-image.js";
 import { hasHancomClipboardMetadata } from "./external-text-format.js";
 import { PasteFormatUnavailable } from "./paste-format-fallback.js";
-import {
-  CLIPBOARD_MIME,
-  MAX_CLIPBOARD_BYTES,
-  type ClipboardData,
-} from "./clipboard.js";
+import type { ClipboardData } from "./clipboard.js";
+import { CLIPBOARD_MIME, hasClipboardMarker, MAX_CLIPBOARD_BYTES } from "./clipboard-envelope.js";
 export const MARKDOWN_FLAVORS = ["text/markdown", "web text/markdown"] as const;
 export type ClipboardRead = ClipboardData & { plainAlternative?: string; markdown?: string; mixedPicture?: HancomMixedPicture };
 export type NativePastePayload = {files: File[]; advertisedFiles?: boolean; hancomQaPrepared?: boolean; html: string; text: string; structured?: string; markdown?: string};
@@ -77,11 +74,6 @@ export async function writeClipboard(data: ClipboardData): Promise<string> {
       ? "HTML 클립보드 (RHWP fragment 포함)"
       : "텍스트 클립보드 (서식 제외)";
 }
-export async function readPasteFiles(files: File[], html: string, text: string): Promise<ClipboardData> {
-  if (files.length !== 1) throw new PasteFormatUnavailable("그림 파일 한 개만 붙여넣을 수 있습니다.", text);
-  validateImageOnly(html, text, files[0].name);
-  return {text:"",html:"",image:await bounded(clipboardPicture(files[0],html))};
-}
 function validateImageOnly(html: string, text: string, fileName?: string) {
   try { imageOnly(html, text, fileName); }
   catch (e) { throw new PasteFormatUnavailable(e instanceof Error ? e.message : String(e), text); }
@@ -98,19 +90,46 @@ async function readHancomMixed(html: string, text: string, images: readonly Blob
     throw new PasteFormatUnavailable(error instanceof Error ? error.message : "한/글 그림 원본을 확인할 수 없습니다.", text);
   }
 }
-// No second clipboard read, permission request, URL fetch or source substitution.
-// These strings/files were synchronously supplied by the browser paste event.
-export async function readNativePaste(data:NativePastePayload):Promise<ClipboardRead>{
-  for(const value of [data.html,data.text,data.structured??"",data.markdown??""])
-    if(new TextEncoder().encode(value).byteLength>MAX_CLIPBOARD_BYTES*2)throw Error("클립보드 크기 제한을 초과했습니다.");
-  if(data.structured)return{text:data.text,html:data.html,structured:data.structured};
-  const mixed = await readHancomMixed(data.html, data.text, data.files, data.files[0]?.name);
+async function choosePasteFormat(
+  html: string,
+  text: string,
+  readImages: () => readonly Blob[] | Promise<readonly Blob[]>,
+  readMarkdown: () => string | undefined | Promise<string | undefined>,
+  missingImageReason?: string,
+): Promise<ClipboardRead> {
+  // An RHWP envelope is the authoritative fragment even when the browser
+  // supplies an alternate thumbnail. The paste command validates the envelope.
+  if (hasClipboardMarker(html)) return { html, text };
+
+  const images = await readImages();
+  const image = images[0];
+  const fileName = image instanceof File ? image.name : undefined;
+  const mixed = await readHancomMixed(html, text, images, fileName);
   if (mixed) return mixed;
-  if(data.files.length)return readPasteFiles(data.files,data.html,data.text);
-  if(data.advertisedFiles && !data.html.includes("data-rhwp-next-clipboard"))
-    throw new PasteFormatUnavailable("브라우저에서 클립보드 파일 데이터를 읽을 수 없습니다.",data.text);
-  if(!data.html&&!data.text&&!data.markdown)throw new PasteFormatUnavailable("붙일 수 있는 클립보드 내용이 없습니다.");
-  return{text:data.text || data.markdown || "",html:data.html,markdown:data.markdown};
+  if (image) {
+    if (images.length !== 1)
+      throw new PasteFormatUnavailable("그림 파일 한 개만 붙여넣을 수 있습니다.", text);
+    validateImageOnly(html, text, fileName);
+    return { text: "", html: "", image: await bounded(clipboardPicture(image, html)) };
+  }
+  if (missingImageReason) throw new PasteFormatUnavailable(missingImageReason, text);
+
+  const markdown = await readMarkdown();
+  if (!html && !text && !markdown)
+    throw new PasteFormatUnavailable("붙일 수 있는 클립보드 내용이 없습니다.");
+  return { text: text || markdown || "", html, markdown };
+}
+
+// The browser paste event owns these synchronously captured strings and files.
+export async function readNativePaste(data: NativePastePayload): Promise<ClipboardRead> {
+  for (const value of [data.html, data.text, data.structured ?? "", data.markdown ?? ""])
+    if (new TextEncoder().encode(value).byteLength > MAX_CLIPBOARD_BYTES * 2)
+      throw Error("클립보드 크기 제한을 초과했습니다.");
+  if (data.structured) return { text: data.text, html: data.html, structured: data.structured };
+  return choosePasteFormat(
+    data.html, data.text, () => data.files, () => data.markdown,
+    data.advertisedFiles ? "브라우저에서 클립보드 파일 데이터를 읽을 수 없습니다." : undefined,
+  );
 }
 export async function readClipboard(plainOnly = false): Promise<ClipboardRead> {
   if (!navigator.clipboard?.read)
@@ -137,21 +156,17 @@ export async function readClipboard(plainOnly = false): Promise<ClipboardRead> {
     const plainAlternative = await read("text/plain").catch(() => "");
     return { text: "", html: "", structured, plainAlternative };
   }
-  const html = await read("text/html"),
-    text = await read("text/plain");
-  // Preserve existing immutable RHWP fragments before alternate raster data.
-  if (html.includes("data-rhwp-next-clipboard")) return {text,html};
-  const imageType = ["image/png", "image/jpeg"].find(type => item.types.includes(type));
-  const raster = imageType ? await bounded(item.getType(imageType)) : undefined;
-  const mixed = await readHancomMixed(html, text, raster ? [raster] : []);
-  if (mixed) return mixed;
-  if (raster) {
-    validateImageOnly(html,text);
-    return {text:"",html:"",image:await bounded(clipboardPicture(raster,html))};
-  }
-  if (item.types.some(type=>type.startsWith("image/")))
-    throw new PasteFormatUnavailable("브라우저가 제공한 그림 형식을 지원하지 않습니다. PNG/JPEG 데이터가 필요합니다.", text);
-  const markdown = await read("text/markdown") || await read("web text/markdown");
-  if (!html && !text && !markdown) throw new PasteFormatUnavailable("붙일 수 있는 클립보드 내용이 없습니다.");
-  return { text: text || markdown, html, markdown };
+  const html = await read("text/html"), text = await read("text/plain");
+  return choosePasteFormat(
+    html,
+    text,
+    async () => {
+      const raster = ["image/png", "image/jpeg"].find(type => item.types.includes(type));
+      return raster ? [await bounded(item.getType(raster))] : [];
+    },
+    async () => await read("text/markdown") || await read("web text/markdown"),
+    item.types.some(type => type.startsWith("image/"))
+      ? "브라우저가 제공한 그림 형식을 지원하지 않습니다. PNG/JPEG 데이터가 필요합니다."
+      : undefined,
+  );
 }

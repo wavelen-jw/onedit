@@ -14,7 +14,7 @@ export function mountProductInfo(doc: Document, panel: HTMLElement, busy: () => 
   const intro = doc.createElement('p'); intro.className = 'product-intro';
   intro.textContent = '브라우저에서 쓰는 한글 문서 편집기';
   const buildBox = doc.createElement('div'); buildBox.className = 'product-build';
-  const version = doc.createElement('p'); version.textContent = '제품 버전 0.1.0 · 개발 중';
+  const version = doc.createElement('p'); version.textContent = '제품 버전 1.2.0';
   const tab = doc.createElement('p'), server = doc.createElement('p');
   // The running module URL belongs to this tab even after the public entry changes.
   const assetDirectory = new URL('./', import.meta.url);

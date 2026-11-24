@@ -5,6 +5,19 @@ import { inlineCellPicture } from './inline-cell-picture.js';
 export const cellPictureSizeNote='일반셀 단일 인라인 그림의 크기만 변경합니다. 배치·교체·삭제·설명문·자르기 편집은 이 입구에서 지원하지 않습니다. 미변경 값과 원본 자원은 유지합니다.';
 export const cellPicturePropertiesHold=cellPictureSizeNote;
 export type PictureFile = { bytes: Uint8Array; extension: 'png'|'jpg'; naturalWidth: number; naturalHeight: number };
+export function pictureInitialSize(
+  file: Pick<PictureFile, 'naturalWidth' | 'naturalHeight'>,
+  frame?: {width: number; height: number},
+) {
+  const sourceWidth = frame?.width ?? file.naturalWidth * 75;
+  const sourceHeight = frame?.height ?? file.naturalHeight * 75;
+  const scale = Math.max(100 / Math.min(sourceWidth, sourceHeight), Math.min(1, 72000 / Math.max(sourceWidth, sourceHeight)));
+  const width = Math.round(sourceWidth * scale);
+  const height = Math.round(sourceHeight * scale);
+  if (Math.max(width, height) > 72000 || Math.min(width, height) < 100)
+    throw Error('현재 그림 크기 범위에서 원본 비율을 유지할 수 없습니다.');
+  return {width, height};
+}
 export type PictureChange = { action:'insert'; file:PictureFile; width:number; height:number; placement?:string; replaceSelection?:true } | {action:'replace';file:PictureFile} | {action:'delete'} | {action:'properties';width?:number;height?:number;treatAsChar?:boolean;textWrap?:string;description?:string};
 export function imageDimensions(b:Uint8Array): {width:number;height:number;extension:'png'|'jpg'} {
   if(b.length>=24&&[137,80,78,71,13,10,26,10].every((v,i)=>b[i]===v)) {const v=new DataView(b.buffer,b.byteOffset,b.byteLength);return {width:v.getUint32(16),height:v.getUint32(20),extension:'png'};}
@@ -19,6 +32,26 @@ export function pictureFile(file:PictureFile) {
   const dimensions=imageDimensions(b);if(dimensions.width!==file.naturalWidth||dimensions.height!==file.naturalHeight||dimensions.extension!==file.extension)throw Error('그림 원본 정보가 일치하지 않습니다.');
   for(const n of [file.naturalWidth,file.naturalHeight]) if(!Number.isInteger(n)||n<1||n>20000) throw Error('그림 원본 크기가 지원 범위를 벗어났습니다.');
   if(file.naturalWidth*file.naturalHeight>40000000)throw Error('그림은 4천만 화소 이하만 지원합니다.');
+}
+/** Validate the unmodified bytes and the decoded pixel frame for each picture entry point. */
+export async function decodePictureBytes(
+  bytes: Uint8Array<ArrayBuffer>,
+  source?: Blob,
+): Promise<PictureFile> {
+  const {width, height, extension} = imageDimensions(bytes);
+  const picture = {bytes, extension, naturalWidth: width, naturalHeight: height};
+  pictureFile(picture);
+  const bitmap = source
+    ? await createImageBitmap(source)
+    : await createImageBitmap(new Blob([bytes], {type: extension === 'png' ? 'image/png' : 'image/jpeg'}),
+        {imageOrientation: 'none'});
+  try {
+    if (bitmap.width !== width || bitmap.height !== height)
+      throw Error('그림 원본 크기와 브라우저 해석이 다릅니다. 원본은 변경하지 않았습니다.');
+    return picture;
+  } finally {
+    bitmap.close();
+  }
 }
 export function pictureCatalog(a:RhwpAdapter) {
  const body=bodyParagraphOwners(a);

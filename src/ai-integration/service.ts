@@ -6,6 +6,7 @@ import {captureRange,readRange,replacementText,current,type Capture} from './sel
 import {ExternalHost,HostError,sha256} from '../host-v2.js';
 import {composeDocumentPlan,composeSdkDocument} from '../markdown-compose.js';
 import {AiNativeRange,AiNativeError} from '../ai-native-range.js';
+import {inspectHwpxPreservation,rememberHwpxPreservation} from '../adapter-save.js';
 import {assertSafeHwpxEntryNames} from '../hwpx-open-boundary.js';
 import {analyzeMarkdown} from '../markdown-import.js';
 import {coreRuntimeIdentity,isCheckedExternalSibling} from '../core-runtime.js';
@@ -257,6 +258,7 @@ export class AIService {
   try{
    need(identity&&detached&&inspection.format===file.format&&coreRuntimeIdentity(detached)===identity&&isCheckedExternalSibling(original,detached),
     'UNSUPPORTED_UNSAFE_FILE','파일 검사 결과가 현재 편집기의 런타임과 다릅니다.');
+   const metadata=file.format==='hwpx'&&file.scope==='edit'?await inspectHwpxPreservation(bytes):undefined;
    need(await sha256(bytes)===file.sha256,'UNSUPPORTED_UNSAFE_FILE','검사 중 파일이 바뀌었습니다.');
    guard();
    await this.auth('openDocument',b,authorization);
@@ -268,6 +270,7 @@ export class AIService {
     ...(file.fileName?{fileName:file.fileName}:{})};
    this.replacingOpen=true;
    try{
+    if(metadata)rememberHwpxPreservation(detached!,metadata);
     const owned=detached!;detached=undefined; // adopter consumes the handle, including on refusal
     this.adopt(bytes,file.destination,false,source,owned);
     state.usedDocuments.add(file.destination.documentId);state.usedCopies.add(file.destination.workingCopyId);

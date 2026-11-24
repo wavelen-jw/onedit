@@ -10,7 +10,8 @@ import type { Interaction } from "./interaction.js";
 import type { Props } from "./model.js";
 import { toCoreParagraph, type FormatState } from "./formatting.js";
 import { formatMenuState } from "./integration/a-format-menu.js";
-import { bindQuickDraft, quickSpacingTypes } from "./quick-format.js";
+import { bindQuickDraft } from "./quick-format.js";
+import { lineSpacingMode } from "./line-spacing.js";
 import { mountContextProperties } from "./context-properties.js";
 import type { Command } from "./model.js";
 import { mountPropertiesPresentation } from "./properties-presentation.js";
@@ -60,7 +61,7 @@ export function mountPropertiesPanel(doc: Document, editor: Interaction, busy: (
   let initial: Record<string,string>={};
   const draft=bindQuickDraft(form,editor,busy,"paragraph",[...fields.values(),apply,cancel],state=>{
     initial={};for(const[key,field]of fields){const v=state[key];initial[key]=typeof v==="number"||typeof v==="string"?paragraphFieldText(key,v):"";field.value=initial[key];markFormatValue(field,formatValueState(state,key));}
-    const type=quickSpacingTypes.find(([v])=>v===state.lineSpacingType)?.[1];spacing.textContent=type&&state.lineSpacing!==undefined?`줄 간격: ${type} · ${state.lineSpacing}${state.lineSpacingType==="Percent"?"%":"pt (근사 조회)"}`:`줄 간격: ${formatValueHint(["lineSpacing","lineSpacingType"].some(k=>formatValueState(state,k)==="unavailable")?"unavailable":"mixed")}`;note.textContent="빈칸·혼합·미조회는 유지 · 변경한 필드만 적용 · 첫 줄 음수는 내어쓰기";note.title=note.textContent;
+    const type=lineSpacingMode(state.lineSpacingType)?.[1];spacing.textContent=type&&state.lineSpacing!==undefined?`줄 간격: ${type} · ${state.lineSpacing}${state.lineSpacingType==="Percent"?"%":"pt (근사 조회)"}`:`줄 간격: ${formatValueHint(["lineSpacing","lineSpacingType"].some(k=>formatValueState(state,k)==="unavailable")?"unavailable":"mixed")}`;note.textContent="빈칸·혼합·미조회는 유지 · 변경한 필드만 적용 · 첫 줄 음수는 내어쓰기";note.title=note.textContent;
   },()=>panelParagraphDelta(initial,Object.fromEntries([...fields].map(([k,e])=>[k,e.value]))),execute,restoreFocus,note);
   // Use the same Escape cancellation path as every other quick draft.
   cancel.onclick=()=>form.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true}));

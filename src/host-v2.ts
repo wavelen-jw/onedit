@@ -1,5 +1,6 @@
 import { composeMarkdownHwpx } from "./markdown-compose.js";
 import { assertSafeHwpxEntryNames } from "./hwpx-open-boundary.js";
+import { exportCheckedDocumentHwpx, inspectHwpxPreservation, rememberHwpxPreservation } from "./adapter-save.js";
 import { RhwpAdapter } from "./adapter.js";
 import { siblingDocument } from "./core-runtime.js";
 import { type Position, type Selection, copy, paraIndex } from "./model.js";
@@ -93,6 +94,7 @@ export class ExternalHost {
   private captures = new Map<string, Capture>();
   private proposals = new Map<string, Proposal>();
   private saves = new Map<string, SaveTicket>();
+  private pendingExports = 0;
   private sequence = 0;
   private acknowledgedSequence = 0;
   constructor(readonly host: NextHostAdapter) {}
@@ -546,19 +548,27 @@ export class ExternalHost {
           "INVALID_DOCUMENT",
           "30 MiB 이하 HWPX bytes가 필요합니다.",
         );
-        assertSafeHwpxEntryNames(p.bytes);
-        // Reuse the same Core constructor for isolated read preflight before
-        // the existing open path retires the old document and its History.
-        const probe = new RhwpAdapter(siblingDocument(this.a.doc, p.bytes));
+        const bytes = new Uint8Array(p.bytes);
+        assertSafeHwpxEntryNames(bytes);
+        const original = this.a.doc, binding = copy(p.binding);
+        const probe = new RhwpAdapter(siblingDocument(original, bytes));
+        let transferred = false;
+        let state;
         try {
           probe.call("getDocumentInfo");
           probe.call("getControls");
           probe.semantic();
           probe.rect({ kind: "body", sec: 0, para: 0, offset: 0 });
+          const metadata = await inspectHwpxPreservation(bytes);
+          this.cleanLifecycle(p);
+          requireHost(this.a.doc === original && equal(binding, p.binding),
+            "REVISION_CONFLICT", "문서 또는 작업본이 달라졌습니다. 다시 여세요.");
+          rememberHwpxPreservation(probe.doc, metadata);
+          transferred = true;
+          state = this.host.adoptInspectedHwpx(probe.doc, binding);
         } finally {
-          probe.doc.free();
+          if (!transferred) probe.doc.free();
         }
-        const state = this.host.route(method, p);
         this.captures.clear();
         this.proposals.clear();
         this.saves.clear();
@@ -640,25 +650,41 @@ export class ExternalHost {
               this.saves.delete(id);
           }
         requireHost(
-          this.saves.size < 16,
+          this.saves.size + this.pendingExports < 16,
           "SAVE_LIMIT",
           "저장 결과를 확인한 뒤 다시 내보내세요.",
         );
-        const out = this.a.exportChecked(),
-          binding = copy(this.host.binding),
-          sha = await sha256(out.bytes),
-          saveId = uuid();
-        // A local edit may occur during hashing. This ticket still identifies
-        // ONLY the exported revision; its acknowledgment never marks later edits saved.
-        this.saves.set(saveId, {
-          documentId: out.documentId,
-          revision: out.revision,
-          workingCopyId: binding.workingCopyId,
-          sha256: sha,
-          sequence: ++this.sequence,
-          status: "pending",
-        });
-        return { ...out, binding, saveId, sha256: sha };
+        const binding = copy(this.host.binding), native = this.a.doc;
+        const sequence = ++this.sequence;
+        const checkBinding = () => requireHost(
+          this.a.doc === native && equal(this.host.binding, binding),
+          "REVISION_CONFLICT",
+          "문서 또는 작업본이 달라졌습니다. 다시 내보내세요.",
+        );
+        this.pendingExports++;
+        try {
+          const out = await exportCheckedDocumentHwpx(this.a, () => {
+            this.current(p);
+            checkBinding();
+            return true;
+          });
+          const sha = await sha256(out.bytes);
+          // Hashing may overlap a later edit. The ticket acknowledges the
+          // exported revision only, and cannot follow a replaced work copy.
+          checkBinding();
+          const saveId = uuid();
+          this.saves.set(saveId, {
+            documentId: out.documentId,
+            revision: out.revision,
+            workingCopyId: binding.workingCopyId,
+            sha256: sha,
+            sequence,
+            status: "pending",
+          });
+          return { ...out, binding, saveId, sha256: sha };
+        } finally {
+          this.pendingExports--;
+        }
       }
       case "completeSave": {
         this.ready();

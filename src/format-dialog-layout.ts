@@ -1,3 +1,4 @@
+import { lineSpacingMode } from "./line-spacing.js";
 import type { FormatKind, FormatState } from "./formatting.js";
 import { languages } from "./formatting.js";
 import type { Props } from "./model.js";
@@ -88,7 +89,7 @@ export function mountDialogLayout(root: HTMLElement, kind: FormatKind, controls:
     validate = () => { if (changed && mode.value) raw.value = firstLineValue(mode.value, amount.value); };
     const spacing = controls.get("lineSpacing")!, type = controls.get("lineSpacingType")!;
     const unit = document.createElement("output"); unit.dataset.spacingUnit = "true"; unit.setAttribute("aria-live", "polite"); spacing.after(unit);
-    const unitSync = () => { unit.textContent = type.value === "Percent" ? "%" : ["Fixed", "Minimum", "SpaceOnly"].includes(type.value) ? "pt" : "방식 선택 필요"; };
+    const unitSync = () => { unit.textContent = lineSpacingMode(type.value)?.[2] ?? "방식 선택 필요"; };
     type.addEventListener("change", unitSync); unitSync();
   }
   return validate;

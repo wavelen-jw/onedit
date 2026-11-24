@@ -1,4 +1,4 @@
-import { imageDimensions, pictureFile, type PictureFile } from './pictures.js';
+import { decodePictureBytes, imageDimensions, pictureFile, pictureInitialSize, type PictureFile } from './pictures.js';
 export type ClipboardPicture = PictureFile & {displaySize?:{width:number;height:number}};
 
 // Hancom can expose an opaque Windows raster alongside an embedded original
@@ -146,25 +146,11 @@ export async function clipboardPicture(blob: Blob, html=''): Promise<ClipboardPi
   if (!blob.size || blob.size > 20 * 1024 * 1024)
     throw Error('클립보드 그림은 20MB 이하이어야 합니다.');
   const bytes = hancomClipboardPNG(html) ?? new Uint8Array(await blob.arrayBuffer());
-  const d = imageDimensions(bytes);
-  const file: PictureFile = { bytes, extension:d.extension, naturalWidth:d.width, naturalHeight:d.height };
-  pictureFile(file);
-  // Decode only the supplied bytes. No canvas re-encoding: PNG alpha and JPEG
-  // bytes remain exactly those supplied by the browser/OS.
-  const bitmap = await createImageBitmap(new Blob([bytes], {type:d.extension === 'png' ? 'image/png' : 'image/jpeg'}), {imageOrientation:'none'});
-  try {
-    if (bitmap.width !== d.width || bitmap.height !== d.height)
-      throw Error('그림 원본 크기와 브라우저 해석이 다릅니다. 원본은 변경하지 않았습니다.');
-  } finally { bitmap.close(); }
+  const file = await decodePictureBytes(bytes);
   const displaySize=clipboardImageFrame(html);
   return displaySize?{...file,displaySize}:file;
 }
 
 export function clipboardPictureSize(file: ClipboardPicture): {width:number;height:number} {
-  const w=file.displaySize?.width??file.naturalWidth*75, h=file.displaySize?.height??file.naturalHeight*75;
-  const scale=Math.max(100/Math.min(w,h), Math.min(1,72000/Math.max(w,h)));
-  const width=Math.round(w*scale),height=Math.round(h*scale);
-  if (Math.max(width,height)>72000 || Math.min(width,height)<100)
-    throw Error('현재 그림 크기 범위에서 원종횡비를 유지할 수 없습니다.');
-  return {width,height};
+  return pictureInitialSize(file, file.displaySize);
 }

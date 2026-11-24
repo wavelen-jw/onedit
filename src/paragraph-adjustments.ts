@@ -4,8 +4,31 @@ import type { FormatState } from './formatting.js';
 
 export const paragraphAdjustmentGroup = '여백·들여쓰기 증감';
 // Existing Ctrl+Shift+Backquote behavior: a fixed value, not a relative step.
-export const hangingIndentCommand: Command = { type: 'paragraph', props: { indent: -2000 } };
+export function hangingIndentCommand(): Command {
+  return { type: 'paragraph', props: { indent: -2000 } };
+}
+
+export const paragraphAlignments = ['left', 'center', 'right', 'justify', 'distribute', 'split'] as const;
+export function paragraphAlignmentCommand(alignment: typeof paragraphAlignments[number]): Command {
+  return { type: 'paragraph', props: { alignment } };
+}
 export type ParagraphAdjustment = { metric: 'indent' | 'marginLeft' | 'marginRight'; direction: 1 | -1 };
+export function paragraphAdjustmentCommand(change: ParagraphAdjustment): Command {
+  return { type: 'paragraph-relative', change: { ...change } };
+}
+
+const marginShortcuts = [
+  { letter: 'e', functionKey: 'f5', change: { metric: 'marginLeft', direction: -1 } },
+  { letter: 'g', functionKey: 'f6', change: { metric: 'marginLeft', direction: 1 } },
+  { letter: 'd', functionKey: 'f7', change: { metric: 'marginRight', direction: 1 } },
+  { letter: 'f', functionKey: 'f8', change: { metric: 'marginRight', direction: -1 } },
+] as const;
+
+export function paragraphMarginShortcut(binding: 'letter' | 'functionKey', key: string) {
+  const match = marginShortcuts.find(row => row[binding] === key);
+  return match && paragraphAdjustmentCommand(match.change);
+}
+
 export const paragraphAdjustmentItems = (['indent', 'marginLeft', 'marginRight'] as const).flatMap((metric, index) =>
   ([1, -1] as const).map(direction => ({ metric, direction,
     label: `${['첫 줄 들여쓰기', '왼쪽 여백', '오른쪽 여백'][index]} ${direction === 1 ? '늘리기 (+1pt)' : '줄이기 (−1pt)'}` })));

@@ -1,3 +1,5 @@
+import { characterStyleCommand } from "../character-style-commands.js";
+import { sameFormatTarget } from "./a-format-input-guard.js";
 import { editorFeedbackText } from "../editor-feedback-text.js";
 import {menuTargetReader} from '../menu-input-projection.js';
 import type {OwnerProjection} from '../owner-projection.js';
@@ -7,7 +9,7 @@ import { linePositionItems } from "../line-position.js";
 import { relativeCharacterMenuItems } from "../character-increments.js";
 import { listGroup, paragraphListItems } from "../paragraph-lists.js";
 import { stylesUnavailable } from "../style-availability.js";
-import { paragraphAdjustmentItems, paragraphAdjustmentGroup, hangingIndentCommand } from "../paragraph-adjustments.js";
+import { paragraphAdjustmentItems, paragraphAdjustmentGroup, hangingIndentCommand, paragraphAlignments, paragraphAlignmentCommand, paragraphAdjustmentCommand } from "../paragraph-adjustments.js";
 import type { Interaction } from "../interaction.js";
 import { type Command as EditorCommand } from "../model.js";
 import type { FormatKind, FormatState } from "../formatting.js";
@@ -38,7 +40,7 @@ export const formatMenuItems: Item[] = [
   {id:'object-ungroup',label:'묶음 개체 풀기',group:'개체',kind:'char',shortcut:'U',command:{type:'object-ungroup'}},
   ...relativeCharacterMenuItems.map((item): Item => ({...item, group: "글자 크기·장평·자간 증감", kind: "char"})),
   { id: "paragraph-adjustments", label: "문단 여백·들여쓰기 증감…", group: paragraphAdjustmentGroup, kind: "paragraph", dialog: "paragraph", dialogGroup: paragraphAdjustmentGroup, shortcut: "Alt+T → 여백·들여쓰기 증감" },
-  ...paragraphAdjustmentItems.map((item): Item => ({ id: `paragraph-relative-${item.metric}-${item.direction}`, label: item.label, group: paragraphAdjustmentGroup, kind: "paragraph", command: { type: "paragraph-relative", change: { metric: item.metric, direction: item.direction } } })),
+  ...paragraphAdjustmentItems.map((item): Item => ({ id: `paragraph-relative-${item.metric}-${item.direction}`, label: item.label, group: paragraphAdjustmentGroup, kind: "paragraph", command: paragraphAdjustmentCommand({ metric: item.metric, direction: item.direction }) })),
 
   {
     id: "character",
@@ -62,7 +64,7 @@ export const formatMenuItems: Item[] = [
     group: "글자 속성",
     kind: "char",
     property: "bold",
-    command: { type: "bold" },
+    command: characterStyleCommand("bold"),
     shortcut: "Alt+Shift+B",
   },
   {
@@ -71,7 +73,7 @@ export const formatMenuItems: Item[] = [
     group: "글자 속성",
     kind: "char",
     property: "italic",
-    command: { type: "toggle-char", property: "italic" },
+    command: characterStyleCommand("italic"),
     shortcut: "Alt+Shift+I",
   },
   {
@@ -80,7 +82,7 @@ export const formatMenuItems: Item[] = [
     group: "글자 속성",
     kind: "char",
     property: "underline",
-    command: { type: "underline" },
+    command: characterStyleCommand("underline"),
     shortcut: "Alt+Shift+U",
   },
   ...linePositionItems.map((item): Item => ({...item, group: "글자 속성", kind: "char"})),
@@ -90,7 +92,7 @@ export const formatMenuItems: Item[] = [
     group: "글자 속성",
     kind: "char",
     property: "strikethrough",
-    command: { type: "toggle-char", property: "strikethrough" },
+    command: characterStyleCommand("strikethrough"),
   },
   ...(["superscript", "subscript", "normal"] as const).map(
     (mode, n): Item => ({
@@ -99,15 +101,15 @@ export const formatMenuItems: Item[] = [
       group: "글자 속성",
       kind: "char",
       property: mode,
-      command: { type: "script", mode },
+      command: characterStyleCommand(mode),
       shortcut: ["Alt+Shift+P", "Alt+Shift+S"][n],
     }),
   ),
-  {id:'char-normal',label:'보통 모양',group:'글자 속성',kind:'char',shortcut:'Alt+Shift+C',command:{type:'char',props:{bold:false,italic:false,underline:false,underlineType:"None",strikethrough:false,superscript:false,subscript:false,outlineType:0,shadowType:0,emboss:false,engrave:false}}},
+  {id:'char-normal',label:'보통 모양',group:'글자 속성',kind:'char',shortcut:'Alt+Shift+C',command:characterStyleCommand("char-normal")},
   ...([-1,1]as const).map((direction):Item=>({id:`number-level-${direction}`,label:direction<0?'번호·개요 한 수준 증가':'번호·개요 한 수준 감소',group:'문단 번호·글머리표',kind:'paragraph',shortcut:direction<0?'Ctrl+Num −':'Ctrl+Num +',command:{type:'list-level',direction}})),
   ...([1,-1]as const).map((direction):Item=>({id:`line-spacing-${direction}`,label:direction>0?'줄 간격 늘리기 (+10%)':'줄 간격 줄이기 (−10%)',group:'문단 여백·들여쓰기 증감',kind:'paragraph',shortcut:direction>0?'Alt+Shift+Z':'Alt+Shift+A',command:{type:'line-spacing-step',direction}})),
   {id:"script-cycle",label:"첨자 순환 (위·아래·해제)",group:"글자 속성",kind:"char",command:{type:"script-cycle"},shortcut:"Ctrl+Alt+A"},
-  ...["left", "center", "right", "justify", "distribute", "split"].map(
+  ...paragraphAlignments.map(
     (alignment, n): Item => ({
       id: alignment,
       label: [
@@ -122,7 +124,7 @@ export const formatMenuItems: Item[] = [
       kind: "paragraph",
       property: "alignment",
       value: alignment,
-      command: { type: "paragraph", props: { alignment } },
+      command: paragraphAlignmentCommand(alignment),
       shortcut: n === 0 ? "Control+Shift+L" : undefined,
     }),
   ),
@@ -139,7 +141,7 @@ export const formatMenuItems: Item[] = [
     label: "첫 줄 내어쓰기 10pt",
     group: "문단 모양",
     kind: "paragraph",
-    command: hangingIndentCommand,
+    command: hangingIndentCommand(),
     shortcut: "Control+Shift+`",
   },
   {id: "paragraph-lists", label: "문단 번호·글머리표…", group: listGroup, kind: "paragraph", dialog: "paragraph", dialogGroup: listGroup},
@@ -266,8 +268,7 @@ export function mountFormatMenu(
     try {
       if (!["Number", "Bullet", "Outline"].includes(mode)) throw Error("지원하지 않는 문단 번호 요청입니다.");
       const current = editor.capture();
-      if (!target || target.documentId !== current.documentId || target.revision !== current.revision ||
-        JSON.stringify(target.selection) !== JSON.stringify(current.selection))
+      if (!target || !sameFormatTarget(target, current))
         throw Error("문서·리비전·선택이 변경되었습니다. 명령을 다시 실행하세요.");
       const states = formatMenuState(editor, actions.composing(), actions.blockedReason?.());
       const apply = states.get(`list-${mode}`)!, remove = states.get("list-None")!;
@@ -306,13 +307,7 @@ export function mountFormatMenu(
       }
       // A queued click must never silently bind to a replaced document or new selection.
       const current = editor.capture();
-      if (
-        target &&
-        (target.documentId !== current.documentId ||
-          target.revision !== current.revision ||
-          JSON.stringify(target.selection) !==
-            JSON.stringify(current.selection))
-      ) {
+      if (target && !sameFormatTarget(target, current)) {
         root.open = false;
         actions.feedback?.("문서·리비전·선택이 변경되었습니다. 메뉴를 다시 여세요.");
         summary.focus();
@@ -348,14 +343,13 @@ export function mountFormatMenu(
   }
   const layout = mountFormatMenuUI1(root, buttons, {
     blocked: actions.composing,
-    fontCycle: direction=>{const current=editor.capture();if(capture&&(capture.documentId!==current.documentId||capture.revision!==current.revision||JSON.stringify(capture.selection)!==JSON.stringify(current.selection))){actions.feedback?.('글꼴 대상 선택이 변경되었습니다. 메뉴를 다시 여세요.');return;}actions.fontCycle?.(direction);}, fontState: actions.fontState,
-    openOutline:()=>{try{const target=capture??editor.capture(),now=editor.capture();if(target.documentId!==now.documentId||target.revision!==now.revision||JSON.stringify(target.selection)!==JSON.stringify(now.selection))throw Error('문서·선택이 변경되었습니다. 메뉴를 다시 여세요.');const state=formatMenuState(editor,actions.composing(),actions.blockedReason?.()).get('paragraph-lists');if(!state||state.disabled)throw Error(state?.reason??'문단 설정을 확인할 수 없습니다.');root.open=false;root.ownerDocument.dispatchEvent(new CustomEvent('rhwp:paragraph-lists',{detail:'Outline'}));}catch(error){actions.feedback?.(String(error));}},
+    fontCycle: direction=>{const current=editor.capture();if(capture && !sameFormatTarget(capture, current)){actions.feedback?.('글꼴 대상 선택이 변경되었습니다. 메뉴를 다시 여세요.');return;}actions.fontCycle?.(direction);}, fontState: actions.fontState,
+    openOutline:()=>{try{const target=capture??editor.capture(),now=editor.capture();if(!sameFormatTarget(target, now))throw Error('문서·선택이 변경되었습니다. 메뉴를 다시 여세요.');const state=formatMenuState(editor,actions.composing(),actions.blockedReason?.()).get('paragraph-lists');if(!state||state.disabled)throw Error(state?.reason??'문단 설정을 확인할 수 없습니다.');root.open=false;root.ownerDocument.dispatchEvent(new CustomEvent('rhwp:paragraph-lists',{detail:'Outline'}));}catch(error){actions.feedback?.(String(error));}},
     toggleList: mode => toggleList(mode, capture ?? editor.capture()),
     objectState: () => actions.objectProperties?.state() ?? { disabled: true, reason: "선택 개체의 속성 입구가 연결돼 있지 않습니다. 기존 개체를 유지합니다." },
     openObject: () => {
       const current = editor.capture();
-      if (!capture || capture.documentId !== current.documentId || capture.revision !== current.revision ||
-        JSON.stringify(capture.selection) !== JSON.stringify(current.selection)) {
+      if (!capture || !sameFormatTarget(capture, current)) {
         root.open = false; actions.feedback?.("문서·리비전·선택이 변경되었습니다. 메뉴를 다시 여세요."); summary.focus(); return;
       }
       root.open = false; actions.objectProperties?.open();

@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import type {Interaction} from './interaction.js';
 import {formatInputGuard,sameFormatTarget} from './integration/a-format-input-guard.js';
@@ -108,7 +109,7 @@ export function mountCharacterMap(doc:Document,editor:Interaction,actions:Action
       }
       queue.value='';syncQueue();actions.changed();status.textContent=editor.adapter.revision!==revision?`${text} 넣음 · 계속 넣거나 닫으세요.`:'변경 없음 · 계속 넣거나 닫으세요.';
       if(closeAfter)closeEditorDialog(dialog);else focusSelected();
-    }catch(error){status.textContent=String(error).replace(/^Error: /,'');}
+    }catch(error){status.textContent=editorFeedbackText(error);}
   }
   form.onsubmit=e=>{
     e.preventDefault();if(!guard.ready())return;

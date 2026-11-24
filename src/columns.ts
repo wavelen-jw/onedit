@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from './adapter.js';
 import { coreRuntimeHasCapability } from './core-runtime.js';
 import { copy, type Selection } from './model.js';
@@ -26,7 +27,7 @@ export function columnEditReason(a:RhwpAdapter,s:Selection,v:ColumnView) {
     if(v.columnType!==0||!v.sameWidth||![1,2].includes(v.columnCount))throw Error('기존 배분·평행·다른 너비·3단 이상 설정은 조회만 지원합니다.');
     a.assertEditable({kind:'body',sec:v.section,para:v.owner.para,offset:0});
     return '';
-  }catch(error){return String(error).replace(/^Error: /,'');}
+  }catch(error){return editorFeedbackText(error);}
 }
 export function columnSpacingHu(value:string):number {
   if(!/^(0|[1-9]\d*)(\.\d{1,2})?$/.test(value))throw Error('간격은 0 이상, 소수 둘째 자리까지 입력하세요.');

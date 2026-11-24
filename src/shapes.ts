@@ -1,3 +1,4 @@
+import {objectPointsToHu} from "./object-size-inputs.js";
 import {bodyParagraphOwners} from './adapter-position.js';
 import { coreRuntimeHasCapability } from './core-runtime.js';
 import type { RhwpAdapter } from './adapter.js';

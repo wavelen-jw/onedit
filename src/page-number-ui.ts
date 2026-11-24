@@ -1,8 +1,10 @@
-import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
+import { editorFeedbackText } from "./editor-feedback-text.js";
+import { setViewAttribute } from "./view-menu-presentation.js";
+import { hasOpenDialog } from "./dialog-support.js";
+import { bindModalNavigation, closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import {menuControlDemanded} from './menu-lifetime.js';
 import type { Interaction } from './interaction.js';
 import { formatInputGuard, sameFormatTarget } from './integration/a-format-input-guard.js';
-import { visibleManagerControls } from './manager-layout.js';
 import { pageNumberLimit, pageNumberReason, type PageNumberKind } from './page-number.js';
 
 export function mountPageNumber(doc: Document, editor: Interaction, actions: {
@@ -26,12 +28,17 @@ export function mountPageNumber(doc: Document, editor: Interaction, actions: {
   form.append(title, label, preview, note, footer); dialog.append(form); doc.body.append(dialog);
   const guard = formatInputGuard(form);
   let captured: ReturnType<Interaction['capture']> | undefined;
-  const blocked = () => actions.busy() || !!doc.querySelector('dialog[open]:not(#page-number-dialog)');
+  const blocked = () => actions.busy() || hasOpenDialog(doc, "page-number-dialog");
   const stale = () => !captured || !sameFormatTarget(captured, editor.capture());
   const sync = (force=false) => {
-    if(!force&&!dialog.open&&!menuControlDemanded(launch)){launch.disabled=blocked();launch.title=pageNumberLimit;return;}
+    if(!force&&!dialog.open&&!menuControlDemanded(launch)){
+      launch.toggleAttribute('disabled', blocked());
+      setViewAttribute(launch, 'title', pageNumberLimit);
+      return;
+    }
     const reason = blocked() ? '입력·저장·열린 대화상자를 먼저 마치세요.' : pageNumberReason(editor.adapter, editor.selection);
-    launch.disabled = !!reason; launch.title = reason || pageNumberLimit;
+    launch.toggleAttribute('disabled', !!reason);
+    setViewAttribute(launch, 'title', reason || pageNumberLimit);
     if (!dialog.open) return;
     const message = stale() ? '문서·리비전·선택이 변경되었습니다. 취소 후 다시 여세요.' : reason;
     ok.disabled = kind.disabled = !!message; ok.title = message;
@@ -46,8 +53,7 @@ export function mountPageNumber(doc: Document, editor: Interaction, actions: {
     } catch (error) { actions.error(error); }
   };
   const close = () => { guard.close(); captured = undefined; closeEditorDialog(dialog); };
-  cancel.onclick = close;
-  dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+  guard.bindCancel(cancel, close);
   dialog.addEventListener('close', () => { if (dialog.open) return; guard.close(); captured = undefined; sync(); });
   form.onsubmit = e => {
     e.preventDefault(); if (!guard.ready()) return;
@@ -55,17 +61,9 @@ export function mountPageNumber(doc: Document, editor: Interaction, actions: {
       if (blocked() || stale()) throw Error('문서·선택 또는 처리 상태가 변경되었습니다. 다시 여세요.');
       editor.execute({ type: 'page-number', kind: kind.value as PageNumberKind }, captured);
       guard.consume(); close(); actions.changed();
-    } catch (error) { preview.textContent = String(error).replace(/^Error: /, ''); }
+    } catch (error) { preview.textContent = editorFeedbackText(error); }
   };
-  form.addEventListener('keydown', e => {
-    if (e.key === 'Tab' && !e.isComposing && e.keyCode !== 229) {
-      const controls = visibleManagerControls(form), at = controls.indexOf(doc.activeElement as HTMLElement);
-      if (controls.length && (at < 0 || (e.shiftKey ? at === 0 : at === controls.length - 1))) {
-        e.preventDefault(); controls[e.shiftKey ? controls.length - 1 : 0].focus();
-      }
-    }
-    e.stopPropagation();
-  });
+  bindModalNavigation(form, dialog);
   const observer = new MutationObserver(()=>sync()); observer.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
   sync(); return { sync };
 }

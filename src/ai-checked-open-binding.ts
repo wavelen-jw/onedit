@@ -10,4 +10,6 @@ export const hasReviewedCheckedOpenCore = (sha256: string) => sha256 === checked
  || sha256 === 'dd9a0dcf6401956bc31fa0cffa98fc44574aea28ca30aa2fdf66859d608bc98b'
  || sha256 === '09783f6af3ab3e5595db46fb7c8f48e17b36c00f167a1ae54bb1ed7df5bb416b'
  || sha256 === 'b0c04296e133be8721d9d60efbaa3deb4c0bbb5f4be4de0fce8fcf06c03f76e0'
- || sha256 === '571c285c665ed680f4406a81605b221b6938a507f50b3182d8207995be3d60ce';
+ || sha256 === '571c285c665ed680f4406a81605b221b6938a507f50b3182d8207995be3d60ce'
+ // The shared editor Core retains the strict native parser from dad1dd7.
+ || sha256 === 'dc39bcd81afff0ab64bc6ffbb01176c947a772a2b6e17d69678cb9b6f7b0ddc3';

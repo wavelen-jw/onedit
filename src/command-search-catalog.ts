@@ -1,3 +1,4 @@
+import { pageBreakLabels } from "./page-break.js";
 import {activeWorkset} from "./active-workset.js";
 import { cellDialogMode, type CellDialogMode } from "./cell-dialog-command.js";
 import { formatMenuItems } from "./integration/a-format-menu.js";
@@ -26,8 +27,8 @@ const buildSearchCommands=():SearchCommand[]=>[
   {id:"insert-table",label:"표 만들기…",group:"입력",aliases:"표 테이블 행 열",insertion:"table",selector:"[data-insert-entry=table]"},
   {id:"insert-picture",label:"그림 넣기…",group:"입력",aliases:"사진 이미지 picture image",insertion:"picture",selector:"[data-insert-entry=picture]"},
   {id:"insert-textbox",label:"빈 글상자 넣기…",group:"입력",aliases:"텍스트상자 글상자 textbox",insertion:"textbox",selector:"[data-insert-entry=textbox]"},
-  {id:"page-break",label:"쪽 나누기",group:"쪽",aliases:"페이지 나누기 다음 쪽",command:{type:"page-break"},selector:"#page-break"},
-  {id:"column-break",label:"단 나누기",group:"쪽",aliases:"컬럼 다단 단 나눔",command:{type:"column-break"},selector:"#column-break"},
+  {id:"page-break",label:pageBreakLabels.page,group:"쪽",aliases:"페이지 나누기 다음 쪽",command:{type:"page-break"},selector:"#page-break"},
+  {id:"column-break",label:pageBreakLabels.column,group:"쪽",aliases:"컬럼 다단 단 나눔",command:{type:"column-break"},selector:"#column-break"},
 ];
 // No dynamic catalog construction before actual search/slash demand.
 let initialized=typeof document==="undefined"||!activeWorkset(document);

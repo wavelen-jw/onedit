@@ -29,6 +29,13 @@ export function wrapDialogTab(event: KeyboardEvent, dialog: HTMLDialogElement) {
   controls[event.shiftKey ? controls.length - 1 : 0].focus();
 }
 
+export function bindModalNavigation(form: HTMLFormElement, dialog: HTMLDialogElement) {
+  form.addEventListener('keydown', event => {
+    event.stopPropagation();
+    wrapDialogTab(event, dialog);
+  });
+}
+
 /** A single-line draft field's Enter submits the modal, not its native text editor. */
 export function bindEditorDialogFormSubmit(form: HTMLFormElement | null) {
   if (!form || keyboardForms.has(form)) return;

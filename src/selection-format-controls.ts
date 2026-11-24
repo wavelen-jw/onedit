@@ -1,3 +1,6 @@
+import { fontSizeBounds, readFontSize, readTracking } from "./character-number-fields.js";
+import { lineSpacingBounds, lineSpacingMode, readLineSpacing } from "./line-spacing.js";
+import { characterStyleCommand } from "./character-style-commands.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import type {Interaction} from './interaction.js';
 import {copy,nested,ordered,sameContainer,paraIndex,type Command} from './model.js';
@@ -6,7 +9,6 @@ import {formatValueState,formatToggleState,markFormatToggle} from './format-valu
 import {formatMenuItems} from './integration/a-format-menu.js';
 import {mountFormatHoverPreview} from './format-hover-preview.js';
 import {mountTextColorSplit} from './text-color-split.js';
-import {quickFormatDelta,quickSpacingDelta,quickSpacingTypes} from './quick-format.js';
 import {selectNumericDraftOnClick} from './numeric-draft-selection.js';
 
 export function mountSelectionFormatControls(doc:Document,editor:Interaction,character:HTMLElement,paragraph:HTMLElement,actions:{valid:()=>boolean;blocked:()=>boolean;target:()=>ReturnType<Interaction['capture']>|undefined;execute:(command:Command)=>void;focus:()=>void}){
@@ -88,15 +90,15 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
     }
     const lineType=()=>{
       const format=state('paragraph');
-      const value=quickSpacingTypes.find(([type])=>format.lineSpacingType===type)?.[0];
+      const value=lineSpacingMode(format.lineSpacingType)?.[0];
       if(formatValueState(format,'lineSpacingType')!=='common'||value!=='Percent'&&nested(editor.selection.focus))return;
       return value;
     };
-    const command=(next:number):Command=>{
+    const command=(next:number|string):Command=>{
       if(key==='lineSpacing'){
         const type=lineType();
         if(!type)throw Error('선택한 문단의 줄 간격 방식을 확인하세요.');
-        return {type:'paragraph',props:quickSpacingDelta({type:'',value:''},{type,value:String(next)})};
+        return {type:'paragraph',props:toCoreParagraph(readLineSpacing(type, String(next)))};
       }
       return kind==='char'?{type:'char',props:toCoreCharacter({[key]:next})}:
         {type:'paragraph',props:toCoreParagraph({[key]:next})};
@@ -108,11 +110,9 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
     };
     const minus=button(group,'−',label+' 줄이기',()=>change(-1));
     const syncDraft=numberDraft(group,key,label,key==='lineSpacing'?'%':'pt',value=>{
-      if(key==='fontSize'){
-        if(!/^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(value))throw Error('글자 크기는 1~200pt의 숫자로 입력하세요.');
-        return {type:'char',props:quickFormatDelta('all',{font:'',size:''},{font:'',size:value})};
-      }
-      const pattern=key==='lineSpacing'&&lineType()==='Percent'?/^\d+$/u:/^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/u;
+      if (key === 'fontSize') return command(readFontSize(value));
+      if (key === 'lineSpacing') return command(value);
+      const pattern = /^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/u;
       const next=Number(value);
       if(!pattern.test(value)||next<min||next>max||!Number.isFinite(next))throw Error(label+' 입력 범위를 확인하세요.');
       return command(next);
@@ -121,7 +121,7 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
     return()=>{
       const type=key==='lineSpacing'?lineType():undefined;
       const reason=key==='lineSpacing'&&!type?'문단 모양에서 공통 줄 간격 방식을 지정하세요.':'';
-      syncDraft(kind,key==='lineSpacing'?type==='Percent'?'%':type?'pt':'':'pt',reason);
+      syncDraft(kind,key==='lineSpacing'?lineSpacingMode(type)?.[2] ?? '':'pt',reason);
       const value=num(kind,key);
       const delta=metricStep();
       minus.disabled=!!reason||value===undefined||value-delta<min;plus.disabled=!!reason||value===undefined||value+delta>max;
@@ -132,8 +132,8 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
   const fontChoices=doc.createElement('span');fontChoices.className='selection-font-choices';fontChoices.hidden=true;fontGroup.append(fontChoices);
   font.onclick=()=>{preview.clear();fontChoices.hidden=!fontChoices.hidden;font.setAttribute('aria-expanded',String(!fontChoices.hidden));};
   for(const name of ['함초롬바탕','함초롬돋움','맑은 고딕']){const b=button(fontChoices,name.replace('맑은 고딕','맑은고딕'),name+' 적용',()=>({type:'char',props:toCoreCharacter({fontFamily:name})}));b.dataset.selectionFont=name;b.addEventListener('click',()=>{fontChoices.hidden=true;font.setAttribute('aria-expanded','false');},{signal});}
-  const sizeSync=metric(character,'fontSize','글자 크기','char',1,1,200);
-  const bold=button(character,'B','선택 진하게',()=>({type:'bold'}));bold.classList.add('selection-bold');
+  const sizeSync=metric(character,'fontSize','글자 크기','char',1,fontSizeBounds.min,fontSizeBounds.max);
+  const bold=button(character,'B','선택 진하게',()=>characterStyleCommand("bold"));bold.classList.add('selection-bold');
   const color=mountTextColorSplit(doc,editor,doc.createElement('input'),{
     idPrefix:'selection-text-color',busy:()=>!actions.valid()||actions.blocked(),readBusy:()=>!actions.valid()||actions.blocked(),focus:actions.focus,
     apply:props=>{preview.clear();projections.clear();if(!actions.valid()||actions.blocked())throw Error('문서·선택이 바뀌었습니다. 다시 선택하세요.');actions.execute({type:'char',props});sync();},
@@ -146,10 +146,9 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
   };
   const trackingGroup=doc.createElement('span');trackingGroup.className='selection-tracking';trackingGroup.setAttribute('role','group');trackingGroup.setAttribute('aria-label','자간');character.append(trackingGroup);
   const narrow=button(trackingGroup,'','자간 좁게',()=>({type:'char-relative',change:{metric:'spacings',direction:-1}}));
-  const trackingSync=numberDraft(trackingGroup,'spacings','자간','%',value=>{
-    if(!value)throw Error('자간은 -100~100%의 정수로 입력하세요.');
-    return {type:'char',props:quickFormatDelta('all',{font:'',size:'',tracking:''},{font:'',size:'',tracking:value})};
-  });
+  const trackingSync = numberDraft(trackingGroup, 'spacings', '자간', '%', value => ({
+    type: 'char', props: toCoreCharacter({spacings: readTracking(value)}),
+  }));
   const wider=button(trackingGroup,'','자간 넓게',()=>({type:'char-relative',change:{metric:'spacings',direction:1}}));
   trackingIcon(narrow,false);trackingIcon(wider,true);
 
@@ -159,7 +158,7 @@ export function mountSelectionFormatControls(doc:Document,editor:Interaction,cha
     // second icon/command meaning. User confirmed 혼합 = 양쪽 정렬.
     const svg=doc.querySelector(`[data-align="${id}"] svg`);if(svg)b.append(svg.cloneNode(true));else b.textContent=item.label;return b;
   });
-  const lineSync=metric(paragraph,'lineSpacing','줄 간격','paragraph',5,1,1000);
+  const lineSync=metric(paragraph,'lineSpacing','줄 간격','paragraph',5,lineSpacingBounds.min,lineSpacingBounds.max);
   const gaps=doc.createElement('span');gaps.className='selection-paragraph-spacing';paragraph.append(gaps);
   const beforeSync=metric(gaps,'spacingBefore','문단 위 간격','paragraph',1,0),afterSync=metric(gaps,'spacingAfter','문단 아래 간격','paragraph',1,0);
   // Restore hover BEFORE save/print/selection/IME and every unrelated action.

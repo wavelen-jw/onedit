@@ -1,3 +1,5 @@
+import { placeSubmenu } from "./context-menu-placement.js";
+import { rowColumnItem, rowColumnMenuGroups } from "./table-menu-items.js";
 import { mountDropdownKeys } from "./workspace-menu-navigation.js";
 
 // Observed table-only groups in UI1-CONTEXT-CELL-CARET/BLOCK. The received
@@ -23,9 +25,18 @@ export function mountTableMenuUI1(root: HTMLDetailsElement, buttons: Map<string,
   live(panel,'equal-width','셀 너비를 같게(W)','w','W');
   live(panel,'range-size','선택 범위 크기 조절…');
   live(panel,'merge','셀 합치기(J)','j','M');live(panel,'split-dialog','셀 나누기(V)…','v','S');
-  const add=make('table-add-submenu','줄/칸 추가하기(I)…','i');live(add.p,'add-dialog','줄/칸 추가하기…',undefined,'Alt+Insert');live(add.p,'row-add','아래 행 추가');live(add.p,'col-add','오른쪽 열 추가');
-  const remove=make('table-delete-submenu','줄/칸 지우기(E)…','e');live(remove.p,'delete-dialog','줄/칸 지우기…',undefined,'Alt+Delete');live(remove.p,'row-delete','현재 행 삭제 (내용 포함)');live(remove.p,'col-delete','현재 열 삭제 (내용 포함)');
-  for(const [s,key]of [[add.s,'Alt+Insert'],[remove.s,'Alt+Delete']]as const){const k=doc.createElement('kbd');k.textContent=key;k.title='기존 Command의 줄/칸 선택 창';s.append(k);}
+  const add = make('table-add-submenu', '줄/칸 추가하기(I)…', 'i');
+  const remove = make('table-delete-submenu', '줄/칸 지우기(E)…', 'e');
+  for (const [menu, ids] of [[add, rowColumnMenuGroups.add], [remove, rowColumnMenuGroups.remove]] as const) {
+    for (const id of ids) {
+      const { label, key } = rowColumnItem(id);
+      live(menu.p, id, label, undefined, key);
+    }
+    const hint = doc.createElement('kbd');
+    hint.textContent = rowColumnItem(ids[0]).key!;
+    hint.title = '기존 Command의 줄/칸 선택 창';
+    menu.s.append(hint);
+  }
   separator();held('a','채우기(A)','연속 데이터 채우기 명령은 미연결입니다. 지원하는 셀 배경색은 테두리/배경 창에서 변경합니다.');held('k','블록 계산식(K)','셀 계산식 편집은 연결돼 있지 않습니다. 기존 표 내용은 유지합니다.');
   separator();live(panel,'table-transpose','표 뒤집기 · 줄/칸 전치…',undefined,'T');live(panel,'table-object-line','표 개체 테두리…',undefined,'L');live(panel,'table-object-background','표 개체 채우기…',undefined,'C');live(panel,'table-object-pagination','표 쪽 나누기…');separator();panel.append(extra);
   const menus=[border.d,add.d,remove.d,extra],disposers:(()=>void)[]=[];
@@ -37,7 +48,10 @@ export function mountTableMenuUI1(root: HTMLDetailsElement, buttons: Map<string,
     s.setAttribute('role','menuitem');s.setAttribute('aria-haspopup','menu');s.setAttribute('aria-controls',p.id);
     const rows=()=>[...p.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')].filter(b=>b.closest('details')===d&&!!b.getClientRects().length);
     const focus=(e?:HTMLElement)=>{e?.focus();e?.scrollIntoView({block:'nearest',inline:'nearest'});};
-    const position=()=>{s.setAttribute('aria-expanded',String(d.open));if(!d.open||!root.open)return;const r=s.getBoundingClientRect(),a=panel.getBoundingClientRect(),b=p.getBoundingClientRect(),w=doc.defaultView!;const left=a.right+b.width+2<w.innerWidth-8?a.right+1:a.left-b.width-1;p.style.left=`${Math.max(8,Math.min(left,w.innerWidth-b.width-8))}px`;p.style.top=`${Math.max(8,Math.min(r.top,w.innerHeight-b.height-8))}px`;};
+    const position = () => {
+      s.setAttribute('aria-expanded', String(d.open));
+      if (d.open && root.open) placeSubmenu(s, panel, p);
+    };
     const open=()=>{if(s.getAttribute('aria-disabled')==='true')return;for(const other of menus)if(other!==d)other.open=false;d.open=true;position();focus(rows()[0]??s);};
     if(s.dataset.tableSubkey)openers.set(s.dataset.tableSubkey,open);
     const key=(e:KeyboardEvent)=>{

@@ -1,3 +1,5 @@
+import { characterStyleCommand } from "./character-style-commands.js";
+import { paragraphMarginShortcut } from './paragraph-adjustments.js';
 import type { KeyInput, KeyRoute } from './keyboard.js';
 import type { Command, Selection } from './model.js';
 
@@ -22,9 +24,10 @@ export function hancomWebKey(e: KeyInput, s: Selection, platform = shortcutPlatf
     return view('document', k === 'pagedown' ? 'End' : 'Home');
   if (!e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey && k === 'f5' && s.focus.kind === 'cell' && ['caret','text','cells'].includes(s.kind))
     return view('cell-start-extend');
-  const margin: Record<string, readonly ['marginLeft'|'marginRight',1|-1]> = {f5:['marginLeft',-1],f6:['marginLeft',1],f7:['marginRight',1],f8:['marginRight',-1]};
-  if (e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey && margin[k])
-    return command({type:'paragraph-relative',change:{metric:margin[k][0],direction:margin[k][1]}});
+  if (e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey) {
+    const margin = paragraphMarginShortcut('functionKey', k);
+    if (margin) return command(margin);
+  }
   if (e.ctrlKey && !e.altKey && !e.metaKey && e.shiftKey && ['w','q'].includes(letter))
     return command({type:'line-spacing-step',direction:letter==='w'?1:-1});
   if (platform !== 'mac') return;
@@ -52,12 +55,12 @@ export function hancomWebKey(e: KeyInput, s: Selection, platform = shortcutPlatf
   if (cmd && !e.shiftKey && k === 'f10' && text) return {kind:'existing-ui',action:'character-map'};
   if (cmd && !e.shiftKey && letter === 'l') return {kind:'format',target:'char'};
   if (cmd && !e.shiftKey && ['u','i'].includes(letter))
-    return command(letter === 'u' ? {type:'underline'} : {type:'toggle-char',property:'italic'});
+    return command(characterStyleCommand(letter === "u" ? "underline" : "italic"));
   if (cmd && e.shiftKey && ['e','r','k','j'].includes(letter)) return command({type:'char-relative',change:{
     metric:['e','r'].includes(letter)?'fontSize':'ratios',direction:['e','k'].includes(letter)?1:-1}});
   if (e.metaKey && e.ctrlKey && !e.altKey && !e.shiftKey) {
-    if (letter === 'p' || letter === 's') return command({type:'script',mode:letter==='p'?'superscript':'subscript'});
-    if (letter === 'c') return command({type:'char',props:{bold:false,italic:false,underline:false,underlineType:'None',strikethrough:false,superscript:false,subscript:false,outlineType:0,shadowType:0,emboss:false,engrave:false}});
+    if (letter === 'p' || letter === 's') return command(characterStyleCommand(letter === "p" ? "superscript" : "subscript"));
+    if (letter === 'c') return command(characterStyleCommand("char-normal"));
   }
   if (cmd && e.shiftKey && letter === 'h') return {kind:'search',replace:true};
   if (e.metaKey && e.altKey && !e.ctrlKey && !e.shiftKey) {

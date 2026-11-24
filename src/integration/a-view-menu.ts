@@ -3,7 +3,7 @@ import {firstPageBelow, activeMenuDemand} from '../active-workset.js';
 import {mountEditorFullscreen} from '../fullscreen-view.js';
 import {mountAutoPageLayout} from '../auto-page-layout.js';
 import { tableGuideModes,type TableGuideMode } from "../table-guides.js";
-import { mountViewMenuPresentation } from "../view-menu-presentation.js";
+import { mountViewMenuPresentation, setViewAttribute } from "../view-menu-presentation.js";
 import { viewMarkerItems, type ViewMarker } from "../view-markers.js";
 import { viewNumber } from "../status-navigation.js";
 import { viewSequenceItems } from "../view-sequence.js";
@@ -40,6 +40,12 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
   guides?:{read:()=>{mode:TableGuideMode;reason:string};set:(mode:TableGuideMode)=>void}) {
   const panel = root.querySelector<HTMLElement>("[data-view-panel]")!;
   let scale = 1, mode = "custom";
+  let appliedZoom: string | undefined;
+  const publishZoom = () => {
+    pages.style.setProperty("zoom", String(scale));
+    // CSSOM can serialize zoom at lower precision than the calculated scale.
+    appliedZoom = pages.style.getPropertyValue("zoom");
+  };
   let beforeTouchWidth: { scale: number; mode: string } | undefined;
   const layout=mountAutoPageLayout(pages,viewport);
   const pageList = () => Array.from(pages.getElementsByClassName("page")) as HTMLElement[];
@@ -56,9 +62,11 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
     viewport.scrollTop = Math.max(0, viewport.scrollTop + list[index].getBoundingClientRect().top - viewport.getBoundingClientRect().top - viewport.clientTop - 20);
     return true;
   };
-  const fit = () => {
-    const list = pageList(); if (!list.length) return;
-    const width = Math.max(...list.map(p => parseFloat(p.style.width)));
+  const fittedScale = (index: number) => {
+    const list = pages.getElementsByClassName("page") as HTMLCollectionOf<HTMLElement>;
+    if (!list.length) return;
+    const measured = layout.measuredFitWidth(list.length);
+    const width = measured ?? Math.max(...Array.from(list, p => parseFloat(p.style.width)));
     let ratio: number;
     if (mode === "width") {
       const horizontalPadding = (element: HTMLElement) => {
@@ -67,17 +75,20 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
       };
       ratio = (viewport.clientWidth - horizontalPadding(viewport)) / (width + horizontalPadding(pages));
     } else {
-      const height = parseFloat(list[current()].style.height);
+      const height = parseFloat(list[index].style.height);
       ratio = Math.min((viewport.clientWidth - 60) / width, (viewport.clientHeight - 40) / height);
     }
-    if (Number.isFinite(ratio) && ratio > 0) scale = Math.min(3, Math.max(.25, ratio));
-    pages.style.setProperty("zoom", String(scale));
+    return {scale: Number.isFinite(ratio) && ratio > 0 ? Math.min(3, Math.max(.25, ratio)) : scale,
+      measured: measured !== undefined};
   };
   const zoom = (value: number, newMode = "custom") => {
     beforeTouchWidth = undefined;
     const keep=layout.anchor(),index = current(); mode = newMode; scale = Math.min(3, Math.max(.25, value));
     viewport.dataset.viewMode = mode;
-    if (mode !== "custom") fit(); else pages.style.setProperty("zoom", String(scale));
+    if (mode !== "custom") {
+      const fitted = fittedScale(mode === "page" ? current() : index);
+      if (fitted) { scale = fitted.scale; publishZoom(); }
+    } else publishZoom();
     layout.refresh(keep);if(!keep)go(index);
   };
   // Han/word 2024 View: buttons and Shift+Num +/- change by five percent.
@@ -156,46 +167,72 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
     const hint = document.createElement("kbd"); hint.textContent = `Ctrl+G,${key}`;
     b.append(hint); b.title = `본문 편집기에서 Ctrl+G를 누른 뒤 ${key}`;
   }
+  function restoreField(field: HTMLInputElement, value: string) {
+    if (field.value !== value) field.value = value;
+    if (field.validity.customError) field.setCustomValidity("");
+  }
   const presentation = mountViewMenuPresentation(root, busy);
+  const specialAdmission = new Set([...nav, zoomIn, zoomOut, fullscreen.button, ...markerButtons.map(row => row.button)]);
   function refresh() {
     const count = pages.children.length;
     let index = current();
     if (mode !== "custom") {
-      const before = scale,keep=layout.anchor();
-      fit();
-      // Sidebar/window resize must not leave a long document at the old
-      // pixel offset on a different page after fit-mode scaling.
-      if (scale !== before) {layout.refresh(keep);if(!keep)go(index);}
-      index = current();
+      const fitted = fittedScale(index);
+      if (fitted && (!fitted.measured || fitted.scale !== scale || pages.style.getPropertyValue("zoom") !== appliedZoom)) {
+        // Preserve the old anchor before writing the new zoom. A stable fit
+        // needs neither the anchor scan nor a second visible-page lookup.
+        const before = scale, keep = layout.anchor();
+        scale = fitted.scale;
+        publishZoom();
+        if (scale !== before) {layout.refresh(keep);if(!keep)go(index);}
+        index = current();
+      }
     }
     layout.refresh();
     // All fields below describe the same synchronous view publication.
     // Each user action still checks the current editor state on entry.
     const isBusy = busy(), unavailable = isBusy || !count;
-    number.max = String(count);
-    number.disabled = percent.disabled = unavailable;
+    if (number.max !== String(count)) number.max = String(count);
+    number.toggleAttribute("disabled", unavailable);
+    percent.toggleAttribute("disabled", unavailable);
     // A discarded draft's error must not describe the restored current value.
     // Keep both value and validation feedback while its input still has focus.
-    if (document.activeElement !== percent) { percent.value = String(Math.round(scale * 100)); percent.setCustomValidity(""); }
-    if (document.activeElement !== number) { number.value = count ? String(index + 1) : ""; number.setCustomValidity(""); }
+    if (document.activeElement !== percent) restoreField(percent, String(Math.round(scale * 100)));
+    if (document.activeElement !== number) restoreField(number, count ? String(index + 1) : "");
     const label = `${count ? index + 1 : 0} / ${count}쪽 · ${Math.round(scale * 100)}%${mode === "width" ? " · 폭 맞춤" : mode === "page" ? " · 쪽 맞춤" : ""}`;
     if (status.textContent !== label) status.textContent = label;
     for (const [key,value] of Object.entries({viewPage:count ? index+1 : 0,viewPages:count,viewZoom:Math.round(scale*100),viewMode:mode,viewBusy:unavailable}))
       if (status.dataset[key] !== String(value)) status.dataset[key] = String(value);
     for (const b of panel.querySelectorAll<HTMLButtonElement>("[data-view-action]")) {
-      if (b.disabled !== unavailable) b.disabled = unavailable;
+      // Publish the final admission once. Toggling a disabled control on and
+      // back off wakes proxy observers and can force layout at the caret read.
+      if (specialAdmission.has(b)) continue;
+      b.toggleAttribute("disabled", unavailable);
     }
     for (const {item, button} of markerButtons) {
       let value: boolean | undefined, error = "";
       try { value = markers?.read(item.id); } catch (e) { error = String(e); }
       const reason = error || (value === undefined ? "현재 Core/SVG 표시 연결 미지원" : isBusy ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : !count ? "문서를 먼저 여세요." : "");
-      button.disabled = !!reason; button.title = reason ? editorFeedbackText(reason) : (item.id === "transparent-borders" ? "선 없음 표·셀 경계를 화면에 점선으로 표시 · 저장/인쇄 제외" : item.id === "paragraph-marks" ? "문단 끝·기존 줄바꿈 표시 · 공백 표시는 조판 부호로 제어합니다." : "공백·조판 부호와 기존 문단 부호를 화면에 표시 · 저장/인쇄 제외");
+      button.toggleAttribute("disabled", !!reason);
+      const description = reason ? editorFeedbackText(reason) : (item.id === "transparent-borders" ? "선 없음 표·셀 경계를 화면에 점선으로 표시 · 저장/인쇄 제외" : item.id === "paragraph-marks" ? "문단 끝·기존 줄바꿈 표시 · 공백 표시는 조판 부호로 제어합니다." : "공백·조판 부호와 기존 문단 부호를 화면에 표시 · 저장/인쇄 제외");
       const shortcut = viewSequenceItems.find(([, action]) => action === item.id);
-      if (!reason && shortcut) button.title += ` · 본문에서 Ctrl+G를 누른 뒤 ${shortcut[2]}`;
-      button.setAttribute("aria-pressed", String(value === true));
-      button.setAttribute("aria-disabled", String(!!reason));
+      const title = !reason && shortcut ? description + ` · 본문에서 Ctrl+G를 누른 뒤 ${shortcut[2]}` : description;
+      if (!guideButtons.includes(button)) setViewAttribute(button, "title", title);
+      setViewAttribute(button, "aria-pressed", String(value === true));
+      setViewAttribute(button, "aria-disabled", String(!!reason));
     }
-    if(guides){const state=guides.read();for(const b of guideButtons){b.setAttribute("role","menuitemradio");b.setAttribute("aria-pressed",String(b.dataset.tableGuideMode===state.mode));b.setAttribute("aria-checked",String(b.dataset.tableGuideMode===state.mode));b.title="화면 보조선 · 저장/인쇄 제외 · 출력 테두리 불변";}guideNote.textContent=state.reason||"붉은 점선은 선 없음 구간의 편집 보조선 · 실제 출력 테두리 불변 · 저장/인쇄 제외. ‘선택한 표’는 커서·셀 블록·표 개체가 속한 표입니다.";}
+    if (guides) {
+      const state = guides.read();
+      for (const b of guideButtons) {
+        const checked = String(b.dataset.tableGuideMode === state.mode);
+        setViewAttribute(b, "role", "menuitemradio");
+        setViewAttribute(b, "aria-pressed", checked);
+        setViewAttribute(b, "aria-checked", checked);
+        setViewAttribute(b, "title", "화면 보조선 · 저장/인쇄 제외 · 출력 테두리 불변");
+      }
+      const note = state.reason || "붉은 점선은 선 없음 구간의 편집 보조선 · 실제 출력 테두리 불변 · 저장/인쇄 제외. ‘선택한 표’는 커서·셀 블록·표 개체가 속한 표입니다.";
+      if (guideNote.textContent !== note) guideNote.textContent = note;
+    }
     if (ruler && (activeMenuDemand(root) || ruler.state().shown)) {
       ruler.refresh();
       const rulerState = ruler.state(), rulerReason = rulerState?.reason || (!rulerState ? "현재 Core 쪽 눈금 조회 미지원" : busy() ? "입력·저장 또는 열린 대화상자를 먼저 마치세요." : "");
@@ -203,11 +240,11 @@ export function mountViewMenu(root: HTMLDetailsElement, pages: HTMLElement, view
       rulerButton.setAttribute("aria-pressed", String(rulerState?.shown === true));
       rulerButton.setAttribute("aria-disabled", String(!!rulerReason));
     }
-    nav[0].disabled ||= index === 0; nav[1].disabled ||= index === 0;
-    nav[2].disabled ||= index === count - 1; nav[3].disabled ||= index === count - 1;
-    zoomOut.disabled ||= scale <= .25; zoomIn.disabled ||= scale >= 3;
-    presets.forEach((b, n) => b.setAttribute("aria-pressed", String(n === 0 ? mode === "custom" && Math.abs(scale - 1) < .001 : mode === (n === 1 ? "width" : "page"))));
-    side.setAttribute("aria-pressed", String(!sidebar.hidden));
+    nav.forEach((b, i) => b.toggleAttribute("disabled", unavailable || (i < 2 ? index === 0 : index === count - 1)));
+    zoomOut.toggleAttribute("disabled", unavailable || scale <= .25);
+    zoomIn.toggleAttribute("disabled", unavailable || scale >= 3);
+    presets.forEach((b, n) => setViewAttribute(b, "aria-pressed", String(n === 0 ? mode === "custom" && Math.abs(scale - 1) < .001 : mode === (n === 1 ? "width" : "page"))));
+    setViewAttribute(side, "aria-pressed", String(!sidebar.hidden));
     presentation.refresh(!!count);fullscreen.refresh();
   }
   viewport.addEventListener("scroll", refresh, { passive: true });

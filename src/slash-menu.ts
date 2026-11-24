@@ -70,7 +70,7 @@ function createSlashMenu(doc:Document,editor:Interaction,actions:SlashActions,re
   const oldAria=new Map(['aria-label','aria-controls','aria-haspopup','aria-activedescendant','aria-autocomplete'].map(n=>[n,input.getAttribute(n)]));
   const restoreAria=()=>{for(const[n,v]of oldAria)if(v===null)input.removeAttribute(n);else input.setAttribute(n,v);};
   const current=()=>!!target&&access===`${editor.adapter.scope}:${editor.adapter.documentLocked}`&&sameFormatTarget(target,editor.capture());
-  const close=(focus=true)=>{guard.close();closeEditorDialog(dialog, false);target=undefined;draft.close();restoreAria();if(focus&&doc.activeElement!==input)actions.focus();if(!running)release?.();};
+  const close=(focus=true,explicit=false)=>{guard.close();closeEditorDialog(dialog, false);target=undefined;draft.close(explicit);restoreAria();if(focus&&doc.activeElement!==input)actions.focus();if(!running)release?.();};
   const show=()=>{
     // An inline suggestion list must not run dialog.show()'s focusing steps.
     // open is non-modal; existing dialog[open] admission remains intact.
@@ -131,22 +131,23 @@ function createSlashMenu(doc:Document,editor:Interaction,actions:SlashActions,re
     commitSpace:()=>{if(dialog.open)void run();},
     key:e=>{
       if(!dialog.open)return;
-      if(e.key==='Escape'){e.preventDefault();close();}
+      if(e.key==='Escape'){e.preventDefault();if(draft.canCancel())close();}
       else if(e.key==='Enter'||e.key===' '){e.preventDefault();if(!e.repeat&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!e.shiftKey)void run();}
       else if(!query.value&&!e.repeat&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&Object.values(hotkeys).includes(e.key)){e.preventDefault();active=choices.findIndex(r=>hotkeys[r.id]===e.key);if(active>=0)void run();}
       else if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();active=(active+(e.key==='ArrowDown'?1:-1)+choices.length)%Math.max(1,choices.length);mark();options()[active]?.scrollIntoView({block:'nearest'});}
       else if(e.key==='Tab')close(false);
     },
   });
-  form.onsubmit=e=>{e.preventDefault();run();};form.querySelector<HTMLButtonElement>("[data-slash-close]")!.onclick=()=>close();
-  form.querySelector<HTMLButtonElement>('[data-slash-close]')!.onpointerdown=e=>e.preventDefault();
-  form.addEventListener("keydown",e=>{e.stopPropagation();if(draft.composing()||e.isComposing||e.keyCode===229)return;
-    if(e.key==="Escape"){e.preventDefault();close();}else if(e.key==="Enter"){e.preventDefault();if(!e.repeat&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!e.shiftKey)run();}
+  form.onsubmit=e=>{e.preventDefault();run();};
+  const closeButton=form.querySelector<HTMLButtonElement>('[data-slash-close]')!;
+  guard.bindCancel(closeButton, () => close(true,true), draft.canCancel);
+  closeButton.onpointerdown=e=>e.preventDefault();
+  form.addEventListener("keydown",e=>{e.stopPropagation();if(e.defaultPrevented||draft.composing()||e.isComposing||e.keyCode===229)return;
+    if(e.key==="Escape"){e.preventDefault();if(draft.canCancel())close();}else if(e.key==="Enter"){e.preventDefault();if(!e.repeat&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!e.shiftKey)run();}
   },{signal});
-  dialog.addEventListener("cancel",e=>{e.preventDefault();if(!draft.composing())close();},{signal});
   doc.addEventListener("pointerdown",e=>{if(dialog.open&&!dialog.contains(e.target as Node)){if(draft.composing()){e.preventDefault();e.stopImmediatePropagation();return;}close(false);}},{capture:true,signal});
   doc.addEventListener("scroll",schedule,{capture:true,passive:true,signal});doc.defaultView?.addEventListener("resize",schedule,{signal});const size=new ResizeObserver(schedule);size.observe(viewport);
   const sync=()=>{if(dialog.open){if(!current())close(false);else schedule();}};
   if(release)doc.addEventListener("rhwp:editor-state",sync,{signal});
-  return{begin,get open(){return dialog.open;},execute(_command:Command,_captured:ReturnType<Interaction["capture"]>){return false;},sync,dispose(){life.abort();guard.close();draft.dispose();restoreAria();size.disconnect();if(frame)cancelAnimationFrame(frame);dialog.remove();}};
+  return{begin,get open(){return dialog.open;},execute(_command:Command,_captured:ReturnType<Interaction["capture"]>){return false;},sync,dispose(){life.abort();guard.dispose();draft.dispose();restoreAria();size.disconnect();if(frame)cancelAnimationFrame(frame);dialog.remove();}};
 }

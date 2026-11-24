@@ -11,6 +11,7 @@ const safeTop=new Set(["documentPr","dh","bf","cp","tp","nu","bu","pp","st","mp"
 const blockedHtml=/<\s*(?:script|svg|object|embed|iframe|link|base|img|audio|video|source)\b/i;
 
 type RecordValue=Record<string,unknown>;
+export type { Link as HancomClipboardLink };
 type Link={paragraph:number;start:number;end:number;command:string;uri:string;label:string;editable:boolean;dirty:boolean;
   fieldId:number|undefined;zOrder:number|undefined;neutralProp:boolean};
 type Caption={table:number;paragraphId:string;source:RecordValue;width:number;gap:number;full:boolean;outerWidth:number};

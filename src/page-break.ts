@@ -1,6 +1,12 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from "./adapter.js";
 import { coreRuntimeHasCapability } from "./core-runtime.js";
 import type { Selection } from "./model.js";
+
+export const pageBreakLabels = {
+  page: "쪽 나누기",
+  column: "단 나누기",
+} as const;
 
 type RootControl = { list:number; para:number; ctrlId:string; userDesc:string; props?:{Lock?:boolean} };
 const documentDefinitions = new Set(["secd", "cold", "head", "foot"]);
@@ -25,7 +31,7 @@ function target(a: RhwpAdapter, s: Selection) {
   return {p, rootPara, controls};
 }
 export function pageBreakReason(a: RhwpAdapter, s: Selection) {
-  try { target(a, s); return ""; } catch (error) { return String(error).replace(/^Error: /, ""); }
+  try { target(a, s); return ""; } catch (error) { return editorFeedbackText(error); }
 }
 export function preparePageBreak(a: RhwpAdapter, s: Selection): () => Selection {
   const {p, rootPara, controls} = target(a, s);

@@ -1,3 +1,5 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
+import { dismissPaletteOnEscape, fitPaletteAxis, paletteGridIndex } from "./palette-navigation.js";
 import type { Interaction } from "./interaction.js";
 import type { FormatState } from "./formatting.js";
 import { toCoreCharacter } from "./formatting.js";
@@ -32,7 +34,7 @@ export function mountTextColorSplit(doc:Document, editor:Interaction, hex:HTMLIn
         options.apply(toCoreCharacter({textColor:next}),target);
       recent=[next,...recent.filter(c=>c!==next)].slice(0,10);project();
       guard.consume();close(false);options.focus();
-    }catch(error){status.textContent=String(error).replace(/^Error: /,"");}
+    }catch(error){status.textContent=editorFeedbackText(error);}
   }
   const button=(text:string)=>{const b=doc.createElement("button");b.type="button";b.textContent=text;return b;};
   const automatic=button("검정");automatic.dataset.color="#000000";automatic.title="검정";automatic.onclick=()=>commit("#000000");popup.append(automatic);
@@ -52,13 +54,25 @@ export function mountTextColorSplit(doc:Document, editor:Interaction, hex:HTMLIn
   const focusColor=(b:HTMLElement)=>{for(const g of grids)for(const n of g.querySelectorAll<HTMLElement>("button"))n.tabIndex=n===b?0:-1;b.focus({preventScroll:true});b.scrollIntoView({block:"nearest"});};
   popup.addEventListener("keydown",e=>{
     if(e.isComposing||e.keyCode===229||e.altKey||e.ctrlKey||e.metaKey)return;
-    if(e.key==="Escape"){e.preventDefault();e.stopImmediatePropagation();close();return;}
+    if(dismissPaletteOnEscape(e, close))return;
     if(e.key==="Enter"&&e.target===hex){e.preventDefault();e.stopPropagation();if(!e.repeat)commit(hex.value);return;}
     const b=(e.target as Element).closest<HTMLElement>("[role=option]"),g=b?.parentElement;
-    if(!b||!g||!["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"].includes(e.key))return;
-    const items=[...g.querySelectorAll<HTMLElement>("button")],at=items.indexOf(b),n=e.key==="Home"?0:e.key==="End"?items.length-1:at+({ArrowLeft:-1,ArrowRight:1,ArrowUp:-10,ArrowDown:10}[e.key]??0);e.preventDefault();e.stopPropagation();focusColor(items[Math.max(0,Math.min(items.length-1,n))]);
+    if(!b||!g)return;
+    const items=[...g.querySelectorAll<HTMLElement>("button")];
+    const next=paletteGridIndex(e.key,items.indexOf(b),items.length,10);
+    if(next===undefined)return;
+    e.preventDefault();e.stopPropagation();focusColor(items[next]);
   });
-  function fit(){if(popup.hidden)return;const a=trigger.getBoundingClientRect(),host=doc.body.getBoundingClientRect(),w=doc.defaultView!,width=Math.min(300,w.innerWidth-16,host.width-16);popup.style.width=`${Math.max(160,width)}px`;popup.style.maxHeight=`${Math.max(100,w.innerHeight-16)}px`;popup.style.left=`${Math.max(8,Math.min(a.left,host.right-width-8,w.innerWidth-width-8))}px`;popup.style.top=`${Math.max(8,Math.min(a.bottom+5,w.innerHeight-popup.getBoundingClientRect().height-8))}px`;}
+  function fit(){
+    if(popup.hidden)return;
+    const anchor=trigger.getBoundingClientRect(), host=doc.body.getBoundingClientRect(), viewport=doc.defaultView!;
+    const right=Math.min(host.right,viewport.innerWidth)-8;
+    const width=Math.max(0,Math.min(300,right-8));
+    popup.style.width=`${width}px`;
+    popup.style.maxHeight=`${Math.max(0,viewport.innerHeight-16)}px`;
+    popup.style.left=`${fitPaletteAxis(anchor.left,8,right,width)}px`;
+    popup.style.top=`${fitPaletteAxis(anchor.bottom+5,8,viewport.innerHeight-8,popup.getBoundingClientRect().height)}px`;
+  }
   function open(){
     if(options.readBusy()||reason)return;
     target=editor.capture();status.textContent="";popup.hidden=false;trigger.setAttribute("aria-expanded","true");hex.value=valid(state.textColor)?state.textColor:"";

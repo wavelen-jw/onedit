@@ -1,16 +1,12 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from "./adapter.js";
 import type { Selection } from "./model.js";
-import { pageBreakReason } from "./page-break.js";
-import { columnEditReason, columnView } from "./columns.js";
+import { columnBreakTarget } from './column-break.js';
 
 // Inherit the existing definition only. The section getter/setter cannot edit
 // the newly-created zone; never use it as a position-specific settings API.
 function target(a: RhwpAdapter, s: Selection) {
-  const reason = pageBreakReason(a, s);
-  if (reason) throw Error(reason);
-  if (s.kind !== "caret" || s.focus.kind !== "body") throw Error("본문 커서를 확인하세요.");
-  const p = s.focus, view = columnView(a, p.sec), blocked = columnEditReason(a, s, view);
-  if (blocked) throw Error(blocked);
+  const {p} = columnBreakTarget(a, s);
   const at = a.textOffset(p), text = [...a.text(p)];
   // Boundary/object-owner variants retain their existing restrictions until
   // their UI selection contracts have direct acceptance.
@@ -23,7 +19,7 @@ function target(a: RhwpAdapter, s: Selection) {
   return { p, at, text, stream };
 }
 export function columnDefinitionBreakReason(a: RhwpAdapter, s: Selection) {
-  try { target(a, s); return ""; } catch (error) { return String(error).replace(/^Error: /, ""); }
+  try { target(a, s); return ""; } catch (error) { return editorFeedbackText(error); }
 }
 export function prepareColumnDefinitionBreak(a: RhwpAdapter, s: Selection): () => Selection {
   const { p, at, text, stream } = target(a, s), count = a.doc.getParagraphCount(p.sec);

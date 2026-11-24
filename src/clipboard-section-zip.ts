@@ -3,13 +3,20 @@ const archiveLimit = 16 * 1024 * 1024;
 const decoder = new TextDecoder("utf-8", {fatal:true});
 function invalid(): never { throw Error("한/글 붙여넣기용 HWPX 구조를 확인하지 못했습니다."); }
 function view(b: Uint8Array) { return new DataView(b.buffer,b.byteOffset,b.byteLength); }
-function crc(bytes: Uint8Array): number {
-  let r = -1;
-  for (const b of bytes) {
-    r ^= b;
-    for (let bit=0;bit<8;bit++) r = (r>>>1) ^ (r & 1 ? 0xedb88320 : 0);
+const crcTable = Uint32Array.from({ length: 256 }, (_, byte) => {
+  let value = byte;
+  for (let bit = 0; bit < 8; bit++) {
+    value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
   }
-  return (r ^ -1) >>> 0;
+  return value;
+});
+
+function crc(bytes: Uint8Array): number {
+  let value = -1;
+  for (let i = 0; i < bytes.length; i++) {
+    value = (value >>> 8) ^ crcTable[(value ^ bytes[i]) & 0xff];
+  }
+  return (value ^ -1) >>> 0;
 }
 
 type XmlMember = "Contents/section0.xml" | "settings.xml";
@@ -17,10 +24,30 @@ export function rewriteSectionXml(bytes: Uint8Array, edit: (xml:Document)=>void 
   return rewriteHwpxXmlMember(bytes, "Contents/section0.xml", edit);
 }
 
-export async function rewriteHwpxXmlMember(
+export function inspectSectionXml(bytes: Uint8Array, read: (xml: Document) => void, requiredLiteral?: string) {
+  return processXmlMember(bytes, "Contents/section0.xml", xml => {
+    read(xml);
+    return false;
+  }, requiredLiteral);
+}
+
+function editXml(text: string, edit: (xml: Document) => void | false, requiredLiteral?: string) {
+  if (/<!DOCTYPE|<!ENTITY/i.test(text)) invalid();
+  if (requiredLiteral !== undefined && !text.includes(requiredLiteral)) return;
+  const xml = new DOMParser().parseFromString(text, "application/xml");
+  if (xml.querySelector("parsererror")) invalid();
+  if (edit(xml) !== false) return new TextEncoder().encode(new XMLSerializer().serializeToString(xml));
+}
+
+export function rewriteHwpxXmlMember(bytes: Uint8Array, member: XmlMember, edit: (xml: Document) => void | false) {
+  return processXmlMember(bytes, member, edit);
+}
+
+async function processXmlMember(
   bytes: Uint8Array,
   member: XmlMember,
   edit: (xml:Document)=>void | false,
+  requiredLiteral?: string,
 ): Promise<Uint8Array> {
   if (bytes.length>archiveLimit || bytes.length<22) invalid();
   const input=view(bytes), eocd=bytes.length-22;
@@ -66,17 +93,13 @@ export async function rewriteHwpxXmlMember(
         } finally { await reader.cancel(); }
       }
       if (data.length!==size || crc(data)!==u32(c+16)) invalid();
-      const xmlText=decoder.decode(data);
-      if (/<!DOCTYPE|<!ENTITY/i.test(xmlText)) invalid();
-      const xml=new DOMParser().parseFromString(xmlText,"application/xml");
-      if (xml.querySelector("parsererror")) invalid();
-      if (edit(xml) === false) {
+      const replacement = editXml(decoder.decode(data), edit, requiredLiteral);
+      if (!replacement) {
         chunks.push(bytes.subarray(local,end));
         outputAt+=end-local;
         central.push(header);c=record;inputAt=end;
         continue;
       }
-      const replacement=new TextEncoder().encode(new XMLSerializer().serializeToString(xml));
       const localHeader=bytes.slice(local,content),l=view(localHeader), sum=crc(replacement);
       l.setUint16(8,0,true); l.setUint32(14,sum,true);
       l.setUint32(18,replacement.length,true);l.setUint32(22,replacement.length,true);

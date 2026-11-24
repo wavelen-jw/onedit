@@ -1,8 +1,10 @@
-import { approvedEmbedChrome } from "./approved-embed-chrome.js";
+import { approvedEmbedChrome, approvedLocalWorkspace } from "./approved-embed-chrome.js";
 import {installReportUI} from './diagnostics/report-ui.js';
 import {freezeDiagnostic} from './diagnostics/runtime.js';
 import {startupMark} from './startup-timing.js';
+import {startRootCoreLoad} from './core-module-loading.js';
 startupMark('entry');
+startRootCoreLoad();
 try { installReportUI(document); } catch { /* Optional reporting must never prevent editor startup or report itself. */ }
 // Initial HTML retains source controls for existing owners. Publish them only
 // after the same UI bootstrap has finished; no editable legacy fallback.
@@ -23,7 +25,7 @@ try {
   await new Promise<void>(resolve => queueMicrotask(resolve));
   if (root.dataset.workspaceStartup !== "failed") {
     if (!document.querySelector("#pages > .page > svg, #pages > .page > canvas") ||
-        ((window.parent===window||approvedEmbedChrome(document)) && !document.querySelector(".workspace-modern #workspace-document-identity")))
+        ((window.parent===window||approvedLocalWorkspace(document)||approvedEmbedChrome(document)) && !document.querySelector(".workspace-modern #workspace-document-identity")))
       throw Error("편집기 화면 구성이 완료되지 않았습니다.");
     const returnFocus = document.activeElement === document.body || startup.contains(document.activeElement);
     startup.hidden = true;

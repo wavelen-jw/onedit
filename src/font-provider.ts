@@ -1,3 +1,4 @@
+import { fontFamilyKey } from './font-name.js';
 import {fontFamilyValues} from './font-family-values.js';
 import {finishResponsiveWork,yieldToBrowser} from './responsive-work.js';
 // Font supply is session rendering state. Only an explicit formatting Command
@@ -460,7 +461,7 @@ const printSources=new WeakMap<Uint8Array<ArrayBuffer>,Map<string,string>>();
 const originalNames=new WeakMap<object,Set<string>>(),sourceRevisions=new WeakMap<object,number>();
 const cssFallbacksByDocument=new WeakMap<object,Map<string,string[]>>();
 let revision=0, started=false;
-const familyKey=(family:string)=>family.trim().replace(/^(['"])(.*)\1$/,'$2').normalize('NFC').toLowerCase();
+const familyKey = fontFamilyKey;
 function loadedFaces(family:string){return typeof document==='undefined'?[]:[...document.fonts].filter(f=>familyKey(f.family)===familyKey(family)&&f.status==='loaded');}
 export function fontSupply(family:string):FontSupply|undefined{
   const r=records.get(family)??[...records.values()].find(r=>familyKey(r.family)===familyKey(family));

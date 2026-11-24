@@ -1,3 +1,5 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
+import { setViewAttribute } from "./view-menu-presentation.js";
 import { closeEditorDialog, showUtilityDialog } from "./editor-popup-focus.js";
 import {activeWorkset} from './active-workset.js';
 import {subscribeWhileOpen} from './ui-demand-lifetime.js';
@@ -107,15 +109,23 @@ export function mountMenuSettings(doc: Document, actions: {
   for(const b of launchers){b.textContent=b.dataset.ui1Label??(b.dataset.menuScopePart==='menu-settings'?'메뉴 사용자 설정…':'단축키 사용자 설정…');b.onclick=()=>{
     doc.querySelectorAll('#main-menu details[open]').forEach(d=>d.removeAttribute('open'));show(b.dataset.menuScopePart!, b);
   };}
-  const sync=()=>{for(const b of launchers){b.disabled=actions.busy();b.title=b.disabled?'입력·저장·열린 대화상자를 먼저 마치세요.':'이번 편집 탭의 서식 메뉴 표시·추가 단축키를 설정합니다.';b.setAttribute('aria-disabled',String(b.disabled));b.setAttribute('aria-description',b.title);}
+  const sync=()=>{
+    const disabled = launchers.length > 0 && actions.busy();
+    const title = disabled ? '입력·저장·열린 대화상자를 먼저 마치세요.' : '이번 편집 탭의 서식 메뉴 표시·추가 단축키를 설정합니다.';
+    for(const b of launchers){
+      b.toggleAttribute('disabled', disabled);
+      setViewAttribute(b, 'title', title);
+      setViewAttribute(b, 'aria-disabled', String(disabled));
+      setViewAttribute(b, 'aria-description', title);
+    }
     if(dialog.open){const stale=!captured||!sameFormatTarget(captured,actions.capture());apply.disabled=reset.disabled=stale||actions.busy();if(stale)status.textContent='문서·리비전·선택이 변경되었습니다. 취소 후 다시 여세요.';}};
   form.onsubmit=e=>{e.preventDefault();if(!guard.ready())return;
     try{if(actions.busy()||!captured||!sameFormatTarget(captured,actions.capture()))throw Error('문서·선택 또는 처리 상태가 변경되었습니다. 취소 후 다시 여세요.');
       const rows=configurableCommands.map(({id})=>({id,visible:controls.get(id)!.visible.checked,shortcut:controls.get(id)!.shortcut.value}));
       preferences.apply(rows);guard.consume();project();close();
-    }catch(error){status.textContent=String(error).replace(/^Error: /,'');}};
+    }catch(error){status.textContent=editorFeedbackText(error);}};
   reset.onclick=()=>{if(guard.ready()&&!actions.busy()&&captured&&sameFormatTarget(captured,actions.capture())){draft(defaultMenuPreferences());status.textContent='기본값 초안입니다. 설정을 눌러 반영하거나 취소할 수 있습니다.';}};
-  cancel.onclick=close;dialog.addEventListener('cancel',e=>{if(e.defaultPrevented)return;e.preventDefault();close();});
+  guard.bindCancel(cancel, close);
   dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();captured=undefined;sync();});
   form.addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.isComposing&&e.keyCode!==229){const all=[...form.querySelectorAll<HTMLElement>('summary,button,input,select')].filter(n=>n.tabIndex>=0&&!(n as HTMLInputElement).disabled&&!!n.getClientRects().length),at=all.indexOf(doc.activeElement as HTMLElement);if(all.length&&(at<0||(e.shiftKey?at===0:at===all.length-1))){e.preventDefault();all[e.shiftKey?all.length-1:0].focus();}}e.stopPropagation();});
   const observer=new MutationObserver(sync);

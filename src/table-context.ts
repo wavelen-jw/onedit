@@ -1,3 +1,6 @@
+import { rowColumnItem, rowColumnMenuGroups } from "./table-menu-items.js";
+import { contextMenuAnchor, placeSubmenu, showContextMenuAt } from "./context-menu-placement.js";
+import { sameFormatTarget } from "./integration/a-format-input-guard.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import {activeWorkset, withMenuDemand} from "./active-workset.js";
 import { cellDialogFor, cellDialogMode } from "./cell-dialog-command.js";
@@ -7,7 +10,7 @@ import {registerPopupLifetime} from './menu-lifetime.js';
 import type { EditAction } from "./integration/a-edit-menu.js";
 import type { Interaction } from "./interaction.js";
 import { sameContainer, sameTable, type Position, type Selection } from "./model.js";
-import { pagePoint, pageScale } from "./integration/a-view-menu.js";
+import { pagePoint } from "./integration/a-view-menu.js";
 import { tableItems, tableMenuState } from "./integration/a-table-menu.js";
 import { formatMenuState } from "./integration/a-format-menu.js";
 
@@ -24,7 +27,7 @@ export function keepTableContextSelection(selection: Selection, hit: Position, s
   return false;
 }
 export function sameTableContextTarget(a: ReturnType<Interaction["capture"]>, b: typeof a) {
-  return a.documentId === b.documentId && a.revision === b.revision && JSON.stringify(a.selection) === JSON.stringify(b.selection);
+  return sameFormatTarget(a, b);
 }
 export function tableContextKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey" | "isComposing" | "keyCode" | "repeat">) {
   return !e.isComposing && e.keyCode !== 229 && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey &&
@@ -104,8 +107,14 @@ export function mountTableContext(doc: Document, editor: Interaction, busy: () =
   table(border,'block-border','하나의 셀처럼 · 테두리…','B');
   table(border,'block-background','하나의 셀처럼 · 배경…','F');
   separator();table(popup,"merge","셀 합치기","M · F5 블록");const split=table(popup,"split-dialog","셀 나누기…","S");
-  const add=submenu("줄/칸 추가하기");table(add,'add-dialog','줄/칸 추가하기…','Alt+Insert');table(add,"row-add","아래 행 추가");table(add,"col-add","오른쪽 열 추가");
-  const remove=submenu("줄/칸 지우기");table(remove,'delete-dialog','줄/칸 지우기…','Alt+Delete');table(remove,"row-delete","현재 행 삭제 · 내용 포함");table(remove,"col-delete","현재 열 삭제 · 내용 포함");
+  const add = submenu("줄/칸 추가하기");
+  const remove = submenu("줄/칸 지우기");
+  for (const [panel, ids] of [[add, rowColumnMenuGroups.add], [remove, rowColumnMenuGroups.remove]] as const) {
+    for (const id of ids) {
+      const { label, key } = rowColumnItem(id);
+      table(panel, id, label, key);
+    }
+  }
   separator();const more=submenu("선택·이동·크기 도구");
   for(const id of ["select","text","object","previous","next","width-plus","width-minus","height-plus","height-minus","select-columns","leave","control-front","control-back","control-inFrontOfText","control-behindText"]){const entry=tableItems.find(x=>x.id===id)!;table(more,id,entry.label,entry.key);}
 
@@ -148,24 +157,33 @@ export function mountTableContext(doc: Document, editor: Interaction, busy: () =
   };
   const enabled=(menu:HTMLElement)=>Array.from(menu.children).filter((n):n is HTMLButtonElement=>n instanceof HTMLButtonElement&&!n.hidden&&!n.disabled);
   const focus=(button?:HTMLButtonElement)=>{button?.focus({preventScroll:true});button?.scrollIntoView({block:"nearest"});};
-  const position=(button:HTMLButtonElement,panel:HTMLElement)=>{
-    const a=button.getBoundingClientRect(),root=popup.getBoundingClientRect(),box=panel.getBoundingClientRect();
-    panel.style.left=`${Math.max(8,Math.min(root.right+box.width<win.innerWidth-8?root.right+1:root.left-box.width-1,win.innerWidth-box.width-8))}px`;
-    panel.style.top=`${Math.max(8,Math.min(a.top,win.innerHeight-box.height-8))}px`;
+  const position = (button: HTMLButtonElement, panel: HTMLElement) => placeSubmenu(button, popup, panel);
+  const openSubmenu = (button: HTMLButtonElement, explicit = false) => {
+    if (busy() || !current()) return;
+    const panel = submenus.get(button)!;
+    if (!explicit && !panel.hidden) return;
+    panel.hidden = false;
+    // Hover stays available for side-by-side menus. A narrow fallback needs
+    // an explicit click or keyboard action because it can cover sibling rows.
+    if (!position(button, panel) && !explicit) { panel.hidden = true; return; }
+    for (const [other, sibling] of submenus) {
+      const active = other === button;
+      sibling.hidden = !active;
+      other.setAttribute("aria-expanded", String(active));
+    }
+    if (explicit) focus(enabled(panel)[0]);
   };
-  const openSubmenu=(button:HTMLButtonElement,keyboard=false)=>{if(busy()||!current())return;closeSubmenus();const panel=submenus.get(button)!;panel.hidden=false;button.setAttribute("aria-expanded","true");position(button,panel);if(keyboard)focus(enabled(panel)[0]);};
   for(const [button]of submenus){button.onclick=()=>openSubmenu(button,true);button.onpointerenter=e=>{if(e.pointerType!=="touch")openSubmenu(button);};}
   popup.addEventListener("scroll",()=>{for(const [button,panel]of submenus)if(!panel.hidden)position(button,panel);},{passive:true});
   const open=(x:number,y:number)=>{
     if(busy()||editor.selection.focus.kind!=="cell")return;
     for(const menu of doc.querySelectorAll<HTMLDetailsElement>("#main-menu details[open], #table-tools"))menu.open=false;
-    captured=editor.capture();sync();popup.hidden=false;popup.style.left=popup.style.top="8px";
-    const box=popup.getBoundingClientRect();popup.style.left=`${Math.max(8,Math.min(x,win.innerWidth-box.width-8))}px`;popup.style.top=`${Math.max(8,Math.min(y,win.innerHeight-box.height-8))}px`;
+    captured=editor.capture();sync();showContextMenuAt(popup, x, y);
     doc.dispatchEvent(new Event("rhwp:table-context"));focus(enabled(popup)[0]);
   };
   const openKeyboard=()=>{
     if(busy()||editor.selection.focus.kind!=="cell")return;
-    try{const rect=editor.adapter.rect(editor.selection.focus),page=pages.querySelector<HTMLElement>(`[data-page="${rect.pageIndex}"]`);if(!page)return;const box=page.getBoundingClientRect(),scale=pageScale(page);open(box.left+rect.x*scale,box.top+(rect.y+rect.height)*scale);}catch(error){close(true);feedback(String(error));}
+    try{const rect=editor.adapter.rect(editor.selection.focus),page=pages.querySelector<HTMLElement>(`[data-page="${rect.pageIndex}"]`);if(!page)return;open(...contextMenuAnchor(page, rect.x, rect.y + rect.height));}catch(error){close(true);feedback(String(error));}
   };
   const pointer=(e:PointerEvent)=>{if(e.button===2){e.preventDefault();e.stopPropagation();}};
   const context=(e:MouseEvent)=>{

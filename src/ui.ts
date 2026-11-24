@@ -1,3 +1,8 @@
+import { approvedLocalWorkspace } from "./approved-embed-chrome.js";
+import { lineBreakCommand } from "./text-edit-commands.js";
+import { characterStyleCommand } from "./character-style-commands.js";
+import { mountedPaperBoxes } from "./paper-boxes.js";
+import { hasOpenDialog } from "./dialog-support.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import { bindEditorDialogFormSubmit, bindEditorPopupFocus, closeEditorDialog, showDocumentEditingDialog, showEditorDialog } from "./editor-popup-focus.js";
 import {coreRuntimeScreenInputEpoch as screenInputDispatchEpoch} from "./core-runtime.js";
@@ -28,6 +33,7 @@ import { specialEditingStatus } from "./status-statistics.js";
 import {startupMark} from './startup-timing.js';
 import { applyUserMenuDecisions } from './user-menu-decisions.js';
 import {pointerTextRange} from "./pointer-text-selection.js";
+import {appendSelectionMark, clearSelectionMarks} from "./page-layers.js";
 import {paintBodyCorners, type BodyPageInfo} from './body-corner-guides.js';
 import {captureParentTableCut} from './parent-table-cut.js';
 import {captureCellBlockObjectCut} from './cell-block-cut.js';
@@ -37,11 +43,11 @@ import { mountTextboxEditor } from "./textbox-edit-ui.js";
 import { clipboardPictureSize } from "./clipboard-image.js";
 import { pasteCompletion } from "./external-text-format.js";
 import { prepareHancomLinkedHwpx, restoreHancomNativeLink } from "./hancom-linked-hwpx.js";
-import { extractLinkZOrder, rememberLinkZOrder } from "./hwpx-link-zorder.js";
-import { readPrintSettings, rememberPrintSettings } from "./hwpx-print-settings.js";
+import { adoptPreparedHancomPaste, inspectPreparedHancomPaste } from "./hancom-paste-adoption.js";
 import { siblingDocument, wasCreatedBlank } from "./core-runtime.js";
 import { hancomFragmentRequested, readHancomQaHwpx } from "./hancom-native-qa.js";
 import { encodeHancomNativeRange } from "./clipboard.js";
+import { hasClipboardMarker } from "./clipboard-envelope.js";
 import { mountPasteResult } from "./paste-result-ui.js";
 import { offerPlainPaste, PasteFormatUnavailable } from "./paste-format-fallback.js";
 import { clipboardMarkdown } from "./clipboard-markdown.js";
@@ -60,6 +66,8 @@ import {
 import { nativeSavePicker } from "./native-save-picker.js";
 import { FileLifecycle, downloadHwpx } from "./file-lifecycle.js";
 import { type FormatKind, type FormatState } from "./formatting.js";
+import { formatInputGuard } from "./integration/a-format-input-guard.js";
+import { submitFormatDraft } from "./format-draft-submit.js";
 import { mountFields } from "./format-dialog.js";
 import { NextHostAdapter } from "./host.js";
 import { mountCompositionInput } from "./composition-input.js";
@@ -119,8 +127,10 @@ function showTableNotice(error:unknown) {
   return true;
 }
 const pasteResult = mountPasteResult(document, () => ({ documentId: adapter.documentId, revision: adapter.revision }), () => requestedFontDescriptions(adapter));
+const localWorkspace = approvedLocalWorkspace(document);
 const files = new FileLifecycle(adapter, editor, {
-  standalone: window.parent === window,
+  standalone: window.parent === window || localWorkspace,
+  localWorkspace,
   confirm: (message) => confirm(message),
   prompt: (message, name) => prompt(message, name),
   pickSaveTarget: nativeSavePicker(window),
@@ -201,7 +211,8 @@ function projectSaveNotice() {
   projectText("file-status", files.notice);
   panel.toggleAttribute("data-save-success", token !== undefined);
   // Persistent viewer restrictions are displayed outside this panel.
-  const viewerRestriction = !!adapter.viewerOnlyReason && files.notice.startsWith("읽기 전용 표시 · ");
+  const viewerRestriction = !!adapter.viewerOnlyReason && !files.canDownloadTrackedOriginal &&
+    files.notice.startsWith("읽기 전용 표시 · ");
   panel.hidden = !files.notice || viewerRestriction || saveNoticeExpired;
 }
 configureReporting({wasmDeclared:coreRuntimeSha256,wasmObserved:()=>coreRuntimeIdentity(adapter.doc)?.sha256??null,state:()=>({
@@ -213,14 +224,14 @@ configureReporting({wasmDeclared:coreRuntimeSha256,wasmObserved:()=>coreRuntimeI
 })});
 mountTypingFormatPresentation(editor,input,
   () => `${fontSupplyRevision()}:${devicePixelRatio}:${adapter.presentationDpi()}`,
-  () => files.busy || clipboardBusy || !!document.querySelector('dialog[open]'));
+  () => files.busy || clipboardBusy || hasOpenDialog(document));
 let dragging = false;
 // IME edits the current document inside a pending transaction. Only commit
 // publishes its single History entry; cancellation restores the original state.
 let composition: LiveComposition | undefined;
 const compositionKeys = compositionCommitKey(input, () => JSON.stringify([
   adapter.documentId, adapter.revision, editor.selection,
-]), () => { if (!composing && !files.busy && !clipboardBusy && !document.querySelector("dialog[open]")) safe(() => editor.execute({type:"break"}), true); });
+]), () => { if (!composing && !files.busy && !clipboardBusy && !hasOpenDialog(document)) safe(() => editor.execute(lineBreakCommand()), true); });
 let bodyPastePresentation = false;
 let textEditPresentation = false;
 let resizePresentation = false;
@@ -248,23 +259,26 @@ function cancelComposition() {
   composition = undefined;
   delete input.dataset.imePreview;
 }
+function presentSafeCommand(before: PresentationTarget, visibleBodyEdit = false, resizing = false) {
+  if (adapter.revision !== before.revision) qaInputBoundary?.("native-command-committed");
+  // A resize at its content floor restored the entire snapshot/selection.
+  // There is no new document, History, format or ink to publish or rebuild.
+  if (resizing && before.documentId === adapter.documentId && before.revision === adapter.revision) return;
+  qaRenderCause?.("edit-dispatch");
+  if (visibleBodyEdit) publishBodyPaste(before, true);
+  else {
+    resizePresentation = resizing;
+    try { files.ui.change(true); }
+    finally { resizePresentation = false; }
+  }
+  return revealCommandSelection(document, before, presentationTarget());
+}
 function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
   try {
     $("error").hidden = true;
     const before = presentationTarget();
     action();
-    if (adapter.revision !== before.revision) qaInputBoundary?.("native-command-committed");
-    // A resize at its content floor restored the entire snapshot/selection.
-    // There is no new document, History, format or ink to publish or rebuild.
-    if (resizing && before.documentId === adapter.documentId && before.revision === adapter.revision) return;
-    qaRenderCause?.("edit-dispatch");
-    if (visibleBodyEdit) publishBodyPaste(before, true);
-    else {
-      resizePresentation = resizing;
-      try { files.ui.change(true); }
-      finally { resizePresentation = false; }
-    }
-    return revealCommandSelection(document, before, presentationTarget());
+    return presentSafeCommand(before, visibleBodyEdit, resizing);
   } catch (e) {
     if (e instanceof ClippedTextEdit) {
       $("error").textContent = e.message;
@@ -282,15 +296,15 @@ function safe(action: () => void, visibleBodyEdit = false, resizing = false) {
 document.addEventListener('rhwp:shortcut-ui',event=>{
  const action=(event as CustomEvent).detail;
  if(typeof action!=='string'||!action.startsWith('local-'))return;
- const command=localResizeCommand(action.slice(6));if(!command||files.busy||clipboardBusy||composing||document.querySelector('dialog[open]'))return;
+ const command=localResizeCommand(action.slice(6));if(!command||files.busy||clipboardBusy||composing||hasOpenDialog(document))return;
  $("error").hidden=true;focus();const origin=document.activeElement;
- void authorizeLocalResize(editor,command).then(captured=>{if(files.busy||clipboardBusy||composing||document.querySelector('dialog[open]')||document.activeElement!==origin&&document.activeElement!==input){console.debug('현재 셀 조절 대기 중 입력 문맥 변경: 취소');return;}safe(()=>editor.execute(command,captured),false,true);focus();},error=>{files.ui.error(error);if(document.activeElement===origin||document.activeElement===input)focus();});
+ void authorizeLocalResize(editor,command).then(captured=>{if(files.busy||clipboardBusy||composing||hasOpenDialog(document)||document.activeElement!==origin&&document.activeElement!==input){console.debug('현재 셀 조절 대기 중 입력 문맥 변경: 취소');return;}safe(()=>editor.execute(command,captured),false,true);focus();},error=>{files.ui.error(error);if(document.activeElement===origin||document.activeElement===input)focus();});
 });
 function focus() {
   input.focus({ preventScroll: true });
 }
 mountExternalFileDrop(document,pages,files,editor,{
-  blocked:()=>files.busy||clipboardBusy||composing||adapter.transientEdit||!!document.querySelector('dialog[open]'),
+  blocked:()=>files.busy||clipboardBusy||composing||adapter.transientEdit||hasOpenDialog(document),
   imageBusy:value=>{clipboardBusy=value;files.ui.change(false);},focus,
 });
 // Optional loopback QA attribution only: no new getter, timer or decision.
@@ -371,7 +385,7 @@ function scheduleFontRefresh(source: FontRefreshSource) {
     fontRefreshTask = undefined;
     qaRenderCause?.("font-run", source);
     // Do not recompose underneath a command, IME preview or open modal draft.
-    if (files.busy || composing || document.querySelector("dialog[open]")) {
+    if (files.busy || composing || hasOpenDialog(document)) {
       qaRenderCause?.("font-blocked", source);
       return;
     }
@@ -461,17 +475,21 @@ function prepareBodySelectionSurfaces():boolean {
 // Only the physical paper rectangle is needed to reserve an offscreen page.
 // Core enumerates the current pagination; equal total page counts alone do
 // not guarantee that a portrait/landscape section boundary stayed in place.
-function readPaperSizes(count: number): Pick<BodyPageInfo, "width" | "height">[] | undefined {
+const paperBoxes = mountedPaperBoxes(pages);
+function readPaperSizes(count: number, allowMounted: boolean) {
   if (typeof adapter.doc.getPageSizeRuns !== "function") return;
+  const runs = adapter.call<number[][]>("getPageSizeRuns");
+  const mounted = allowMounted ? paperBoxes.current(count, runs) : undefined;
+  if (mounted) return {sizes: mounted, runs, mounted: true};
   const sizes = new Array<Pick<BodyPageInfo, "width" | "height">>(count);
   let start = 0;
-  for (const [end, width, height] of adapter.call<number[][]>("getPageSizeRuns")) {
+  for (const [end, width, height] of runs) {
     if (!Number.isInteger(end) || end <= start || end > count ||
         !Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) return;
     sizes.fill({width, height}, start, end);
     start = end;
   }
-  return start === count ? sizes : undefined;
+  return start === count ? {sizes, runs, mounted: false} : undefined;
 }
 function render(visibleComposition = false, visibleBodyEdit = false, visibleResize = false,
     changedCellClose?: () => void, fontSource?: FontRefreshSource, committedCellApply=false, repairCellFrame=false):void {
@@ -505,7 +523,6 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   // font update. Keep the current document in this demand presentation mode.
   // Non-caret/unknown cases retain the authoritative full renderer.
   const fontPresentation = fontViewportActive() && editor.selection.kind === 'caret' && reusePages;
-  const previousPages = reusePageSurfaces ? Array.from(pages.children) as HTMLElement[] : [];
   // Core supplies every current page's dimensions even when only visible ink
   // is consumed first. Body paste reuses the existing guarded IME page drain,
   // but remain SVG; Canvas/composition policy is unchanged.
@@ -523,7 +540,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   // already completed above; cells, mixed/cross-paragraph, unknown/transient,
   // loading fonts and first-document presentation retain the full path.
   let localTextScreen=reusePages&&!composing&&!adapter.transientEdit&&!files.busy&&document.fonts.status!=="loading"&&
-    !document.querySelector("dialog[open]")&&adapter.localBodyTextIdentified&&renderedDocument===adapter.documentId&&
+    !hasOpenDialog(document)&&adapter.localBodyTextIdentified&&renderedDocument===adapter.documentId&&
     sameBodyParagraph;
   if(localTextScreen)try{editor.capture();}catch{localTextScreen=false;}
   const openingWorkset=replaced&&files.publishingLocalOpen&&activeWorkset(document)&&reusePages;
@@ -537,25 +554,30 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const worksetPresentation=openingWorkset || standaloneText;
   const prioritize = worksetPresentation || fontPresentation || resize || localTextScreen ||
     reusePages && (compositionSurface || visibleBodyEdit && !composing && selection.kind === "caret");
-  const paperSizes = worksetPresentation || resize ? readPaperSizes(pageCount) : undefined;
+  const paperSizes = worksetPresentation || resize ? readPaperSizes(pageCount, !!worksetPresentation && reusePageSurfaces) : undefined;
+  const mounted = paperSizes?.mounted;
+  const previousPages = reusePageSurfaces && !mounted ? Array.from(pages.children) as HTMLElement[] : [];
   const fullInfos = prioritize && !paperSizes
     ? Array.from({length: pageCount}, (_, page) => viewAdapter.call<BodyPageInfo>("getPageInfo", page)) : undefined;
-  const infos = paperSizes ?? fullInfos;
+  const infos = paperSizes?.sizes ?? fullInfos;
   let needed: Set<number> | undefined;
   let editedFocusPage: number | undefined;
   if (infos) {
-    for (let page = 0; page < infos.length; page++) {
-      let div = previousPages[page];
-      if (!div) {
-        div = document.createElement("div");
-        div.className = "page"; div.dataset.page = String(page);
-        const overlay = document.createElement("div"); overlay.className = "overlay";
-        div.append(overlay); pages.append(div); previousPages[page] = div;
+    if (!mounted) {
+      for (let page = 0; page < infos.length; page++) {
+        let div = previousPages[page];
+        if (!div) {
+          div = document.createElement("div");
+          div.className = "page"; div.dataset.page = String(page);
+          const overlay = document.createElement("div"); overlay.className = "overlay";
+          div.append(overlay); pages.append(div); previousPages[page] = div;
+        }
+        if (div.style.width !== `${infos[page].width}px`) div.style.width = `${infos[page].width}px`;
+        if (div.style.height !== `${infos[page].height}px`) div.style.height = `${infos[page].height}px`;
       }
-      if (div.style.width !== `${infos[page].width}px`) div.style.width = `${infos[page].width}px`;
-      if (div.style.height !== `${infos[page].height}px`) div.style.height = `${infos[page].height}px`;
+      while (pages.children.length > infos.length) pages.lastElementChild!.remove();
+      if (worksetPresentation && paperSizes) paperBoxes.remember(paperSizes.runs, paperSizes.sizes);
     }
-    while (pages.children.length > infos.length) pages.lastElementChild!.remove();
     const bounds = viewport.getBoundingClientRect();
     if (fontPresentation && (![bounds.top,bounds.bottom,bounds.left,bounds.right].every(Number.isFinite) ||
         bounds.width <= 0 || bounds.height <= 0)) {
@@ -624,7 +646,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   }
   for (let i = 0; i < (targets?.length ?? pageCount); i++) {
     const page = targets?.[i] ?? i;
-    let div = previousPages[page];
+    let div = mounted ? pages.children[page] as HTMLElement : previousPages[page];
     if (needed && !needed.has(page)) {
       // Keep the validated DOM for byte comparison at flush, but do not expose
       // stale ink/geometry as the current page. Scroll/resize flush before use.
@@ -1054,7 +1076,7 @@ function currentF5Epoch(native:typeof adapter.doc, observeOnly=false): F5Epoch |
   if(native!==adapter.doc||renderedDocument!==adapter.documentId||editor.selection.kind!=="cells"||
      files.busy||clipboardBusy||composing||adapter.transientEdit||adapter.hasPendingLocalBodyFlow()||adapter.scope!=="edit"||adapter.documentLocked||
      adapter.viewerOnlyReason||document.fonts.status!=="loaded"||pages.children.length!==5||
-     pages.querySelector("[data-ime-canvas],[data-resize-canvas]")||document.querySelector("dialog[open]:not(#format)"))return;
+     pages.querySelector("[data-ime-canvas],[data-resize-canvas]")||hasOpenDialog(document, "format"))return;
   const pending=[...pages.querySelectorAll<HTMLElement>("[data-render-pending]")];
   if(deferredCompositionPages&&!pending.length)return;
   if(pending.length){
@@ -1120,12 +1142,7 @@ function paintSelectionGeometry(owners?:OwnerProjection) {
   const compositionBoxes = composing ? compositionCursorBoxes(viewEditor, composition) : [];
   const page = pages.querySelector<HTMLElement>(`[data-page="${r.pageIndex}"]`);
   const point = page ? viewportPoint(page, viewport, r.x, r.y) : undefined;
-  // Page margin marks belong to the displayed page. Only selection decorations
-  // (caret, guides and highlights) are replaced on a selection-only update.
-  for (const overlay of pages.getElementsByClassName("overlay")) {
-    while (overlay.lastElementChild && !overlay.lastElementChild.classList.contains("body-corner-guides"))
-      overlay.lastElementChild.remove();
-  }
+  clearSelectionMarks(pages);
   paintTableGuides(viewEditor,pages);
   let f5Overlay:SVGSVGElement|undefined;
   for (const pageIndex of new Set(rects.map(r => r.pageIndex))) {
@@ -1149,7 +1166,7 @@ function paintSelectionGeometry(owners?:OwnerProjection) {
     path.setAttribute("fill-rule", "nonzero");
     path.setAttribute("d", bands.map(r => `M${r.x-x} ${r.y-y}h${r.width}v${r.height}h${-r.width}Z`).join(""));
     el.append(path);
-    pages.querySelector(`[data-page="${pageIndex}"] .overlay`)?.append(el);
+    appendSelectionMark(pages, pages.querySelector(`[data-page="${pageIndex}"] .overlay`), el);
     if(f5Visual&&cells&&pageIndex===r.pageIndex)f5Overlay=el;
   }
   if (page && point) {
@@ -1164,7 +1181,7 @@ function paintSelectionGeometry(owners?:OwnerProjection) {
         top: `${r.y}px`,
         height: `${r.height}px`,
       });
-      page.querySelector(".overlay")!.append(cursor);
+      appendSelectionMark(pages, page.querySelector(".overlay"), cursor);
     }
     input.style.left = `${point.x}px`;
     input.style.top = `${point.y}px`;
@@ -1210,7 +1227,7 @@ function paintSelection(owners?:OwnerProjection, changedCellClose?:()=>void, pro
   // after the frame and flushes it before toolbar/menu actions. Avoid reading
   // all selected text formats again on every size key; blocking admission still
   // updates immediately, and every real command revalidates its live owner.
-  const reason = formatUIBlockReason({fileBusy:files.busy,composing:false,clipboardBusy,modal:!!document.querySelector("dialog[open]")});
+  const reason = formatUIBlockReason({fileBusy:files.busy,composing:false,clipboardBusy,modal:hasOpenDialog(document)});
   const resizeFormatsUnchanged = !reason && adapter.scope === "edit" && !adapter.documentLocked && renderedDocument === adapter.documentId &&
     !!document.getElementById("integration-menus") && !!pages.querySelector("[data-resize-canvas]");
   const keepFormat = !reason && keepTypingFormatPresentation(editor);
@@ -1225,13 +1242,12 @@ function paintSelection(owners?:OwnerProjection, changedCellClose?:()=>void, pro
   projectSaveNotice();
   pasteResult.sync();
   $("download-confirm").hidden = !files.pending;
-  for (const id of activeWorkset(document) ? ["download-confirm"] : ["save", "save-as", "download-confirm"])
-    $(id).toggleAttribute(
-      "disabled",
-      files.busy || (id !== "save" && window.parent !== window),
-    );
+  const saveBlocked = files.saveBlockReason !== null;
+  $("save").toggleAttribute("disabled", saveBlocked);
+  $("save-as").toggleAttribute("disabled", saveBlocked || !files.ui.standalone);
+  $("download-confirm").toggleAttribute("disabled", files.busy || !files.ui.standalone);
   if(!activeWorkset(document))for (const id of ["new", "open", "close-document"])
-    $(id).toggleAttribute("disabled", files.busy || window.parent !== window);
+    $(id).toggleAttribute("disabled", files.busy || !files.ui.standalone);
   // Cell guides and the authoritative overlay can invalidate earlier native
   // reads. Start the shared display reads only after that work has settled.
   if (changedCellClose && !resizeFormatsUnchanged && !keepFormat) syncFormatView(owners);
@@ -1323,6 +1339,7 @@ function updateView(action: () => void, afterF5?: () => void, trustedF5=false) {
   }
   if (!revealed) afterF5?.();
 }
+let embeddedFormatGuard: ReturnType<typeof formatInputGuard> | undefined;
 function format(kind: FormatKind) {
   try {
     const captured = editor.capture();
@@ -1345,15 +1362,28 @@ function format(kind: FormatKind) {
       $("format-note").textContent =
         "선택한 자식 셀 문단에 변경한 속성만 적용합니다. 혼합 값과 빈 항목은 유지합니다.";
     const changes = mountFields($("fields"), kind, state);
+    const form = $<HTMLFormElement>("format-form");
+    const guard = embeddedFormatGuard ??= formatInputGuard(form);
+    guard.open();
     if (kind === "char" || kind === "paragraph") showDocumentEditingDialog(dialog);
     else showEditorDialog(dialog);
     if(f5SliceEnabled)f5Render.open(dialog);
     ($("fields").querySelector("input,select") as HTMLElement)?.focus();
-    $("format-form").onsubmit = (e) => {
+    form.onsubmit = (e) => {
       e.preventDefault();
-      const props = changes();
+      if (!dialog.open || files.busy || clipboardBusy || composing || adapter.transientEdit) return;
+      const before = presentationTarget();
+      try {
+        if (!submitFormatDraft(editor, kind, captured, guard, changes)) return;
+      } catch (error) {
+        knownDiagnosticError(error);
+        $("format-note").textContent = editorFeedbackText(error);
+        return;
+      }
       closeEditorDialog(dialog);
-      if (Object.keys(props).length) safe(() => editor.execute({ type: kind, props }, captured));
+      if (adapter.revision === before.revision) return;
+      $("error").hidden = true;
+      presentSafeCommand(before);
     };
   } catch (e) {
     knownDiagnosticError(e);
@@ -1368,6 +1398,7 @@ $("cancel").onclick = () => {
 };
 dialog.addEventListener("close", () => {
   if (dialog.open) {if(f5SliceEnabled)f5Render.closed(dialog,true);return;} // Never touch a reopened form.
+  embeddedFormatGuard?.close();
   // Closing transfers focus synchronously. The queued close notification
   // owns presentation only; it cannot take focus from a later user action.
   // Only a proven unchanged close of this exact modal lifetime can use the
@@ -1414,7 +1445,7 @@ $("cell-format").onclick = event => {
   else format("cell");
 };
 $("bold").onclick = () => {
-  safe(() => editor.execute({ type: "bold" }));
+  safe(() => editor.execute(characterStyleCommand("bold")));
   focus();
 };
 for (const name of ["italic", "underline"])
@@ -1507,7 +1538,7 @@ const openControl = $<HTMLInputElement>("open");
 const restoreOpenFocus = () => {
   // A chooser cancel has no change event. Restore only its abandoned focus;
   // an opening document/dialog or a newer control must keep its own focus.
-  if (!files.busy && !document.querySelector('dialog[open]') &&
+  if (!files.busy && !hasOpenDialog(document) &&
       (document.activeElement === openControl || document.activeElement === document.body)) focus();
 };
 openControl.oncancel = restoreOpenFocus;
@@ -1558,7 +1589,7 @@ function withStudioTableClick(page:HTMLElement,_at:Pick<PointerEvent,"clientX"|"
     renderedDocument===docId&&renderGeneration===view&&fontSupplyRevision()===fonts&&
     environment!==undefined&&a.observedLocalBodyEnvironment()===environment&&pages.style.zoom===zoom&&
     document.fonts.status==="loaded"&&!composing&&!files.busy&&!clipboardBusy&&!a.transientEdit&&
-    !a.hasPendingLocalBodyFlow()&&!document.querySelector("dialog[open]")&&
+    !a.hasPendingLocalBodyFlow()&&!hasOpenDialog(document)&&
     !deferredCompositionPages&&!page.matches("[data-render-pending],[data-ime-canvas],[data-resize-canvas]")&&
     !!svg&&svg===page.querySelector(":scope > svg")&&page.isConnected&&page.parentElement===pages&&
     Number.isSafeInteger(index)&&index>=0&&page.dataset.page===String(index);
@@ -1613,7 +1644,7 @@ window.addEventListener("pointermove", (e) => {
 });
 window.addEventListener("pointerup", () => (dragging = false));
 function selectPointerText(e: MouseEvent, unit: 'word' | 'sentence') {
-  if(e.defaultPrevented||e.button!==0||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||composing||adapter.transientEdit||files.busy||clipboardBusy||document.querySelector('dialog[open]'))return;
+  if(e.defaultPrevented||e.button!==0||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey||composing||adapter.transientEdit||files.busy||clipboardBusy||hasOpenDialog(document))return;
   const page=(e.target as Element).closest<HTMLElement>('.page');if(!page||!pages.contains(page))return;
   try{
     const captured=editor.capture(),point=pagePoint(page,e.clientX,e.clientY),range=pointerTextRange(adapter,Number(page.dataset.page),point.x,point.y,unit);
@@ -1638,7 +1669,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
   const selection = editor.selection;
   if (kind === "copy" && (selection.kind === "caret" ||
       selection.kind === "text" && samePosition(selection.anchor, selection.focus))) return;
-  if (composing || files.busy || document.querySelector("dialog[open]")) {
+  if (composing || files.busy || hasOpenDialog(document)) {
     $("clipboard-status").textContent = "한글 조합·대화상자·문서 작업을 마친 뒤 사용하세요.";
     return;
   }
@@ -1733,7 +1764,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
         editor.execute({type:"picture",change:{action:"insert",file:data.image,...size,placement:"inline",replaceSelection:true}},captured);
       } else if (data) {
         try {
-          if (!plain && !data.structured && !data.html.includes("data-rhwp-next-clipboard") && (data.markdown || !data.html))
+          if (!plain && !data.structured && !hasClipboardMarker(data.html) && (data.markdown || !data.html))
             markdown = clipboardMarkdown(data.text, data.markdown);
           const wholeNative=!qaBytes && !plain && !data.structured && !data.mixedPicture &&
             !markdown && blankTarget
@@ -1742,43 +1773,15 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
               })
             : undefined;
           const preparedBytes = qaBytes ?? wholeNative?.bytes;
-          const expected = qaLinked?.expected ?? wholeNative?.expected;
-          const zOrder = preparedBytes && (expected?.zOrder !== undefined || qaNative?.sourceFormat === "hwp")
-            ? await extractLinkZOrder(preparedBytes) : undefined;
-          if (expected?.zOrder !== undefined && zOrder?.value !== expected.zOrder)
-            throw Error("붙여넣을 링크의 순서 값을 확인하지 못했습니다.");
-          const printSettings = qaBytes ? await readPrintSettings(qaBytes) : undefined;
+          const prepared = preparedBytes && await inspectPreparedHancomPaste(preparedBytes,
+            qaLinked?.expected ?? wholeNative?.expected, qaNative?.sourceFormat === "hwp", !!qaBytes);
           unchanged();
-          if(preparedBytes){
+          if(prepared){
             if(origin.doc!==nativeDoc||editor.currentSelectionGeneration!==generation||
                origin.scope!=="edit"||origin.documentLocked||composing||origin.transientEdit||
-               files.busy||document.querySelector("dialog[open]"))
+               files.busy||hasOpenDialog(document))
               throw new PasteFormatUnavailable("붙여넣을 위치가 변경되었습니다.");
-            const prepared=siblingDocument(nativeDoc,preparedBytes);
-            let adopted=false;
-            try {
-              const next=new RhwpAdapter(prepared);
-              next.scope=origin.scope;
-              if(prepared.getSectionCount()!==1||prepared.getParagraphCount(0)<1)throw Error("구역을 확인하지 못했습니다.");
-              files.ui.prepareDisplay?.(next,true);
-              if (expected) {
-                const found=next.call<{links:{uri:string;text:string;start:number;end:number}[]}>(
-                  "getHyperlinkContext",JSON.stringify({section:0,para:expected.paragraph,cellPath:[]}));
-                const match=found.links.length===1&&found.links[0];
-                if(!match||match.uri!==expected.uri||match.text!==expected.label||
-                   match.start!==expected.start||match.end!==expected.end)
-                  throw Error("붙여넣은 링크의 범위를 확인하지 못했습니다.");
-              }
-              rememberLinkZOrder(prepared,zOrder);
-              rememberPrintSettings(prepared,printSettings);
-              next.exportChecked();
-              const para=prepared.getParagraphCount(0)-1;
-              const focus={kind:"body" as const,sec:0,para,offset:0};
-              focus.offset=next.length(focus);
-              next.validate(focus);
-              editor.selection=editor.history.adoptPreparedPaste(prepared,dest,{kind:"caret",focus});
-              adopted=true;
-            } finally {if(!adopted) prepared.free();}
+            adoptPreparedHancomPaste(editor, dest, prepared, next => files.ui.prepareDisplay?.(next, true));
           } else editor.execute({ type: "paste", text: data.text, html: data.html, structured: data.structured,
             markdown, mixedPicture: data.mixedPicture, nativeHancomRange: !!fragment }, captured);
         } catch (e) {
@@ -1799,7 +1802,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
         }
         const checkContext = () => {
           if (!document.hasFocus() || composing || files.busy || origin.transientEdit ||
-              document.querySelector("dialog[open]") || editor.adapter !== origin || origin.doc !== nativeDoc ||
+              hasOpenDialog(document) || editor.adapter !== origin || origin.doc !== nativeDoc ||
               editor.currentSelectionGeneration !== generation || origin.revision !== captured.revision ||
               editor.history.undoStack.length !== undo || editor.history.redoStack.length !== redo)
             throw Error("붙여넣을 위치가 바뀌었습니다. 위치를 선택해 다시 붙여넣으세요.");
@@ -1844,7 +1847,7 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
         : data.mixedPicture ? "한/글 본문과 그림 붙여넣기 완료" : pasteCompletion(data);
       $("clipboard-status").textContent = pasteApplied ? `${plain ? "텍스트만" : "서식 포함"} 붙이기 · ${detail}` : "붙여넣기 · 문서 변경 없음";
       pasteResult.applied({ detail, changed: pasteApplied, formatted: !!(markdownApplied || data.image || data.structured || data.html),
-        extensionMetadata: !markdownApplied && !data.structured && !data.html.includes("data-rhwp-next-clipboard") && /hwpEditorBoardContent|data-hjsonver|hwpjson/i.test(data.html) });
+        extensionMetadata: !markdownApplied && !data.structured && !hasClipboardMarker(data.html) && /hwpEditorBoardContent|data-hjsonver|hwpjson/i.test(data.html) });
     } else {
       const objectSource = kind === 'cut' && captured.selection.kind === 'object'
         ? selectedCutObject(adapter, captured.selection) : undefined;
@@ -1904,11 +1907,11 @@ window.addEventListener("beforeunload", (e) => {
     e.returnValue = "";
   }
 });
-if (window.parent !== window) {
+if (!files.ui.standalone) {
   $("new").setAttribute("disabled", "");
   $("open").setAttribute("disabled", "");
 }
-const externalHost = new NextHostAdapter(adapter, editor);
+const externalHost = new NextHostAdapter(adapter, editor, localWorkspace);
 connectConfiguredAIHost(externalHost, (bytes,binding,_generated,source,prepared) => {
   if (source && prepared) files.adoptHostOpen(prepared,source.format,source.scope,source.fileName);
   else {
@@ -1916,7 +1919,7 @@ connectConfiguredAIHost(externalHost, (bytes,binding,_generated,source,prepared)
     files.adoptPreparedAI(bytes);
   }
   externalHost.binding={documentId:binding.documentId,workingCopyId:binding.workingCopyId,baseVersion:binding.hostVersion};
-},()=>files.busy||clipboardBusy||composing||!!document.querySelector('dialog[open]'),render,
+},()=>files.busy||clipboardBusy||composing||hasOpenDialog(document),render,
  publish=>{publishHostState=publish;});
 installMarkdownImport(externalHost, files);
 // D mounts workspace menus in its existing FileLifecycle adapter microtask.
@@ -1924,9 +1927,9 @@ installMarkdownImport(externalHost, files);
 queueMicrotask(() => {
   mountLocalFontSettings(document,editor,{busy:()=>composing||clipboardBusy||files.busy});
   menuSettings = mountMenuSettings(document, {
-    busy: () => composing || clipboardBusy || files.busy || !!document.querySelector('dialog[open]:not(#menu-settings)'),
+    busy: () => composing || clipboardBusy || files.busy || hasOpenDialog(document, "menu-settings"),
     reason: id => {
-      if (composing || clipboardBusy || files.busy || document.querySelector('dialog[open]'))
+      if (composing || clipboardBusy || files.busy || hasOpenDialog(document))
         return '입력·저장·열린 대화상자를 먼저 마치세요.';
       const state = settingsCommandState(editor).get(id);
       if (state) return state.reason;
@@ -1937,7 +1940,7 @@ queueMicrotask(() => {
     capture: () => editor.capture(),
   });
   mountTextboxEditor(document,editor,{busy:()=>composing||clipboardBusy||files.busy,changed:render,focus,error:e=>{$("error").textContent=editorFeedbackText(e);$("error").hidden=false;}});
-  mountShortcutResults(document,{blocked:()=>composing||clipboardBusy||files.busy||!!document.querySelector('dialog[open]'),preferences:()=>menuSettings?.read()??[]});
+  mountShortcutResults(document,{blocked:()=>composing||clipboardBusy||files.busy||hasOpenDialog(document),preferences:()=>menuSettings?.read()??[]});
   // Embedded Host has no standalone page-menu launchers. Do not partially
   // mount their dialogs or abort the remaining UI bootstrap on a null button.
   if (document.getElementById("header-footer-open")) headerFooter = mountHeaderFooter(document, editor, {

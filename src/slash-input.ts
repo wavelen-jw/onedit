@@ -5,13 +5,27 @@ export function slashInput(input:HTMLTextAreaElement, hooks:{
 }) {
   const life=new AbortController(),signal=life.signal,win=input.ownerDocument.defaultView!;
   let owned=false,composing=false,processDown=false,committed=false,retired=false,disposed=false,orphanEnter=false,spaceDown=false,tail:string|undefined;
-  const clear=()=>{owned=composing=processDown=committed=retired=spaceDown=false;input.value="";};
+  // Native dialog cancellation can follow compositionend in the same turn.
+  // The draft's receiver is outside the dialog and owns this boundary.
+  let settling: number | undefined;
+  let dismissedComposition=false;
+  const clearSettling=()=>{win.clearTimeout(settling);settling=undefined;};
+  const release=()=>{clearSettling();owned=composing=processDown=committed=retired=spaceDown=false;};
+  const clear=()=>{release();input.value="";};
+  const ready=()=>owned&&!retired&&!composing&&!(processDown&&committed);
   const compositionKey=(e:KeyboardEvent)=>e.key==='Process'||e.keyCode===229;
   input.addEventListener('keydown',e=>{
     tail=undefined;
     if(!owned){
       if(orphanEnter&&e.key==='Enter'&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!e.shiftKey&&e.cancelable){e.preventDefault();e.stopImmediatePropagation();return;}
-      orphanEnter=false;if(disposed)life.abort();return;
+      orphanEnter=false;if(disposed&&!dismissedComposition)life.abort();return;
+    }
+    // A click can end native preedit without delivering compositionend to
+    // this receiver. A new, ordinary printable key belongs to the editor.
+    // Keep listening for the old composition tail until a new IME begins.
+    if(retired&&dismissedComposition&&!e.isComposing&&!compositionKey(e)&&
+       e.key.length===1&&e.key!==' '&&!e.ctrlKey&&!e.altKey&&!e.metaKey){
+      clear();return;
     }
     if(retired&&!composing){clear();if(disposed)life.abort();return;}
     // Process belongs to the browser IME. Only contain propagation to editor
@@ -28,10 +42,11 @@ export function slashInput(input:HTMLTextAreaElement, hooks:{
     if(e.key==='Enter'&&processDown&&committed){e.preventDefault();e.stopImmediatePropagation();return;}
     e.stopImmediatePropagation();hooks.key(e);
   },{capture:true,signal});
-  input.addEventListener('beforeinput',e=>{if(owned)e.stopImmediatePropagation();},{capture:true,signal});
+  input.addEventListener('beforeinput',e=>{if(owned||(dismissedComposition&&e.isComposing))e.stopImmediatePropagation();},{capture:true,signal});
   for(const type of ['copy','cut','paste'])input.addEventListener(type,e=>{if(owned)e.stopImmediatePropagation();},{capture:true,signal});
   input.addEventListener('input',e=>{
     if(!owned){
+      if(dismissedComposition&&e.isComposing){e.stopImmediatePropagation();input.value='';return;}
       // An invalidated search may finish its native composition after the
       // document changed. A new key/composition clears this exact tail token.
       if(tail!==undefined&&e.data===tail&&e.inputType.toLowerCase().includes('composition')){
@@ -42,14 +57,24 @@ export function slashInput(input:HTMLTextAreaElement, hooks:{
     e.stopImmediatePropagation();if(!retired)hooks.change(input.value);
   },{capture:true,signal});
   input.addEventListener('compositionstart',e=>{
-    tail=undefined;if(!owned){if(disposed)life.abort();return;}
+    // A new native composition also ends the dismissed draft's ownership.
+    if(retired&&dismissedComposition)release();
+    tail=undefined;dismissedComposition=false;if(!owned){if(disposed)life.abort();return;}
     e.stopImmediatePropagation();composing=true;committed=false;
   },{capture:true,signal});
-  input.addEventListener('compositionupdate',e=>{if(owned)e.stopImmediatePropagation();},{capture:true,signal});
+  input.addEventListener('compositionupdate',e=>{if(owned||dismissedComposition)e.stopImmediatePropagation();},{capture:true,signal});
   input.addEventListener('compositionend',e=>{
-    if(!owned)return;e.stopImmediatePropagation();composing=false;committed=processDown;
+    if(!owned){
+      if(dismissedComposition){e.stopImmediatePropagation();dismissedComposition=false;tail=e.data;if(disposed&&!tail)life.abort();}
+      return;
+    }
+    e.stopImmediatePropagation();dismissedComposition=false;composing=false;committed=processDown;
     if(retired){tail=e.data;orphanEnter=processDown;clear();if(disposed&&!tail&&!orphanEnter)life.abort();}
-    else hooks.change(input.value);
+    else {
+      clearSettling();
+      settling=win.setTimeout(()=>{settling=undefined;},0);
+      hooks.change(input.value);
+    }
   },{capture:true,signal});
   win.addEventListener('keyup',e=>{
     if(compositionKey(e)||e.key==='Enter'||e.key===' '||e.code==='Space'){
@@ -60,10 +85,11 @@ export function slashInput(input:HTMLTextAreaElement, hooks:{
   },{capture:true,signal});
   input.addEventListener('blur',()=>{if(owned)hooks.blur();},{signal});
   return {
-    open(){if(owned||input.value||input.ownerDocument.activeElement!==input)return false;owned=true;retired=false;tail=undefined;return true;},
-    ready(){return owned&&!retired&&!composing&&!(processDown&&committed);},
+    open(){if(owned||input.value||input.ownerDocument.activeElement!==input)return false;owned=true;retired=false;dismissedComposition=false;tail=undefined;return true;},
+    ready,
     composing(){return composing;},
-    close(){if(composing)retired=true;else clear();},
+    canCancel(){return ready()&&settling===undefined;},
+    close(explicit=false){if(composing){retired=true;dismissedComposition ||= explicit;}else clear();},
     dispose(){disposed=true;if(composing)retired=true;else{clear();life.abort();}},
   };
 }

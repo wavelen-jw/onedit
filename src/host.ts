@@ -1,18 +1,36 @@
 import { assertPictureFreeTextEdit } from "./search-object-safety.js";
+import type { HwpDocument } from "../development/core/rhwp.js";
 import { RhwpAdapter } from "./adapter.js";
 import { Interaction } from "./interaction.js";
 import { type Position } from "./model.js";
 /** Host metadata never owns document content. Server ACL/CAS remain the host's responsibility. */
+type HostDocumentBinding = { documentId: string; workingCopyId: string; baseVersion: string };
+
 export class NextHostAdapter {
-  binding: {
-    documentId: string;
-    workingCopyId: string;
-    baseVersion: string;
-  } | null = null;
+  private bound?: { instance: string; value: HostDocumentBinding | null };
+  private local?: HostDocumentBinding;
+
   constructor(
     readonly adapter: RhwpAdapter,
     readonly editor: Interaction,
+    private readonly localWorkspace = false,
   ) {}
+
+  get binding() {
+    const id = this.adapter.documentId;
+    if (!this.localWorkspace) return this.bound?.value ?? null;
+    if (this.bound?.instance === id && this.bound.value) return this.bound.value;
+    // Local files in this workspace need document identity for SDK requests.
+    // A later local open must never reuse a previous Host working-copy ID.
+    if (this.local?.documentId !== id)
+      this.local = { documentId: id, workingCopyId: id, baseVersion: "local" };
+    return this.local;
+  }
+
+  set binding(value: HostDocumentBinding | null) {
+    this.bound = { instance: this.adapter.documentId, value };
+  }
+
   state() {
     const a = this.adapter;
     return {
@@ -137,10 +155,28 @@ export class NextHostAdapter {
           if (typeof params.binding?.[key] !== "string" || !params.binding[key])
             throw Error("작업본 바인딩이 필요합니다.");
         a.open(params.bytes);
-        this.editor.history.detachForDocumentReplacement();
-        this.editor.reset();
-        this.binding = { ...params.binding };
-        return this.state();
+        return this.opened(params.binding);
+  }
+
+  /** Host v2 already inspected this exact detached document. This path consumes it. */
+  adoptInspectedHwpx(candidate: HwpDocument, binding: NonNullable<NextHostAdapter["binding"]>) {
+    try {
+      if (this.adapter.revision !== this.adapter.savedRevision || this.adapter.transientEdit)
+        throw Error("저장하지 않은 변경이 있어 문서 전환을 거부합니다.");
+      this.adapter.completeLocalBodyFlow();
+    } catch (error) {
+      candidate.free();
+      throw error;
+    }
+    this.adapter.adoptOpenedDocument(candidate);
+    return this.opened(binding);
+  }
+
+  private opened(binding: NonNullable<NextHostAdapter["binding"]>) {
+    this.editor.history.detachForDocumentReplacement();
+    this.editor.reset();
+    this.binding = { ...binding };
+    return this.state();
   }
 
   private markSaved(a: RhwpAdapter, params: any) {

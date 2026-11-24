@@ -1,3 +1,5 @@
+import { pageBreakLabels } from "./page-break.js";
+import {heldMenuItem} from "./dialog-support.js";
 import { browserShortcutScope } from "./browser-shortcut-scope.js";
 import type { Interaction } from "./interaction.js";
 import { sameFormatTarget } from "./integration/a-format-input-guard.js";
@@ -45,10 +47,8 @@ export function mountPageMenuUI1(doc: Document, editor: Interaction, actions: {
   };
   const separator = () => { const hr = doc.createElement("hr"); hr.setAttribute("role","separator"); panel.append(hr); };
   const held = (letter: string, label: string, reason: string, key = "", arrow = false) => {
-    const b = doc.createElement("button"); b.type = "button"; b.disabled = true; b.textContent = label; b.title = reason;
-    b.dataset.pageHeld = letter; b.dataset.menuLetter = letter; b.setAttribute("role","menuitem"); b.setAttribute("aria-disabled","true"); b.setAttribute("aria-description",reason);
-    if (key) { const k = doc.createElement("kbd"); k.textContent = key; b.append(k); }
-    if (arrow) { const a = doc.createElement("span"); a.className = "page-submenu-hint"; a.textContent = "›"; a.setAttribute("aria-hidden","true"); b.append(a); }
+    const b = heldMenuItem(doc, label, reason, letter, key, arrow ? "page-submenu-hint" : undefined);
+    b.dataset.pageHeld = letter;
     panel.append(b);
   };
   const unavailable = "현재 쪽 명령과 연결돼 있지 않습니다. 문서의 기존 값은 유지합니다.";
@@ -59,11 +59,11 @@ export function mountPageMenuUI1(doc: Document, editor: Interaction, actions: {
   held("g","쪽 번호 매기기(G)…","쪽 위치·번호 모양/시작 번호 지정은 미지원입니다. 기존 본문 자동 번호 필드는 아래 지원 도구에 별도로 보존합니다.","Ctrl+N,P");
   held("w","새 번호로 시작(W)…",unavailable); held("i","감추기(I)…",unavailable,"Ctrl+N,S"); held("m","줄 번호(M)",unavailable,"",true); separator();
   const pageBreak = doc.createElement("button"); pageBreak.type = "button";
-  live(pageBreak,"p","쪽 나누기(P)"); pageBreak.id = "page-break"; pageBreak.setAttribute("aria-keyshortcuts","Control+Enter");
+  live(pageBreak,"p",`${pageBreakLabels.page}(P)`); pageBreak.id = "page-break"; pageBreak.setAttribute("aria-keyshortcuts","Control+Enter");
   const breakKey = doc.createElement("kbd"); breakKey.textContent = "Ctrl+Enter"; pageBreak.append(breakKey); panel.append(pageBreak); guard(pageBreak);
   pageBreak.onclick = () => { if (captured) actions.breakPage(captured); };
   const columnBreak = doc.createElement("button"); columnBreak.type = "button";
-  live(columnBreak,"d","단 나누기(D)"); columnBreak.id = "column-break"; columnBreak.setAttribute("aria-keyshortcuts","Control+Shift+Enter");
+  live(columnBreak,"d",`${pageBreakLabels.column}(D)`); columnBreak.id = "column-break"; columnBreak.setAttribute("aria-keyshortcuts","Control+Shift+Enter");
   const columnKey = doc.createElement("kbd"); columnKey.textContent = "Ctrl+Shift+Enter"; columnBreak.append(columnKey); panel.append(columnBreak); guard(columnBreak);
   columnBreak.onclick = () => { if (captured) actions.breakColumn(captured); };
   const inherited = doc.createElement("button"); inherited.type = "button";

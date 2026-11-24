@@ -1,5 +1,9 @@
 # Onedit Host SDK changelog
 
+## 1.2.0
+
+- 1.2.0 실행 패키지에서 임베딩 예제를 실행할 수 있습니다. 공개 메서드 20개와 이벤트 8개, 전송 버전은 유지됩니다.
+
 ## 1.1.0
 
 - Provide the checked-open SDK sample runtime as a companion archive. The 20 methods, eight events and wire version are retained.

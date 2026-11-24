@@ -1,3 +1,4 @@
+import { appendSelectionMark } from "./page-layers.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
 import { nested, type CellBox, type Position } from "./model.js";
@@ -124,7 +125,7 @@ export function paintTableGuides(editor:Interaction,pages:HTMLElement){
         line.setAttribute("x2",String(e.axis==="x"?e.line:e.end));line.setAttribute("y2",String(e.axis==="x"?e.end:e.line));
         line.setAttribute("vector-effect","non-scaling-stroke");group.append(line);
       }
-      page.querySelector(".overlay")?.append(group);
+      appendSelectionMark(pages, page.querySelector(".overlay"), group);
     }
   }catch(error){failures.set(editor,"표 보조선 조회 불가: "+editorFeedbackText(error));}
 }

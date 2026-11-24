@@ -14,7 +14,7 @@ export function projectSemantic(this: RhwpAdapter) {
     return part.value;
 }
 
-export function* projectSemanticParts(this: RhwpAdapter) {
+export function* projectSemanticParts(this: RhwpAdapter, use: "compare" | "validate-open" = "compare") {
     if (this.viewerOnlyReason) {
       // Explicitly a READ-ONLY DISPLAY projection, not full editable semantics.
       // No export/serialization fallback and no invented cell address. Saving is
@@ -44,9 +44,16 @@ export function* projectSemanticParts(this: RhwpAdapter) {
     // Never share across documents, edits, or a second semantic() invocation.
     const propertiesByShape = new Map<number, Map<string, ReturnType<typeof strip>>>();
     const paragraph = (p: Position) => {
-      const text = this.text(p), letters = Array.from(text), chars: ReturnType<typeof strip>[] = [];
+      const text = this.text(p);
+      // A paragraph entirely in one of these two BMP ranges has one scalar per
+      // code unit, and all its characters select the same native language slot.
+      const uniformKey = !/[^가-힣]/u.test(text) ? "hangul-syllable" :
+        !/[^A-Za-z0-9]/u.test(text) ? "ascii-letter-or-digit" : undefined;
+      const letters = uniformKey ? text : Array.from(text);
+      const compare = use === "compare";
+      const chars: ReturnType<typeof strip>[] = compare ? new Array(letters.length) : [];
       if (!letters.length) {
-        chars.push(strip(this.charProps({ ...p, offset: this.logical(p, 0) })));
+        chars.push(strip(this.charPropsAtTextOffset(p, 0)));
       } else {
         const runs: { startOffset: number; endOffset: number; charShapeId: number }[] =
           p.kind === "body"
@@ -66,24 +73,30 @@ export function* projectSemanticParts(this: RhwpAdapter) {
             properties = new Map<string, ReturnType<typeof strip>>();
             propertiesByShape.set(run.charShapeId, properties);
           }
-          for (; next < run.endOffset; next++) {
+          while (next < run.endOffset) {
             const letter = letters[next];
             // All modern precomposed Hangul syllables use Core slot 0. All ASCII
             // letters and digits use slot 1. Keep every other character exact.
             const cp = letter.codePointAt(0)!;
-            const propertyKey = cp >= 0xAC00 && cp <= 0xD7A3 ? "hangul-syllable" :
-              /[A-Za-z0-9]/u.test(letter) ? "ascii-letter-or-digit" : letter;
+            const propertyKey = uniformKey ?? (cp >= 0xAC00 && cp <= 0xD7A3 ? "hangul-syllable" :
+              /[A-Za-z0-9]/u.test(letter) ? "ascii-letter-or-digit" : letter);
             let props = properties.get(propertyKey);
             // Keep the independent shape-reference check at EVERY run boundary,
             // even if its first character was already projected elsewhere.
             if (next === run.startOffset || !props) {
-              const raw = this.charProps({ ...p, offset: this.logical(p, next) });
+              const raw = this.charPropsAtTextOffset(p, next);
               if (raw.charShapeId !== run.charShapeId)
                 throw Error("의미 검사 글자 모양 참조가 일치하지 않습니다.");
-              props = strip(raw);
+              props = compare ? strip(raw) : raw;
               properties.set(propertyKey, props);
             }
-            chars.push(props);
+            if (uniformKey) {
+              if (compare) chars.fill(props, next, run.endOffset);
+              next = run.endOffset;
+            } else {
+              if (compare) chars[next] = props;
+              next++;
+            }
           }
         }
         if (next !== letters.length)

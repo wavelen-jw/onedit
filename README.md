@@ -2,7 +2,7 @@
 
 브라우저에서 **HWP·HWPX 문서를 열고 편집한 결과를 HWPX로 저장**할 수 있는 한글 문서 편집기입니다. 독립 편집기와 다른 앱에 편집 화면을 연결하는 JavaScript·TypeScript Host SDK를 제공합니다.
 
-[온라인 편집기](https://edit.govpress.cloud/) · [v1.1.0 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.1.0) · [Host SDK](sdk/QUICKSTART.md)
+[온라인 편집기](https://edit.govpress.cloud/) · [v1.2.0 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.2.0) · [패치노트](CHANGELOG.md) · [Host SDK](sdk/QUICKSTART.md)
 
 ## 주요 기능
 
@@ -13,7 +13,7 @@
 
 ## 로컬 실행
 
-[v1.1.0](https://github.com/wavelen-jw/onedit/releases/tag/v1.1.0)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
+[v1.2.0](https://github.com/wavelen-jw/onedit/releases/tag/v1.2.0)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
@@ -27,10 +27,10 @@ node start-ai-editor.mjs 4173
 
 ## 다른 앱에 연결
 
-[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.1.0/onedit-ai-host-sdk-1.1.0.tgz)를 설치합니다.
+[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.2.0/onedit-ai-host-sdk-1.2.0.tgz)를 설치합니다.
 
 ```bash
-npm install --ignore-scripts ./onedit-ai-host-sdk-1.1.0.tgz
+npm install --ignore-scripts ./onedit-ai-host-sdk-1.2.0.tgz
 ```
 
 승인된 파일 열기를 사용하는 SDK 예제는 같은 릴리스의 `onedit-sdk-editor-runtime.tar.gz`로 실행합니다. 독립 편집에는 `onedit-browser-runtime.tar.gz`를 사용합니다.
@@ -39,7 +39,7 @@ Host가 iframe의 온편집과 연결해 승인된 파일을 `openDocument`로 �
 
 ## AI 데모
 
-[온라인 AI 데모](https://edit.govpress.cloud/ai/)는 초대 코드로 접속하는 별도 호스팅 서비스입니다. 외부 앱에서 AI 보고서 작성이나 선택 문장 재작성을 제공하려면 해당 앱의 모델 API와 인증 서버를 연결해야 합니다.
+[온라인 AI 데모](https://edit.govpress.cloud/ai/)에서는 초대 코드를 입력하기 전에도 편집기를 쓸 수 있습니다. 코드 확인 후 AI 보고서 작성과 선택 문장 수정을 사용할 수 있습니다. 생성한 보고서는 적용 내용을 확인하고 문서에 넣습니다. 외부 앱에서 AI 보고서 작성이나 선택 문장 재작성을 제공하려면 해당 앱의 모델 API와 인증 서버를 연결해야 합니다.
 
 ## 소스 빌드
 

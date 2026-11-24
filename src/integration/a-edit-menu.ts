@@ -1,3 +1,4 @@
+import { sameFormatTarget } from "./a-format-input-guard.js";
 import { editorFeedbackText } from "../editor-feedback-text.js";
 import { activeWorkset, activeMenuDemand, withMenuDemand } from "../active-workset.js";
 import { mountDropdownKeys } from "../workspace-menu-navigation.js";
@@ -131,7 +132,7 @@ export function mountEditMenu(
     const source = buttons.get(id)!;
     if(reason || (!activeWorkset(root.ownerDocument) && source.disabled)) { feedback(reason || source.title); refresh(); return; }
     const now = editor.capture();
-    if(target && (target.documentId !== now.documentId || target.revision !== now.revision || JSON.stringify(target.selection) !== JSON.stringify(now.selection))) {
+    if (target && !sameFormatTarget(target, now)) {
       root.open = false; feedback("문서·리비전·선택이 변경되었습니다. 다시 선택하세요."); root.querySelector<HTMLElement>("summary")!.focus(); return;
     }
     root.open = false; run(id); refresh();

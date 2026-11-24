@@ -3,8 +3,7 @@ import { cellLayoutInput, cellLayoutKeys, cellLayoutHold } from "./cell-layout.j
 import {
   type FormatKind,
   type FormatState,
-  sides,
-  borderLineOptions,
+  assertFormatFontName,
   toCoreCharacter,
   toCoreParagraph,
 } from "./formatting.js";
@@ -13,27 +12,8 @@ import { mountParagraphLists, type ListCatalog } from "./paragraph-lists.js";
 import type { Props } from "./model.js";
 import { resetHancomCharacterDialog } from "./hancom-character-dialog.js";
 import {paragraphFieldText} from './paragraph-spacing-display.js';
-type Field = {
-  name: string;
-  label: string;
-  type?: "number";
-  numeric?: boolean;
-  options?: [string, string][];
-  min?: number;
-  max?: number;
-  step?: number;
-};
-const boolean = [
-  ["true", "켜기"],
-  ["false", "끄기"],
-] as [string, string][];
-const shade = [
-  ["none", "없음"],
-  ["#ffffff", "흰색"],
-  ["#fff2a8", "노랑"],
-  ["#cceedd", "연두"],
-] as [string, string][];
-export function fields(kind: FormatKind): Field[] {
+import { cellFields, shadeOptions, toggleOptions, readFormatScalar, type FormatField } from "./format-fields.js";
+export function fields(kind: FormatKind): FormatField[] {
   if (kind === "char")
     return [
       { name: "fontFamily", label: "글꼴" },
@@ -48,11 +28,11 @@ export function fields(kind: FormatKind): Field[] {
       ...["bold", "italic", "underline"].map((name, n) => ({
         name,
         label: ["굵게", "기울임", "밑줄"][n],
-        options: boolean,
+        options: toggleOptions,
       })),
       { name: "underlineType", label: "선 위치", options: linePositions.map(([value, label]) => [value, label]) },
       { name: "textColor", label: "글자색 (#RRGGBB)" },
-      { name: "shadeColor", label: "글자 음영", options: shade },
+      { name: "shadeColor", label: "글자 음영", options: shadeOptions },
     ];
   if (kind === "paragraph")
     return [
@@ -97,46 +77,7 @@ export function fields(kind: FormatKind): Field[] {
         step: 1,
       },
     ];
-  return [
-    { name: "verticalAlign", label: "셀 세로 정렬", numeric: true,
-      options: [["0", "위"], ["1", "가운데"], ["2", "아래"]] },
-    { name: "applyInnerMargin", label: "셀 안 여백 사용", options: boolean },
-    ...["Left", "Right", "Top", "Bottom"].map((side, n) => ({
-      name: `padding${side}`, label: `${["왼쪽", "오른쪽", "위", "아래"][n]} 안 여백 (pt)`,
-      type: "number" as const, min: 0, max: 327.67, step: 0.01,
-    })),
-    { name: "background", label: "셀 배경", options: shade },
-    ...sides.flatMap((side, n) => [
-      {
-        name: `border${side}.type`,
-        label: `${["왼쪽", "오른쪽", "위", "아래"][n]} 테두리`,
-        options: borderLineOptions,
-      },
-      {
-        name: `border${side}.width`,
-        label: "선 굵기",
-        options: [
-          ["0", "0.1 mm"],
-          ["1", "0.12 mm"],
-          ["2", "0.15 mm"],
-          ["3", "0.2 mm"],
-          ["4", "0.25 mm"],
-          ["5", "0.3 mm"],
-          ["6", "0.4 mm"],
-          ["7", "0.5 mm"],
-          ["8", "0.6 mm"],
-          ["9", "0.7 mm"],
-          ["10", "1.0 mm"],
-          ["11", "1.5 mm"],
-          ["12", "2.0 mm"],
-          ["13", "3.0 mm"],
-          ["14", "4.0 mm"],
-          ["15", "5.0 mm"],
-        ] as [string, string][],
-      },
-      { name: `border${side}.color`, label: "선 색 (#RRGGBB)" },
-    ]),
-  ];
+  return cellFields();
 }
 // Controls hold drafts only. A single Command receives explicitly edited fields.
 export function mountFields(
@@ -230,13 +171,8 @@ export function mountFields(
     for (const f of fields(kind)) {
       const v = controls.get(f.name)!.value;
       if (!v || v === initial.get(f.name)) continue;
-      props[f.name] = ["bold", "italic", "underline", "applyInnerMargin"].includes(f.name)
-        ? v === "true"
-        : f.numeric || f.type === "number" || /\.(type|width)$/.test(f.name)
-          ? Number(v)
-          : v.startsWith("#")
-            ? v.toLowerCase()
-            : v;
+      if (f.name === "fontFamily") assertFormatFontName(v);
+      props[f.name] = readFormatScalar(f, v, ["bold", "italic", "underline", "applyInnerMargin"].includes(f.name));
     }
     if (kind === "paragraph" && "lineSpacing" in props)
       props.lineSpacingType = "Percent";

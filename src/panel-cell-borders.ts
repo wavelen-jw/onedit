@@ -4,20 +4,24 @@ import { nested, type Command, type Props } from "./model.js";
 import { cellBorderPlan, type CellBorderDraft } from "./cell-border-plan.js";
 import { bindPanelDraft } from "./panel-draft.js";
 import { objectLinePalette } from "./object-line-palette.js";
-import { borderLineStyles } from "./formatting.js";
-import { fields } from "./integration/a-format-dialog.js";
+import { borderLineOptions, borderLineStyle, borderWidthOptions, borderWidthsMm } from "./formatting.js";
 import { formatValueState, formatValueGroup, markFormatValue } from "./format-value-state.js";
 
 const edgeNames = [["top","위"],["left","왼쪽"],["insideH","안쪽 가로"],["insideV","안쪽 세로"],["right","오른쪽"],["bottom","아래"]] as const;
 const presets = [["outer","바깥 테두리"],["inner","안쪽 선"],["all","모든 선"],["none","테두리 없음"],["weighted","바깥 굵게 · 안쪽 얇게"]] as const;
-const widths=[.1,.12,.15,.2,.25,.3,.4,.5,.6,.7,1,1.5,2,3,4,5];
 export function mountPanelCellBorders(root:HTMLElement,editor:Interaction,busy:()=>boolean,stateReason:()=>string,
   execute:(command:Command,target:ReturnType<Interaction["capture"]>)=>void,focus:()=>void) {
   const doc=root.ownerDocument,life=new AbortController(),form=doc.createElement("form");form.id="ui2-cell-borders";form.className="ui2-panel-form";
   const scope=doc.createElement("output");scope.className="ui2-scope-note";form.append(scope);
   const type=doc.createElement("select"),width=doc.createElement("select"),color=doc.createElement("input"),background=doc.createElement("input");
   type.name="panelBorderType";width.name="panelBorderWidth";color.name="panelBorderColor";background.name="panelCellBackground";
-  for(const[control,key,label]of [[type,"type","선 모양"],[width,"width","선 굵기 (mm)"]] as const){control.add(new Option("방향별 / 유지",""));for(const[value,name]of fields("cell").find(f=>f.name===`borderTop.${key}`)!.options!)control.add(new Option(name,value));const l=doc.createElement("label");l.append(label,control);form.append(l);}
+  for (const [control, options, label] of [[type, borderLineOptions, "선 모양"], [width, borderWidthOptions, "선 굵기 (mm)"]] as const) {
+    control.add(new Option("방향별 / 유지", ""));
+    for (const [value, name] of options) control.add(new Option(name, value));
+    const field = doc.createElement("label");
+    field.append(label, control);
+    form.append(field);
+  }
   const palettes:ReturnType<typeof objectLinePalette>[]=[];
   for(const[input,label,none]of [[color,"선 색 (#RRGGBB)",false],[background,"배경 (#RRGGBB / none)",true]] as const){
     input.type="text";input.autocomplete="off";input.placeholder="혼합 / 유지";
@@ -89,8 +93,8 @@ export function mountPanelCellBorders(root:HTMLElement,editor:Interaction,busy:(
         for(const side of ["Top","Bottom","Left","Right"]){if(!Object.keys(props).some(k=>k.startsWith(`border${side}.`)))continue;
           const line=doc.createElementNS(svg.namespaceURI,"line"),horizontal=side==="Top"||side==="Bottom",x=side==="Right"?c.x+c.w:c.x,y=side==="Bottom"?c.y+c.h:c.y;
           const next={...(current[`border${side}`] as any),...Object.fromEntries(Object.entries(props).filter(([k])=>k.startsWith(`border${side}.`)).map(([k,v])=>[k.split(".")[1],v]))};
-          line.setAttribute("x1",String(x));line.setAttribute("y1",String(y));line.setAttribute("x2",String(horizontal?x+c.w:x));line.setAttribute("y2",String(horizontal?y:y+c.h));line.setAttribute("stroke",next.type===0?"#245ddd":next.color);line.setAttribute("stroke-width",String(next.type===0?2:(widths[next.width]??.12)*96/25.4));
-          const pattern = next.type === 0 ? "5 3" : borderLineStyles.find(([value]) => Number(value) === next.type)?.[3];
+          line.setAttribute("x1",String(x));line.setAttribute("y1",String(y));line.setAttribute("x2",String(horizontal?x+c.w:x));line.setAttribute("y2",String(horizontal?y:y+c.h));line.setAttribute("stroke",next.type===0?"#245ddd":next.color);line.setAttribute("stroke-width",String(next.type===0?2:(borderWidthsMm[next.width]??.12)*96/25.4));
+          const pattern = next.type === 0 ? "5 3" : borderLineStyle(next.type)?.[3];
           if (pattern) line.setAttribute("stroke-dasharray", pattern);
           if(next.type===0)line.setAttribute("opacity",".55");svg.append(line);
         }

@@ -1,3 +1,5 @@
+import { fontSizeBounds, readFontSize, readTracking, trackingBounds } from "../character-number-fields.js";
+import { lineSpacingBounds, lineSpacingModes, readLineSpacing } from "../line-spacing.js";
 import {selectNumericDraftOnClick} from "../numeric-draft-selection.js";
 import { bindSpacingDraft } from "../spacing-draft.js";
 import {paragraphFieldText} from '../paragraph-spacing-display.js';
@@ -12,36 +14,15 @@ import { mountHancomCharacterDialog, resetHancomCharacterDialog } from "../hanco
 import {
   type FormatKind,
   type FormatState,
-  sides,
-  borderLineOptions,
   languages,
+  assertFormatFontName,
   toCoreCharacter,
   toCoreParagraph,
 } from "../formatting.js";
 import { mountTabs } from "./a-tab-stops.js";
 import type { Props } from "../model.js";
-type Field = {
-  name: string;
-  label: string;
-  type?: "number";
-  options?: [string, string][];
-  min?: number;
-  max?: number;
-  step?: number;
-  group?: string;
-  numeric?: boolean;
-};
-const boolean = [
-  ["true", "켜기"],
-  ["false", "끄기"],
-] as [string, string][];
-const shade = [
-  ["none", "없음"],
-  ["#ffffff", "흰색"],
-  ["#fff2a8", "노랑"],
-  ["#cceedd", "연두"],
-] as [string, string][];
-export function fields(kind: FormatKind): Field[] {
+import { borderFields, cellFields, shadeOptions, toggleOptions, readFormatScalar, type FormatField } from "../format-fields.js";
+export function fields(kind: FormatKind): FormatField[] {
   if (kind === "char")
     return [
       { name: "fontFamily", label: "공통 글꼴 (모든 언어)" },
@@ -57,8 +38,7 @@ export function fields(kind: FormatKind): Field[] {
             label: `${lang} ${["장평", "자간", "상대 크기", "글자 위치"][n]} (%)`,
             group: "언어별 폭·간격",
             type: "number" as const,
-            min: n === 0 || n === 2 ? 1 : -100,
-            max: n === 0 || n === 2 ? 200 : 100,
+            ...(name === "spacings" ? trackingBounds : {min: n === 0 || n === 2 ? 1 : -100, max: n === 0 || n === 2 ? 200 : 100}),
           }),
         ),
       ),
@@ -66,20 +46,19 @@ export function fields(kind: FormatKind): Field[] {
         name: "fontSize",
         label: "크기 (pt)",
         type: "number",
-        min: 1,
-        max: 200,
+        ...fontSizeBounds,
         step: 0.5,
       },
       { name: "scriptMode", label: "첨자", options: [["normal", "보통 (첨자 해제)"], ["super", "위 첨자"], ["sub", "아래 첨자"]] },
       ...["bold", "italic", "underline", "strikethrough"].map((name, n) => ({
         name,
         label: ["굵게", "기울임", "밑줄", "취소선"][n],
-        options: boolean,
+        options: toggleOptions,
       })),
       { name: "underlineColor", label: "밑줄 색 (#RRGGBB)" },
       { name: "strikeColor", label: "취소선 색 (#RRGGBB)" },
       { name: "textColor", label: "글자색 (#RRGGBB)" },
-      { name: "shadeColor", label: "글자 음영", options: shade },
+      { name: "shadeColor", label: "글자 음영", options: shadeOptions },
       {
         name: "outlineType",
         label: "외곽선",
@@ -128,7 +107,7 @@ export function fields(kind: FormatKind): Field[] {
         name,
         label: n ? "음각" : "양각",
         group: "장식 효과",
-        options: boolean,
+        options: toggleOptions,
       })),
       { name: "underlineType", label: "선 위치", group: "선 모양", options: linePositions.map(([value, label]) => [value, label]) },
       ...["underlineShape"].map((name, n) => ({
@@ -153,14 +132,13 @@ export function fields(kind: FormatKind): Field[] {
             " · 모든 언어",
           group: "폭·간격",
           type: "number" as const,
-          min: n === 0 || n === 2 ? 1 : -100,
-          max: n === 0 || n === 2 ? 200 : 100,
+          ...(name === "spacings" ? trackingBounds : {min: n === 0 || n === 2 ? 1 : -100, max: n === 0 || n === 2 ? 200 : 100}),
           step: 1,
         }),
       ),
-      { name: "kerning", label: "커닝", group: "장식 효과", options: boolean },
-      { name: "characterBackground", label: "글자 배경", options: shade, group: "테두리·배경" },
-      ...fields("cell").filter(f => /^border(Left|Right|Top|Bottom)\.(type|width|color)$/.test(f.name))
+      { name: "kerning", label: "커닝", group: "장식 효과", options: toggleOptions },
+      { name: "characterBackground", label: "글자 배경", options: shadeOptions, group: "테두리·배경" },
+      ...borderFields()
         .map(f => ({ ...f, name: "charB" + f.name.slice(1), group: "테두리·배경" })),
     ];
   if (kind === "paragraph")
@@ -168,13 +146,10 @@ export function fields(kind: FormatKind): Field[] {
       {
         name: "paragraphBackground",
         label: "문단 배경",
-        options: shade,
+        options: shadeOptions,
         group: "테두리·배경",
       },
-      ...fields("cell")
-        // Only side borders are shared. Cell padding/alignment use a
-        // different target/API; paragraph verticalAlign is defined below.
-        .filter((f) => /^border(Left|Right|Top|Bottom)\.(type|width|color)$/.test(f.name))
+      ...borderFields()
         .map((f) => ({ ...f, group: "테두리·배경" })),
       ...["왼쪽", "오른쪽", "위", "아래"].map((side, i) => ({
         name: `borderGap${i}`,
@@ -187,13 +162,13 @@ export function fields(kind: FormatKind): Field[] {
       ...["borderConnect", "borderIgnoreMargin"].map((name, i) => ({
         name,
         label: i ? "문단 여백 무시" : "이웃 문단 테두리 연결",
-        options: boolean,
+        options: toggleOptions,
         group: "테두리·배경",
       })),
       {
         name: "singleLine",
         label: "한 줄로 입력",
-        options: boolean,
+        options: toggleOptions,
         group: "줄 나눔",
       },
       {
@@ -228,7 +203,7 @@ export function fields(kind: FormatKind): Field[] {
             "문단 앞에서 항상 쪽 나눔",
           ][n],
           group: "문단 보호",
-          options: boolean,
+          options: toggleOptions,
         }),
       ),
       ...["fontLineHeight", "autoSpaceKrEn", "autoSpaceKrNum"].map(
@@ -240,7 +215,7 @@ export function fields(kind: FormatKind): Field[] {
             "한글·숫자 자동 간격",
           ][n],
           group: "자동 간격",
-          options: boolean,
+          options: toggleOptions,
         }),
       ),
       {
@@ -278,68 +253,22 @@ export function fields(kind: FormatKind): Field[] {
       {
         name: "lineSpacingType",
         label: "줄 간격 방식",
-        options: [
-          ["Percent", "글자에 따라 (%)"],
-          ["Fixed", "고정값 (pt)"],
-          ["Minimum", "최소 (pt)"],
-          ["SpaceOnly", "여백만 (pt)"],
-        ],
+        options: lineSpacingModes.map(([type, label]) => [type, label]),
       },
       ...["tabAutoLeft", "tabAutoRight"].map((name, i) => ({
         name,
         label: i ? "문단 오른쪽 끝 자동 탭" : "문단 왼쪽 끝 자동 탭",
         group: "탭",
-        options: boolean,
+        options: toggleOptions,
       })),
       {
         name: "lineSpacing",
         label: "줄 간격 (비율 %, 나머지 pt)",
         type: "number",
-        min: 1,
-        max: 1000,
-        step: 1,
+        ...lineSpacingBounds,
       },
     ];
-  return [
-    { name: "verticalAlign", label: "셀 세로 정렬", group: "셀", numeric: true,
-      options: [["0", "위"], ["1", "가운데"], ["2", "아래"]] },
-    { name: "applyInnerMargin", label: "셀 안 여백 사용", group: "셀", options: boolean },
-    ...["Left", "Right", "Top", "Bottom"].map((side, n) => ({
-      name: `padding${side}`, label: `${["왼쪽", "오른쪽", "위", "아래"][n]} 안 여백 (pt)`,
-      group: "셀", type: "number" as const, min: 0, max: 327.67, step: 0.01,
-    })),
-    { name: "background", label: "셀 배경", options: shade },
-    ...sides.flatMap((side, n) => [
-      {
-        name: `border${side}.type`,
-        label: `${["왼쪽", "오른쪽", "위", "아래"][n]} 테두리`,
-        options: borderLineOptions,
-      },
-      {
-        name: `border${side}.width`,
-        label: "선 굵기",
-        options: [
-          ["0", "0.1 mm"],
-          ["1", "0.12 mm"],
-          ["2", "0.15 mm"],
-          ["3", "0.2 mm"],
-          ["4", "0.25 mm"],
-          ["5", "0.3 mm"],
-          ["6", "0.4 mm"],
-          ["7", "0.5 mm"],
-          ["8", "0.6 mm"],
-          ["9", "0.7 mm"],
-          ["10", "1.0 mm"],
-          ["11", "1.5 mm"],
-          ["12", "2.0 mm"],
-          ["13", "3.0 mm"],
-          ["14", "4.0 mm"],
-          ["15", "5.0 mm"],
-        ] as [string, string][],
-      },
-      { name: `border${side}.color`, label: "선 색 (#RRGGBB)" },
-    ]),
-  ];
+  return cellFields("셀");
 }
 // Controls hold drafts only. A single Command receives explicitly edited fields.
 export function mountFields(
@@ -630,6 +559,11 @@ export function mountFields(
         )
       )
         throw Error(`${f.label}: 지원하지 않는 값`);
+      if (f.name === "fontSize") { props.fontSize = readFontSize(v); continue; }
+      if (/^spacings(?:Language[0-6])?$/.test(f.name)) {
+        props[f.name] = readFormatScalar(f, v, f.options === toggleOptions);
+        continue;
+      }
       if (
         f.type === "number" &&
         (!Number.isFinite(Number(v)) ||
@@ -645,14 +579,10 @@ export function mountFields(
         !/^#[\da-f]{6}$/i.test(v)
       )
         throw Error(`${f.label}: #RRGGBB 형식이 필요합니다`);
-      if (
-        /^font(Language[0-6]|Family)$/.test(f.name) &&
-        (!v.trim() || v.length > 200 || /[\x00-\x1f]/.test(v))
-      )
-        throw Error("글꼴 이름을 확인하세요");
+      if (/^font(Language[0-6]|Family)$/.test(f.name)) assertFormatFontName(v);
       if (f.name === "scriptMode") { Object.assign(props, scriptDelta(v)); continue; }
       props[f.name] =
-        f.options === boolean
+        f.options === toggleOptions
           ? v === "true"
           : f.numeric || f.type === "number" || /\.(type|width)$/.test(f.name)
             ? Number(v)
@@ -661,16 +591,11 @@ export function mountFields(
               : v;
     }
     if (kind === "paragraph") {
-      if ("lineSpacingType" in props && !("lineSpacing" in props)) {
-        const value = controls.get("lineSpacing")!.value;
-        if (!value) throw Error("줄 간격 방식을 바꾼 후 값을 입력하세요");
-        props.lineSpacing = Number(value);
-      }
-      if ("lineSpacing" in props) {
-        const type = controls.get("lineSpacingType")!.value;
-        if (!["Percent", "Fixed", "Minimum", "SpaceOnly"].includes(type))
-          throw Error("줄 간격 방식을 선택하세요");
-        props.lineSpacingType = type;
+      if ("lineSpacingType" in props || "lineSpacing" in props) {
+        Object.assign(props, readLineSpacing(
+          controls.get("lineSpacingType")!.value,
+          controls.get("lineSpacing")!.value,
+        ));
       }
       const tabs = readTabs?.();
       if (tabs !== undefined) props.tabStops = tabs;

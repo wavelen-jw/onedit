@@ -1,3 +1,4 @@
+import {tableAutofillRange} from './table-autofill-range.js';
 import type {RhwpAdapter} from './adapter.js';
 import {copy,nested,sameTable,type Selection,type Position} from './model.js';
 import {repeatAutofillPlan} from './table-autofill-repeat.js';
@@ -17,13 +18,7 @@ export function autofillPlan(a:RhwpAdapter,s:Selection,repeat=false){
  // Each ancestor and the exact leaf must be editable. assertEditable alone
  // intentionally checks the outer cell, not every nested owner.
  if(nested(p)){for(let depth=0;depth<(p.ancestors?.length??0);depth++){const step=p.ancestors![depth],parent={...p,control:step.controlIndex,cell:step.cellIndex,cellPara:step.cellParaIndex,offset:0,ancestors:p.ancestors!.slice(0,depth)};const props=seriesCell(a,parent);if(props.cellProtect||props.fieldName||props.editableInForm)throw Error('보호·필드·양식 셀 안에서는 자동 채우기를 적용하지 않습니다.');}}
- const all=a.cells(p),anchor=all.find(c=>c.cellIdx===s.anchor.cell),focus=all.find(c=>c.cellIdx===p.cell);
- if(!anchor||!focus||all.some(c=>c.rowSpan!==1||c.colSpan!==1))throw Error('병합·분할 없는 일반 표에서 숫자 연속 채우기를 지원합니다.');
- const left=Math.min(anchor.col,focus.col),right=Math.max(anchor.col,focus.col),top=Math.min(anchor.row,focus.row),bottom=Math.max(anchor.row,focus.row);
- const cells=all.filter(c=>c.row>=top&&c.row<=bottom&&c.col>=left&&c.col<=right);
- if(cells.length!==(right-left+1)*(bottom-top+1)||new Set(cells.map(c=>c.cellIdx)).size!==cells.length)throw Error('정확한 사각형 셀 블록을 선택하세요.');
- // The official square example 1,2 -> 3..25 advances across columns.
- cells.sort((a,b)=>right-left>=bottom-top?a.row-b.row||a.col-b.col:a.col-b.col||a.row-b.row);
+ const {cells}=tableAutofillRange(a,s,'병합·분할 없는 일반 표에서 숫자 연속 채우기를 지원합니다.');
  const entries=cells.map(c=>{const q={...p,cell:c.cellIdx,cellPara:0,offset:0};a.validate(q);a.assertEditable(q);a.assertTextOnly(q);if(a.count(q)!==1)throw Error('각 셀이 한 문단인 숫자 연속 채우기만 지원합니다.');const cell=seriesCell(a,q);if(nested(q)&&(cell.cellProtect||cell.fieldName||cell.editableInForm))throw Error('보호·필드·양식 셀은 자동 채우기에서 보존합니다.');return{p:q,text:a.text(q),para:a.paraProps(q),cell};});
  const end=entries.findIndex(x=>x.text==='');if(end<0)return {writes:[],apply:()=>copy(s)};
  if(end<2)throw Error('처음 두 셀 이상에 같은 간격의 숫자를 넣으세요. 한 값 반복·문자 목록은 아직 지원하지 않습니다.');

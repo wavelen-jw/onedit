@@ -1,3 +1,4 @@
+import {tableAutofillRange} from './table-autofill-range.js';
 import type {RhwpAdapter} from './adapter.js';
 import {copy,nested,type Position,type Selection} from './model.js';
 
@@ -29,12 +30,7 @@ export function repeatAutofillPlan(a:RhwpAdapter,s:Selection){
  const root=Array.from({length:p.sec},(_,sec)=>a.doc.getParagraphCount(sec)).reduce((n,count)=>n+count,0)+p.para;
  const host=a.call<any[]>('getControls').find(c=>c.list===0&&c.para===root&&c.controlIndex===p.control);
  if(!host||host.ctrlId!=='tbl'||host.props?.Lock)throw Error('보호되었거나 정확한 소유 표를 확인할 수 없습니다.');
- const all=a.cells(p),anchor=all.find(c=>c.cellIdx===s.anchor.cell),focus=all.find(c=>c.cellIdx===p.cell);
- if(!anchor||!focus||all.some(c=>c.rowSpan!==1||c.colSpan!==1))throw Error('병합·분할 없는 일반 표에서 문자·서식 반복을 지원합니다.');
- const left=Math.min(anchor.col,focus.col),right=Math.max(anchor.col,focus.col),top=Math.min(anchor.row,focus.row),bottom=Math.max(anchor.row,focus.row);
- const cells=all.filter(c=>c.row>=top&&c.row<=bottom&&c.col>=left&&c.col<=right);
- if(cells.length!==(right-left+1)*(bottom-top+1)||new Set(cells.map(c=>c.cellIdx)).size!==cells.length)throw Error('정확한 사각형 셀 블록을 선택하세요.');
- cells.sort((a,b)=>right-left>=bottom-top?a.row-b.row||a.col-b.col:a.col-b.col||a.row-b.row);
+ const {all,cells}=tableAutofillRange(a,s,'병합·분할 없는 일반 표에서 문자·서식 반복을 지원합니다.');
  const entries=cells.map(c=>{const q={...p,cell:c.cellIdx,cellPara:0,offset:0};return{p:q,...state(a,q)};});
  const end=entries.findIndex(e=>e.paragraphs.every(p=>p.text===''));
  if(end<=0)return{writes:[],apply:()=>copy(s)};

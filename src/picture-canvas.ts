@@ -1,6 +1,6 @@
 import type { Interaction } from './interaction.js';
 import { selectedPicture, pictureLayoutBoxes, type PictureLayoutBox } from './pictures.js';
-import { sameFormatTarget } from './integration/a-format-input-guard.js';
+import { isCurrentPointerTarget } from './integration/a-format-input-guard.js';
 import { pagePoint } from './integration/a-view-menu.js';
 import type { Selection } from './model.js';
 type Box = PictureLayoutBox;
@@ -37,7 +37,7 @@ export function mountPictureCanvas(pages:HTMLElement,editor:Interaction,actions:
     const matches=Array.from(pages.querySelectorAll<HTMLElement>('.page')).flatMap(p=>pictureCanvasBoxes(editor,Number(p.dataset.page))).filter(b=>b.sec===s.focus.sec&&b.para===s.focus.para&&b.control===s.control);return matches.length===1?matches[0]:undefined;};
   const sync=()=>{clear();if(drag){drag=undefined;}if(actions.busy())return;try{const b=currentBox();if(b&&!selectedPicture(editor.adapter,editor.selection).props.sizeProtect)draw(b);}catch{/* unavailable selection has no handles */}};
   const stop=(error?:unknown)=>{drag=undefined;sync();if(error)actions.error(error);actions.focus();};
-  const valid=(d:Drag)=>{if(actions.busy()||!d.page.isConnected||!sameFormatTarget(d.target,editor.capture()))throw Error('문서·선택 또는 작업 상태가 변경되어 그림 크기 조절을 취소했습니다.');const b=currentBox();if(!b||JSON.stringify(b)!==JSON.stringify(d.box))throw Error('그림 위치가 변경되었습니다. 다시 선택하세요.');};
+  const valid=(d:Drag)=>{if(!isCurrentPointerTarget(d.page, actions.busy(), d.target, () => editor.capture()))throw Error('문서·선택 또는 작업 상태가 변경되어 그림 크기 조절을 취소했습니다.');const b=currentBox();if(!b||JSON.stringify(b)!==JSON.stringify(d.box))throw Error('그림 위치가 변경되었습니다. 다시 선택하세요.');};
   window.addEventListener('pointerdown',e=>{
     if(e.button!==0||e.shiftKey||e.ctrlKey||e.metaKey||e.altKey)return;
     const target=e.target as Element;if(target.closest('.object-grip'))return;

@@ -1,3 +1,6 @@
+import { forwardDeleteCommand } from "./text-edit-commands.js";
+import { objectLineCommand } from "./object-context-menu.js";
+import { characterStyleCommand, characterStyleShortcut } from "./character-style-commands.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import { approvedEmbedChrome } from "./approved-embed-chrome.js";
 import { closeEditorDialog, keepDialogFieldFocus, showDocumentEditingDialog, showEditorDialog, wrapDialogTab } from "./editor-popup-focus.js";
@@ -103,7 +106,7 @@ import { mountFields } from "./integration/a-format-dialog.js";
 import { focusParagraphBeforeShortcut, mountHancomParagraphDialog, resetHancomParagraphDialog } from "./hancom-paragraph-dialog.js";
 import { appendDialogShortcutHelp } from "./dialog-shortcut-help.js";
 import { mountHancomCellDialog, resetHancomCellDialog, type TablePaginationDisplay } from "./hancom-cell-dialog.js";
-import { mountSearch } from "./integration/a-search.js";
+import { mountSearch, openEditorSearch } from "./integration/a-search.js";
 import { editMenuState, mountEditMenu } from "./integration/a-edit-menu.js";
 import { mountTableMenu } from "./integration/a-table-menu.js";
 import { mountNumberManager } from "./numbering-manager.js";
@@ -330,7 +333,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     }
     focus();
   };
-  const search = mountSearch(editor, changed, focus);
+  const search = mountSearch(editor, changed, focus, unavailable);
   const documentInfo=mountDocumentInfo(doc,editor,{blocked:unavailable});
   mountStatusStatistics(doc,editor,{blocked:unavailable,show:launcher=>{try{documentInfo.show(launcher);}catch(error){files.ui.error(error);}}});
   const paper=mountPaper(doc,editor,{blocked:unavailable,inFlight:busy,focus,changed,error:files.ui.error});
@@ -339,7 +342,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   const tableKeyDraft=mountTableKeyDraft(doc,editor,{blocked:unavailable,inFlight:busy,changed,error:files.ui.error});
   let remainingShortcuts:ReturnType<typeof mountRemainingShortcutUI>|undefined;
   const pasteChooser=mountPasteChooser(doc,editor,{blocked:unavailable,focus,paste:plain=>{focus();input.dispatchEvent(plain?new Event('rhwp:paste-text'):new ClipboardEvent('paste',{bubbles:true,cancelable:true}));}});
-  const queryShortcut=(event:Event)=>{if(unavailable())return;try{const key=(event as CustomEvent<string>).detail;if(key==='i'||key==='d')documentInfo.show();else if(key==='l')search.previous();else search.show(key==='a');}catch(error){files.ui.error(error);}};
+  const queryShortcut=(event:Event)=>{if(unavailable())return;try{const key=(event as CustomEvent<string>).detail;if(key==='i'||key==='d')documentInfo.show();else if(key==='l')search.previous();else openEditorSearch(editor, key==='a');}catch(error){files.ui.error(error);}};
   let equalPending=false;
   const shortcutUI=async(event:Event)=>{
     if(unavailable())return;try{const action=(event as CustomEvent<string>).detail;
@@ -367,14 +370,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     }
     if(action==='table-add'||action==='table-delete'||action==='cell-split'){tableKeyDraft.show(action);return;}
     if(action==='object-background'){const row=shapes.readSelected();if(editor.selection.kind!=='object'||!row||row.name!=='글상자')throw Error('배경색 입구는 기존 본문 plain 글상자에서 지원합니다.');shapes.showProperties();const tab=doc.querySelector<HTMLButtonElement>('dialog[open] [data-object-tab="3"]');if(!tab)throw Error('글상자 채우기 탭을 확인할 수 없습니다.');tab.click();tab.focus();return;}
-    if(action==='object-line'){
-      const s=editor.selection;if(s.kind!=='object')throw Error('개체를 선택하세요.');
-      if(s.focus.kind==='cell'||selectedClipboardObject(editor.adapter,s).kind==='picture')pictures.showProperties();else {
-        const row=shapes.readSelected();if(!row||row.name!=='글상자')throw Error('선 속성 탭은 기존 본문 plain 글상자/그림에서만 지원합니다.');shapes.showProperties();
-      }
-      const tab=doc.querySelector<HTMLButtonElement>('dialog[open] [data-object-tab="2"]');
-      if(!tab)throw Error('현재 개체의 선 속성 탭은 연결되지 않았습니다.');tab.click();tab.focus();
-    }
+    if (action === 'object-line') lineProperties.run();
     }catch(error){files.ui.error(error);}
   };
   doc.addEventListener('rhwp:query-shortcut',queryShortcut);
@@ -388,7 +384,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   };
   searchRoot.addEventListener("click", guardSearch, true);
   searchRoot.addEventListener("keydown", guardSearch, true);
-  const roots: HTMLElement[] = [doc.getElementById("search-dialog")!];
+  const roots: HTMLElement[] = [];
   const host = doc.createElement("div");
   host.id = "integration-menus";
   const style = doc.createElement("style");
@@ -695,7 +691,22 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   const pictures = mountPictures(host,editor,{execute:(command,target)=>executeSearch(command,target),busy:()=>busy()||!!doc.querySelector("dialog[open]:not(#picture-dialog)"),changed,focus,error:e=>files.ui.error(e)});
   const showPictureInsert = () => pictures.showInsert();
   doc.addEventListener("rhwp:picture-insert", showPictureInsert);
-  const pictureContext = mountPictureContext(doc, editor, {busy:unavailable,changed,selectionChanged:()=>files.ui.change(false),focus,properties:pictures.showProperties,error:e=>files.ui.error(e)});
+  const lineProperties = objectLineCommand(doc, () => {
+    if (unavailable()) throw Error("현재 작업을 마친 후 사용하세요.");
+    const selection = editor.selection;
+    if (selection.kind !== "object") throw Error("개체를 선택하세요.");
+    if (selection.focus.kind === "cell" ||
+        selectedClipboardObject(editor.adapter, selection).kind === "picture") {
+      selectedPicture(editor.adapter, selection);
+      return { dialog: "#picture-dialog", open: pictures.showProperties };
+    }
+    const shape = shapes.readSelected();
+    if (!shape || shape.name !== "글상자")
+      throw Error("그림 또는 글상자를 선택하세요.");
+    if (shape.reason) throw Error(shape.reason);
+    return { dialog: "#shape-dialog", open: shapes.showProperties };
+  });
+  const pictureContext = mountPictureContext(doc, editor, {busy:unavailable,changed,selectionChanged:()=>files.ui.change(false),focus,properties:pictures.showProperties,line:lineProperties,error:e=>files.ui.error(e)});
   // Native direct property keys own only an existing typed block/object target.
   // A normal body/cell text caret keeps typing P/L/C as text.
   // Ask the owning editor router before consuming a standalone property key.
@@ -729,7 +740,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     cut: () => input.dispatchEvent(new ClipboardEvent("cut", { bubbles: true, cancelable: true })),
   });
   roots.push(doc.getElementById("shape-dialog")!);
-  const shapeContext=mountShapeContext(doc,editor,{busy:unavailable,changed:()=>files.ui.change(false),focus,properties:shapes.showProperties,error:e=>files.ui.error(e)});
+  const shapeContext=mountShapeContext(doc,editor,{busy:unavailable,changed:()=>files.ui.change(false),focus,properties:shapes.showProperties,line:lineProperties,error:e=>files.ui.error(e)});
   // Current product policy: no style application/manager UI; stored styles are untouched.
   const showStyleManager = () => files.ui.error(stylesUnavailable);
   const numberManager = mountNumberManager(doc.body, editor, {
@@ -797,7 +808,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       if (id === "format-copy") { formatCopy.copy(); return; }
       if (id === "format-paste") { formatCopy.paste(); return; }
       if (id === "find" || id === "replace") {
-        search.show(id === "replace");
+        openEditorSearch(editor, id === "replace");
         return;
       }
       if (id === "copy" || id === "cut" || id === "paste") {
@@ -811,7 +822,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       safe(() => {
         if (id === "undo" || id === "redo") runHistory(editor, id === "redo", unavailable());
         else if (id === "delete")
-          editor.execute(editor.selection.kind === "cells" ? {type:"clear-cells"} : { type: "delete", backward: false });
+          editor.execute(forwardDeleteCommand(editor.selection));
         else if (id === "clear") editor.execute({ type: "clear-cells" });
         else if (id === "all") editor.selectAll();
         else if (id === "block") editor.advanceBlock();
@@ -1170,20 +1181,13 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
         safe(() => editor.execute(lowerMenuCommand(editor, authoring)));
     const searchAction = searchShortcut(e);
     if (searchAction)
-      action = () => search.show(searchAction === "replace");
+      action = () => openEditorSearch(editor, searchAction === "replace");
     if (e.altKey && !primary && !e.shiftKey && (k === "l" || k === "t"))
       action = () => showFormat(k === "l" ? "char" : "paragraph");
     if (e.altKey && e.shiftKey && !primary) {
-      const c: Record<string, CatalogCommand> = {
-        b: { type: "bold" },
-        i: { type: "toggle-char", property: "italic" },
-        u: { type: "underline" },
-        p: { type: "script", mode: "superscript" },
-        s: { type: "script", mode: "subscript" },
-      };
-      if (c[k])
-        action = () =>
-          safe(() => editor.execute(lowerMenuCommand(editor, c[k])));
+      const style = characterStyleShortcut(k);
+      if (style)
+        action = () => safe(() => editor.execute(lowerMenuCommand(editor, style)));
     }
     if (!action) return;
     e.preventDefault();
@@ -1423,7 +1427,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     });
     mountModernWorkspace(doc, files, readUnavailable);
     queueMicrotask(()=>{toolbarOverflow=mountToolbarOverflow(doc);});
-    documentNavigation=mountDocumentNavigation(doc,editor,{busy:unavailable,focus,changed:()=>files.ui.change(false),find:()=>search.show()});
+    documentNavigation=mountDocumentNavigation(doc,editor,{busy:unavailable,focus,changed:()=>files.ui.change(false),find:()=>openEditorSearch(editor)});
     emptyHint=mountEmptyParagraphHint(doc,editor,unavailable);
     if (activeWorkset(doc)) mountMobileEditTools(doc, editor, {
       busy: unavailable,
@@ -1437,7 +1441,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
           case "cell-properties": cellCommand.open("properties", target); return;
           case "character": showFormat("char"); return;
           case "paragraph": showFormat("paragraph"); return;
-          case "bold": safe(() => editor.execute({ type: "bold" }, target)); return;
+          case "bold": safe(() => editor.execute(characterStyleCommand("bold"), target)); return;
           case "insert-table":
             assertTableInsertTarget(editor, target, unavailable());
             tableInsert?.show(); return;
@@ -1558,6 +1562,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     doc.fonts?.removeEventListener("loadingerror", fontsChanged);
     searchRoot.removeEventListener("click", guardSearch, true);
     searchRoot.removeEventListener("keydown", guardSearch, true);
+    search.dispose();
     win.removeEventListener("click", click, true);
     win.removeEventListener("keydown", key, true);
     doc.removeEventListener("keydown", dialogKey);

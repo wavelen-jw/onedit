@@ -1,7 +1,7 @@
-import { rewriteSectionXml } from "./clipboard-section-zip.js";
+import { inspectSectionXml, rewriteSectionXml } from "./clipboard-section-zip.js";
 
 const hp = "http://www.hancom.co.kr/hwpml/2011/paragraph";
-type LinkOrder = { key: string; value: number };
+export type LinkOrder = { key: string; value: number };
 // Scope to the Core handle. Full paste undo/redo already swaps the handles.
 const orders = new WeakMap<object, LinkOrder>();
 
@@ -30,18 +30,20 @@ function singleLink(xml: Document) {
   return {field,key:JSON.stringify([id,fieldId,command,label])};
 }
 
-export async function extractLinkZOrder(bytes: Uint8Array): Promise<LinkOrder | undefined> {
+export async function extractLinkZOrder(bytes: Uint8Array, context?: "local-open"): Promise<LinkOrder | undefined> {
   if (bytes[0] !== 80 || bytes[1] !== 75) return;
   let result: LinkOrder | undefined;
-  await rewriteSectionXml(bytes,xml=>{
+  // XML element names cannot contain entity references. In the optional local
+  // open inspection an absent name proves that no hyperlink order can match.
+  const required = context === "local-open" ? "fieldBegin" : undefined;
+  await inspectSectionXml(bytes,xml=>{
     const link = singleLink(xml);
     const raw = link?.field.getAttribute("zorder");
     if (link && raw != null && /^-?\d{1,10}$/.test(raw)) {
       const value = Number(raw);
       if (value >= -2147483648 && value <= 2147483647) result={key:link.key,value};
     }
-    return false;
-  });
+  }, required);
   return result;
 }
 

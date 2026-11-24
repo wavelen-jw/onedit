@@ -3,6 +3,10 @@ import { mountDropdownKeys } from "./workspace-menu-navigation.js";
 
 // Presentation of existing view-only sources. No document/selection/History or
 // new view option lives here. Native submenus are not available as references.
+export function setViewAttribute(button: HTMLElement, name: string, value: string) {
+  if (button.getAttribute(name) !== value) button.setAttribute(name, value);
+}
+
 export function mountViewMenuPresentation(root: HTMLDetailsElement, busy: () => boolean) {
   const doc = root.ownerDocument, panel = root.querySelector<HTMLElement>("[data-view-panel]")!;
   const original = [...panel.children];
@@ -76,13 +80,13 @@ export function mountViewMenuPresentation(root: HTMLDetailsElement, busy: () => 
     const blocked = busy() || !hasDocument;
     for (const {button} of groups) {
       const unavailable = blocked || (button.dataset.viewEntry === "toolbox" && !panel.querySelector("[data-toolbox-view]"));
-      button.disabled = unavailable; button.setAttribute("aria-disabled", String(unavailable));
-      button.title = unavailable ? "입력·대화상자를 마치고 문서를 먼저 여세요." : "기존 지원 보기 명령 · 문서/이력 불변";
+      button.toggleAttribute("disabled", unavailable); setViewAttribute(button, "aria-disabled", String(unavailable));
+      setViewAttribute(button, "title", unavailable ? "입력·대화상자를 마치고 문서를 먼저 여세요." : "기존 지원 보기 명령 · 문서/이력 불변");
     }
-    for (const b of checks) b.setAttribute("aria-checked", String(b.getAttribute("aria-pressed") === "true"));
+    for (const b of checks) setViewAttribute(b, "aria-checked", String(b.getAttribute("aria-pressed") === "true"));
     for (const b of panel.querySelectorAll<HTMLButtonElement>("[data-toolbox-view]")) {
-      b.setAttribute("role", b.dataset.tableGuideMode?"menuitemradio":"menuitemcheckbox"); b.setAttribute("aria-checked", String(b.getAttribute("aria-pressed") === "true"));
+      setViewAttribute(b, "role", b.dataset.tableGuideMode?"menuitemradio":"menuitemcheckbox"); setViewAttribute(b, "aria-checked", String(b.getAttribute("aria-pressed") === "true"));
     }
-    current.setAttribute("aria-checked", String(hasDocument));
+    setViewAttribute(current, "aria-checked", String(hasDocument));
   } };
 }

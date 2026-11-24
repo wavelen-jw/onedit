@@ -20,7 +20,7 @@ export function mountCommandSearch(doc:Document,editor:Interaction,actions:{
   dialog.id="command-search";dialog.className="ui2-command-search";dialog.setAttribute("aria-labelledby","command-search-title");heading.id="command-search-title";heading.textContent="명령 찾기";
   form.dataset.ui2Search="";form.noValidate=true;query.id="command-query";query.type="search";query.autocomplete="off";query.setAttribute("aria-label","명령·동의어 검색");query.placeholder="중앙 정렬, 셀 색, 사진…";query.setAttribute("role","combobox");query.setAttribute("aria-controls","command-results");query.setAttribute("aria-autocomplete","list");query.setAttribute("aria-expanded","true");
   list.id="command-results";list.setAttribute("role","listbox");list.setAttribute("aria-label","명령 검색 결과");status.setAttribute("role","status");cancel.type="button";cancel.textContent="취소";cancel.dataset.commandCancel="";form.append(heading,query,list,status,help,cancel);dialog.append(form);doc.body.append(dialog);
-  const guard=formatInputGuard(form);let captured:ReturnType<Interaction["capture"]>|undefined,composing=false,running=false,active=0;
+  const guard=formatInputGuard(form);let captured:ReturnType<Interaction["capture"]>|undefined,running=false,active=0;
   let rows:{row:SearchCommand;reason:string;keys:string;recent:boolean}[]=[];const recent:string[]=[];let admission=new Map<string,string>();let access="";
   const accessKey=()=>`${editor.adapter.scope}:${editor.adapter.documentLocked}`;
   const current=()=>!!captured&&access===accessKey()&&sameFormatTarget(captured,editor.capture());
@@ -38,7 +38,7 @@ export function mountCommandSearch(doc:Document,editor:Interaction,actions:{
   const disposeRows=()=>{if(activeWorkset(doc)){releaseSearchCatalog(doc);rows=[];admission.clear();list.replaceChildren();}};
   const close=(focus=true)=>{guard.close();captured=undefined;closeEditorDialog(dialog, focus);if(focus){disposeRows();actions.focus();}};
   async function run(){
-    if(!guard.ready()||composing||running)return;
+    if(!guard.ready()||running)return;
     const original=captured;running=true;
     try{
       if(!current())throw Error("문서·선택이 바뀌었습니다. 취소 후 다시 여세요.");if(actions.busy())throw Error("입력·문서 작업을 먼저 마치세요.");
@@ -63,22 +63,20 @@ export function mountCommandSearch(doc:Document,editor:Interaction,actions:{
   }
   function show(){
     if(dialog.open||actions.busy()||doc.querySelector("dialog[open]"))return false;
-    captured=editor.capture();access=accessKey();admission=actions.reasons();query.value="";active=0;composing=false;
+    captured=editor.capture();access=accessKey();admission=actions.reasons();query.value="";active=0;
     for(const n of doc.querySelectorAll("#main-menu details[open]"))n.removeAttribute("open");
     heading.textContent="명령 찾기";
     help.textContent="↑↓ 이동 · Enter 실행 · Esc 닫기";
     render();guard.open();showEditorDialog(dialog);query.focus();return true;
   }
   button.onclick=()=>show();query.addEventListener("input",()=>{active=0;render();},{signal});
-  form.addEventListener("compositionstart",()=>{composing=true;},{signal});form.addEventListener("compositionend",()=>{composing=false;},{signal});
-  form.onsubmit=e=>{e.preventDefault();run();};cancel.onclick=()=>close();
+  form.onsubmit=e=>{e.preventDefault();run();};guard.bindCancel(cancel,close);
   form.addEventListener("keydown",e=>{
-    if(composing||e.isComposing||e.keyCode===229)return;
+    if(e.defaultPrevented||!guard.ready()||e.isComposing||e.keyCode===229)return;
     if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close();return;}
     if(e.key==="Enter"){e.preventDefault();e.stopPropagation();if(!e.repeat&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!e.shiftKey)run();return;}
     if(e.target===query&&["ArrowDown","ArrowUp"].includes(e.key)){e.preventDefault();e.stopPropagation();active=(active+(e.key==="ArrowDown"?1:-1)+rows.length)%Math.max(rows.length,1);mark();return;}
     if(e.key==="Tab"){e.preventDefault();(doc.activeElement===query?cancel:query).focus();}e.stopPropagation();
   },{signal});
-  dialog.addEventListener("cancel",e=>{e.preventDefault();if(!composing)close();},{signal});
-  return{sync(){if(!activeWorkset(doc))button.disabled=actions.busy()||!!doc.querySelector("dialog[open]");if(dialog.open&&activeWorkset(doc)&&captured&&captured.documentId!==editor.adapter.documentId){close(false);disposeRows();return;}if(dialog.open&&!current()){status.textContent="문서·선택이 바뀌었습니다. 취소 후 다시 여세요.";for(const b of list.querySelectorAll("button"))b.setAttribute("aria-disabled","true");}},dispose(){life.abort();guard.close();disposeRows();button.remove();dialog.remove();}};
+  return{sync(){if(!activeWorkset(doc))button.disabled=actions.busy()||!!doc.querySelector("dialog[open]");if(dialog.open&&activeWorkset(doc)&&captured&&captured.documentId!==editor.adapter.documentId){close(false);disposeRows();return;}if(dialog.open&&!current()){status.textContent="문서·선택이 바뀌었습니다. 취소 후 다시 여세요.";for(const b of list.querySelectorAll("button"))b.setAttribute("aria-disabled","true");}},dispose(){life.abort();guard.dispose();disposeRows();button.remove();dialog.remove();}};
 }

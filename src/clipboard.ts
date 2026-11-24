@@ -6,58 +6,15 @@ import { selectedFragmentObject, captureFragmentObject } from './object-clipboar
 import {tableFragmentHTML} from './clipboard-table-html.js';
 import {PasteFormatUnavailable} from './paste-format-fallback.js';
 
-export const CLIPBOARD_MIME = "web application/vnd.rhwp-next.body+json";
-export const MAX_CLIPBOARD_BYTES = 8 * 1024 * 1024;
-const marker = "data-rhwp-next-clipboard";
+import {
+  clipboardEnvelope, clipboardHTMLAttribute, wrapClipboardHTML,
+  decodeEnvelope, envelopeFromHTML, hasClipboardMarker,
+} from "./clipboard-envelope.js";
+export {
+  CLIPBOARD_MIME, MAX_CLIPBOARD_BYTES, encodeClipboardBytes, decodeEnvelope, envelopeFromHTML,
+} from "./clipboard-envelope.js";
+
 export type ClipboardData = { text: string; html: string; structured?: string; image?: import("./clipboard-image.js").ClipboardPicture };
-export const encodeClipboardBytes = (bytes: Uint8Array) => {
-  let text = "";
-  for (let i = 0; i < bytes.length; i += 8192)
-    text += String.fromCharCode(...bytes.subarray(i, i + 8192));
-  return btoa(text);
-};
-const decode = (text: string, limit = MAX_CLIPBOARD_BYTES) => {
-  if (text.length > limit * 1.4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(text))
-    throw Error("클립보드 데이터 크기 또는 인코딩이 올바르지 않습니다.");
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  // atob returns one byte per UTF-16 code unit. Fill directly rather than
-  // allocating an iterable conversion and calling a mapper for every byte.
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-};
-export function decodeEnvelope(wire: string, nativeHancomRange = false) {
-  if (wire.length > MAX_CLIPBOARD_BYTES * 1.4)
-    throw Error("클립보드 크기 제한을 초과했습니다.");
-  const data = JSON.parse(wire);
-  if (
-    data?.format !== "rhwp-next-body" ||
-    data.version !== 1 ||
-    data.encoding !== "hwpx-fragment" ||
-    typeof data.payload !== "string"
-  )
-    throw Error("지원하지 않거나 손상된 RHWP 클립보드 형식입니다.");
-  if (data.paragraphMode !== undefined &&
-      data.paragraphMode !== "retain-target-at-body-end" && data.paragraphMode !== "retain-target-for-inline-text" && (data.paragraphMode !== "retain-target-for-native-range" || !nativeHancomRange))
-    throw Error("지원하지 않는 클립보드 문단 결합 방식입니다.");
-  const bytes = decode(data.payload);
-  if (bytes.length > MAX_CLIPBOARD_BYTES)
-    throw Error("클립보드 크기 제한을 초과했습니다.");
-  return bytes;
-}
-export function envelopeFromHTML(html: string): string | undefined {
-  if (html.length > MAX_CLIPBOARD_BYTES * 2)
-    throw Error("HTML 클립보드 크기 제한을 초과했습니다.");
-  if (!html.includes(marker)) return undefined;
-  const matches = [
-    ...html.matchAll(/data-rhwp-next-clipboard="([A-Za-z0-9+/=]+)"/g),
-  ];
-  if (matches.length !== 1)
-    throw Error("손상되거나 중복된 RHWP HTML 클립보드입니다.");
-  return new TextDecoder("utf-8", { fatal: true }).decode(
-    decode(matches[0][1], MAX_CLIPBOARD_BYTES * 1.5),
-  );
-}
 
 function assertFragmentScope(a:RhwpAdapter,fragment:{toFragmentBytes():Uint8Array}){
   // Inspect only a Core-validated bounded graph, never the untrusted ZIP.
@@ -65,6 +22,16 @@ function assertFragmentScope(a:RhwpAdapter,fragment:{toFragmentBytes():Uint8Arra
   try{if(JSON.parse(source.listCharts()).length||JSON.parse(source.getControls()).some((c:any)=>c.userDesc==='차트'))
     throw Error('표차트는 사용자 제외 범위입니다. 원문을 보존합니다.');}
   finally{source.free();}
+}
+function withHancomFragment<T>(a: RhwpAdapter, wire: string,
+  apply: (fragment: ReturnType<typeof fragmentForDocument>) => T): T {
+  const fragment = fragmentForDocument(a.doc, decodeEnvelope(wire, true));
+  try {
+    assertFragmentScope(a, fragment);
+    return apply(fragment);
+  } finally {
+    fragment.free();
+  }
 }
 function fragmentPlainText(a:RhwpAdapter,bytes:Uint8Array){
  const source=siblingDocument(a.doc,bytes);try{const text=JSON.parse(source.getTextFileUnicode());if(typeof text!=='string')throw Error('fragment 텍스트 반환 형식이 다릅니다.');return text;}finally{source.free();}
@@ -103,12 +70,7 @@ export function encodeHancomNativeRange(a: RhwpAdapter, bytes: Uint8Array): stri
     const clip = source.captureBodyClipboard(0, 0, 0, last, source.getLogicalLength(0, last));
     try {
       const fragment = clip.toFragmentBytes();
-      if (fragment.length > MAX_CLIPBOARD_BYTES)
-        throw Error("클립보드 크기 제한은 8 MiB입니다.");
-      return JSON.stringify({
-        format: "rhwp-next-body", version: 1, encoding: "hwpx-fragment",
-        paragraphMode: "retain-target-for-native-range", payload: encodeClipboardBytes(fragment),
-      });
+      return JSON.stringify(clipboardEnvelope(fragment, { paragraphMode: "retain-target-for-native-range" }));
     } finally {
       clip.free();
     }
@@ -126,10 +88,11 @@ export class StructuredClipboard {
     // capture only. Nothing references it after immutable bytes reach the OS.
     const clip=captureFragmentObject(a,row);
     try {
-      const bytes=clip.toFragmentBytes();assertFragmentScope(a,clip);if(bytes.length>MAX_CLIPBOARD_BYTES)throw Error('클립보드 크기 제한은 8 MiB입니다.');
-      const structured=JSON.stringify({format:'rhwp-next-body',version:1,encoding:'hwpx-fragment',payload:encodeClipboardBytes(bytes)});
+      const bytes = clip.toFragmentBytes();
+      assertFragmentScope(a, clip);
+      const structured = JSON.stringify(clipboardEnvelope(bytes));
       const text=`[${row.kind}]`;
-      return Object.freeze({text,structured,html:`<div ${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}">${text}</div>`});
+      return Object.freeze({text,structured,html:wrapClipboardHTML(structured, text)});
     }finally{clip.free();}
   }
   capture(a: RhwpAdapter, from: Position, to: Position): ClipboardData {
@@ -142,13 +105,8 @@ export class StructuredClipboard {
     );
     try {
       const payload = fragment.toFragmentBytes();
-      if (payload.length > MAX_CLIPBOARD_BYTES)
-        throw Error("클립보드 크기 제한은 8 MiB입니다.");
       const structured = JSON.stringify({
-        format: "rhwp-next-body",
-        version: 1,
-        encoding: "hwpx-fragment",
-        payload: encodeClipboardBytes(payload),
+        ...clipboardEnvelope(payload),
         ...(from.para === to.para && !a.hasBodyLayoutObject(from) ? {paragraphMode:"retain-target-for-inline-text"} : {}),
       });
       const data = a.call(
@@ -165,7 +123,7 @@ export class StructuredClipboard {
       return Object.freeze({
         text: external?external.text:data.text,
         structured,
-        html: `<div ${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}">${body}</div>`,
+        html: wrapClipboardHTML(structured, body),
       });
     } finally {
       fragment.free();
@@ -196,7 +154,9 @@ export class StructuredClipboard {
     const structured = JSON.stringify(envelope);
     // Only the wrapper scope changes. Keep the already-exported same fragment
     // HTML instead of importing/serializing that identical payload a second time.
-    const html=captured.html.replace(`${marker}="${encodeClipboardBytes(new TextEncoder().encode(captured.structured!))}"`,`${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}"`);
+    const html = captured.html.replace(
+      clipboardHTMLAttribute(captured.structured!), clipboardHTMLAttribute(structured),
+    );
     if(html===captured.html)throw Error('셀 클립보드 wrapper 갱신 실패');
     return Object.freeze({
       text, structured,
@@ -270,20 +230,12 @@ export class StructuredClipboard {
     );
     try {
       const bytes = fragment.toFragmentBytes();
-      if (bytes.length > MAX_CLIPBOARD_BYTES)
-        throw Error("클립보드 크기 제한은 8 MiB입니다.");
-      const structured = JSON.stringify({
-        format: "rhwp-next-body",
-        version: 1,
-        encoding: "hwpx-fragment",
-        scope: "nested",
-        payload: encodeClipboardBytes(bytes),
-      });
+      const structured = JSON.stringify(clipboardEnvelope(bytes, { scope: "nested" }));
       const external=fragmentExternalHTML(a,bytes);
       return Object.freeze({
         text: external.text,
         structured,
-        html: `<div ${marker}="${encodeClipboardBytes(new TextEncoder().encode(structured))}">${external.html}</div>`,
+        html: wrapClipboardHTML(structured, external.html),
       });
     } finally {
       fragment.free();
@@ -349,7 +301,7 @@ export class StructuredClipboard {
     }
   }
   recognizes(html: string) {
-    return html.includes(marker);
+    return hasClipboardMarker(html);
   }
   /** Existing immutable importer remaps definitions; existing cell split/join
    * commands splice text paragraphs in one caller-owned History transaction. */
@@ -416,9 +368,7 @@ export class StructuredClipboard {
     } finally { fragment.free(); }
   }
   pasteHancomGrid(a: RhwpAdapter, p: Extract<Position, {kind: "cell"}>, cells: number[], boundary: [number,number,number,number] | null, wire: string): Position {
-    const fragment = fragmentForDocument(a.doc, decodeEnvelope(wire, true));
-    try {
-      assertFragmentScope(a, fragment);
+    return withHancomFragment(a, wire, fragment => {
       const focus = {...p, cellPara: 0, offset: 0};
       const target = a.clipboardTarget(focus);
       const result = a.call("pasteCapturedCellGrid", fragment, JSON.stringify({...target, after: false}),
@@ -430,14 +380,10 @@ export class StructuredClipboard {
       a.validate(next);
       a.exportChecked();
       return next;
-    } finally {
-      fragment.free();
-    }
+    });
   }
   pasteHancomRange(a: RhwpAdapter, from: Position, to: Position, wire: string): Position {
-    const fragment = fragmentForDocument(a.doc, decodeEnvelope(wire, true));
-    try {
-      assertFragmentScope(a, fragment);
+    return withHancomFragment(a, wire, fragment => {
       let next: Position;
       if (from.kind === "cell" && to.kind === "cell") {
         const target = a.clipboardTarget(from);
@@ -455,9 +401,7 @@ export class StructuredClipboard {
       a.validate(next);
       a.exportChecked();
       return next;
-    } finally {
-      fragment.free();
-    }
+    });
   }
   paste(a: RhwpAdapter, p: Position, html: string, wire?: string, allowObject = true, nativeHancomRange = false): Position {
     if (p.kind !== "body") throw Error("본문 블록은 본문 위치에 붙여넣으세요.");

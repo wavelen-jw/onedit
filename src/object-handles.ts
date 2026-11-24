@@ -3,7 +3,7 @@ import type {Interaction} from './interaction.js';
 import {cellPath,copy,nested,type Position,type Selection} from './model.js';
 import {fragmentClipboardObjects,selectedCutObject} from './object-clipboard.js';
 import {captureParentTableCut} from './parent-table-cut.js';
-import {sameFormatTarget} from './integration/a-format-input-guard.js';
+import {isCurrentPointerTarget,sameFormatTarget} from './integration/a-format-input-guard.js';
 import {pagePoint,pageScale} from './integration/a-view-menu.js';
 import {prepareControlOffset} from './control-shortcuts.js';
 import {RhwpAdapter} from './adapter.js';
@@ -146,7 +146,9 @@ export function mountObjectHandles(pages:HTMLElement,editor:Interaction,actions:
   const status=doc.createElement('div');status.className='object-move-status';status.setAttribute('role','status');status.hidden=true;viewport.append(status);
   let items:Item[]=[],catalog:Item[]=[],catalogKey='',signature='',frame=0,task=0;
   let catalogDoc:RhwpAdapter['doc']|undefined;
-  let mountedPages:{page:Element;surface:Element|null;pending:string|undefined}[]=[];
+  type Surface={index:number;page:HTMLElement|null;ink:Element|null;pending?:string;width?:string;height?:string};
+  const mountedPages=new Map<number,Surface>();
+  const mountedParts:{page:HTMLElement;node:HTMLElement}[]=[];
   type Drag={id:number;item:Item;box:Box;target:ReturnType<Interaction['capture']>;start:{x:number;y:number};moved:boolean;dx:number;dy:number;to?:Destination;reason:string;button:HTMLButtonElement;scale:number;wire?:ClipboardData;nestedWire?:boolean;fits:Map<string,string>;lines:Map<number,BodyVisualLine[]>};
   let drag:Drag|undefined,revealed:string|undefined;
   const outlines=()=>pages.querySelectorAll<HTMLElement>('.object-handle-outline');
@@ -154,49 +156,89 @@ export function mountObjectHandles(pages:HTMLElement,editor:Interaction,actions:
   const reveal=(id?:string)=>{if(revealed===id)return;revealed=id;for(const e of pages.querySelectorAll<HTMLElement>('.object-grip,.object-handle-outline'))e.classList.toggle('is-revealed',e.dataset.objectId===id);};
   const clearPreview=()=>{pages.querySelectorAll('.object-move-preview').forEach(e=>e.remove());status.hidden=true;};
   const cancel=()=>{reveal();if(!drag)return;const d=drag;drag=undefined;d.button.style.cursor='';if(d.button.hasPointerCapture(d.id))d.button.releasePointerCapture(d.id);clearPreview();emphasize();actions.focus();};
-  const pageElement=(n:number)=>pages.querySelector<HTMLElement>(`.page[data-page="${n}"]`);
+  const pageElement=(n:number)=>{
+    const page=pages.children[n] as HTMLElement|undefined;
+    return page?.dataset.page===String(n)&&page.classList.contains('page')
+      ?page:pages.querySelector<HTMLElement>(`.page[data-page="${n}"]`);
+  };
+  const surface=(n:number):Surface=>{
+    const page=pageElement(n);
+    return {index:n,page,ink:page?.firstElementChild??null,pending:page?.dataset.renderPending,
+      width:page?.style.width,height:page?.style.height};
+  };
+  function clearMounted(){
+    for(const {node} of mountedParts)node.remove();
+    mountedParts.length=0;mountedPages.clear();signature='';revealed=undefined;
+  }
   const selected=(item:Item)=>key(editor.selection)===item.id;
   function sync(){
     if(drag){if(!sameFormatTarget(drag.target,editor.capture())||actions.busy())cancel();else return;}
     const target=handleTarget(editor.selection);
     if(!target||actions.busy()){
-      if(items.length||catalog.length){pages.querySelectorAll('.object-grip,.object-handle-outline').forEach(e=>e.remove());}
-      items=[];catalog=[];catalogKey=signature='';catalogDoc=undefined;mountedPages=[];revealed=undefined;status.hidden=true;
+      clearMounted();items=[];catalog=[];catalogKey='';catalogDoc=undefined;status.hidden=true;
       return;
     }
     // The existing presentation catalog is now restricted to the current owner.
     // Keep its previous revision lifetime and additionally invalidate on native
     // document replacement and font/DPR/DPI changes. Unknown environments stay fresh.
     const a=editor.adapter,environment=a.localBodyEnvironmentToken(),targetKey=key(target);
-    const stamp=JSON.stringify([a.documentId,a.revision,a.scope,targetKey,environment]);
-    const present=pages.querySelector('.object-grip');
-    const surfaces=Array.from(pages.children,page=>({page,surface:page.firstElementChild,pending:(page as HTMLElement).dataset.renderPending}));
-    const samePages=surfaces.length===mountedPages.length&&surfaces.every((row,i)=>
-      row.page===mountedPages[i].page&&row.surface===mountedPages[i].surface&&row.pending===mountedPages[i].pending);
-    if(environment!==undefined&&catalogDoc===a.doc&&stamp===signature&&present&&samePages){
-      // A selection-only click must keep the same native button for its second
-      // click/dblclick sequence. Geometry still invalidates on document/revision.
-      const id=key(editor.selection);
-      for(const button of pages.querySelectorAll<HTMLElement>('.object-grip')){const pressed=String(button.dataset.objectId===id);if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);}
-      for(const outline of outlines())outline.classList.toggle('is-selected',outline.dataset.objectId===id);
+    const identity=JSON.stringify([a.documentId,a.revision,targetKey,environment]);
+    const sameDoc=catalogDoc===a.doc;
+    const reread=!sameDoc||environment===undefined||identity!==catalogKey;
+    try{
+      if(reread){catalog=activeHandleObjects(editor);catalogKey=identity;catalogDoc=a.doc;}
+      items=catalog;
+    }catch(error){
+      clearMounted();items=[];catalog=[];catalogKey='';catalogDoc=undefined;
+      console.debug('rhwp:object-handles',error);return;
+    }
+    // Re-read Core on each changed revision. Retain only the UI of an identical
+    // resolved owner with identical boxes, on its original page surfaces.
+    const stamp=JSON.stringify([a.documentId,a.scope,a.documentLocked,a.viewerOnlyReason,environment,items]);
+    if(sameDoc&&environment!==undefined&&signature===stamp&&
+        mountedParts.every(({node,page})=>node.parentNode===page)&&
+        Array.from(mountedPages.values()).every(old=>{
+          const next=surface(old.index);
+          return old.page===next.page&&old.ink===next.ink&&old.pending===next.pending&&
+            old.width===next.width&&old.height===next.height;
+        })){
+      const selectedId=key(editor.selection);
+      for(const {node} of mountedParts){
+        if(reread){
+          if(node.classList.contains('is-revealed'))node.classList.remove('is-revealed');
+          if(node.classList.contains('is-active'))node.classList.remove('is-active');
+        }
+        const active=node.dataset.objectId===selectedId;
+        if(node.tagName==='BUTTON'){
+          const pressed=String(active);
+          if(node.getAttribute('aria-pressed')!==pressed)node.setAttribute('aria-pressed',pressed);
+        }else node.classList.toggle('is-selected',active);
+      }
+      if(reread)revealed=undefined;
       return;
     }
-    signature=stamp;mountedPages=surfaces;
-    pages.querySelectorAll('.object-grip,.object-handle-outline').forEach(e=>e.remove());items=[];revealed=undefined;
-    const identity=JSON.stringify([a.documentId,a.revision,targetKey,environment]);
-    try{if(environment===undefined||catalogDoc!==a.doc||identity!==catalogKey){catalog=activeHandleObjects(editor);catalogKey=identity;catalogDoc=a.doc;}items=catalog;}catch(error){catalog=[];catalogKey='';catalogDoc=undefined;console.debug('rhwp:object-handles',error);return;}
+    clearMounted();signature=stamp;
     const occupied:{page:number;x:number;y:number}[]=[];
     // Inner objects get first choice; outer handles find a free position.
     for(const item of [...items].sort((a,b)=>a.boxes[0].w*a.boxes[0].h-b.boxes[0].w*b.boxes[0].h))for(const b of item.boxes){
-      const page=pageElement(b.page);if(!page||page.hasAttribute('data-render-pending'))continue;
+      let slot=mountedPages.get(b.page);
+      if(!slot){slot=surface(b.page);mountedPages.set(b.page,slot);}
+      const page=slot.page;if(!page||slot.pending!==undefined)continue;
       const line=doc.createElement('div');line.className='object-handle-outline';line.dataset.objectId=item.id;line.dataset.selectionLabel=`${item.name} 전체`;
       line.classList.toggle('is-selected',selected(item));line.setAttribute('aria-hidden','true');
-      Object.assign(line.style,{left:b.x+'px',top:b.y+'px',width:b.w+'px',height:b.h+'px'});registerPageChrome(page,line);page.append(line);
+      Object.assign(line.style,{left:b.x+'px',top:b.y+'px',width:b.w+'px',height:b.h+'px'});registerPageChrome(page,line);page.append(line);mountedParts.push({page,node:line});
       const width=parseFloat(page.style.width),height=parseFloat(page.style.height);
       const clampX=(x:number)=>Math.max(1,Math.min(width-29,x)),clampY=(y:number)=>Math.max(1,Math.min(height-31,y));
-      const candidates=Array.from({length:Math.ceil(height/34)},(_,slot)=>[clampY(b.y+slot*34),clampY(b.y-slot*34)])
-        .flat().flatMap(y=>[clampX(b.x-40),clampX(b.x+b.w+16)].map(x=>({x,y})));
-      const place=candidates.find(({x,y})=>!occupied.some(p=>p.page===b.page&&Math.abs(p.x-x)<29&&Math.abs(p.y-y)<31));
+      let place:{x:number;y:number}|undefined;
+      findSlot:for(let i=0;i<Math.ceil(height/34);i++){
+        for(const y of [clampY(b.y+i*34),clampY(b.y-i*34)]){
+          for(const x of [clampX(b.x-40),clampX(b.x+b.w+16)]){
+            if(!occupied.some(p=>p.page===b.page&&Math.abs(p.x-x)<29&&Math.abs(p.y-y)<31)){
+              place={x,y};break findSlot;
+            }
+          }
+        }
+      }
       if(!place){console.debug('rhwp:object-handle-space',item.id);continue;}
       const {x,y}=place;
       occupied.push({page:b.page,x,y});
@@ -211,12 +253,12 @@ export function mountObjectHandles(pages:HTMLElement,editor:Interaction,actions:
       button.addEventListener('focus',hint);button.addEventListener('blur',leave);
       // Keyboard/assistive click has no pointer sequence and never initiates a move.
       button.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(e.detail!==0||drag||actions.busy())return;choose(item);});
-      registerPageChrome(page,button);page.append(button);
+      registerPageChrome(page,button);page.append(button);mountedParts.push({page,node:button});
     }
   }
   function choose(item:Item){editor.adapter.validate(item.selection.focus);editor.selection=copy(item.selection);editor.block=false;editor.preferredX=undefined;actions.selectionChanged();sync();actions.focus();}
   const valid=(d:Drag)=>{
-    if(actions.busy()||!d.button.isConnected||!sameFormatTarget(d.target,editor.capture()))throw Error('문서·선택이 변경되어 이동을 취소했습니다.');
+    if(!isCurrentPointerTarget(d.button, actions.busy(), d.target, () => editor.capture()))throw Error('문서·선택이 변경되어 이동을 취소했습니다.');
     const current=handleObjects(editor).find(i=>i.id===d.item.id);
     if(!current||JSON.stringify(current)!==JSON.stringify(d.item))throw Error('개체 소유권·위치가 변경되어 이동을 취소했습니다.');
   };

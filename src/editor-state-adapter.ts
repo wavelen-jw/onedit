@@ -12,8 +12,7 @@ export function lifecycleCommandState(files: FileLifecycle, state = files.state(
     : files.busy
       ? "BUSY"
       : null;
-  const readyReason =
-    reason ?? (state.transition ? "AWAITING_TRANSITION_SAVE" : null);
+  const readyReason = files.ui.standalone ? files.transitionBlockReason : "HOST_OWNED";
   const ready: Availability = {
     enabled: readyReason === null,
     reason: readyReason,
@@ -23,12 +22,14 @@ export function lifecycleCommandState(files: FileLifecycle, state = files.state(
     : pending?.documentId === files.adapter.documentId
       ? { enabled: true, reason: null }
       : { enabled: false, reason: "NO_CURRENT_DOWNLOAD" };
+  const saveReason = files.ui.standalone ? files.saveBlockReason : "HOST_OWNED";
+  const save: Availability = { enabled: saveReason === null, reason: saveReason };
   return {
     new: { ...ready },
     open: { ...ready },
     close: { ...ready },
-    save: { ...ready },
-    "save-as": { ...ready },
+    save,
+    "save-as": save,
     "confirm-download": { ...confirmation },
     "cancel-download": { ...confirmation },
     "save-hwp": { enabled: false, reason: "NOT_CONNECTED" },

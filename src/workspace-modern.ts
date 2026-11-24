@@ -65,7 +65,7 @@ export function mountModernWorkspace(doc: Document, files: FileLifecycle, busy: 
   };
   toolbar.addEventListener("keydown", event => {
     if (event.key !== "Escape" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
-    if (event.target instanceof Element && event.target.closest("details[open]")) return;
+    if (event.target instanceof Element && event.target.closest("details[open], .text-color-popup:not([hidden])")) return;
     event.preventDefault(); event.stopPropagation(); closeTools(true);
   }, true);
   doc.addEventListener("pointerdown", event => {

@@ -2,12 +2,12 @@ import { editorFeedbackText } from "./editor-feedback-text.js";
 import { cellDialogFor } from "./cell-dialog-command.js";
 import type { Interaction } from "./interaction.js";
 import type { FormatState } from "./formatting.js";
-import { fields } from "./integration/a-format-dialog.js";
+import { cellFields } from "./format-fields.js";
 import { formatValueState, formatValueHint } from "./format-value-state.js";
 
-// The existing cell dialog owns enums/units. This panel only projects its values.
+// The panel displays the same field names and units as the cell dialog.
 export function cellPanelRows(state: FormatState) {
-  return fields("cell").map(field => {
+  return cellFields().map(field => {
     const value = state[field.name], status = formatValueState(state,field.name), mixed = status === "mixed";
     const option = field.options?.find(([v]) => v === String(value));
     return {key: field.name, label: field.label, mixed, status,

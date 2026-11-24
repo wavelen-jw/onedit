@@ -1,3 +1,4 @@
+import { normalizeFontName } from './font-name.js';
 // Local Font Access is opt-in. Cached names are suggestions, never proof of a
 // loaded face. Bytes remain in this tab and never enter document/font storage.
 import {readLocalFontNames} from './local-font-names.js';
@@ -11,7 +12,7 @@ const bytes=new Map<LocalFace,Promise<Uint8Array<ArrayBuffer>>>();
 let aliases=new WeakMap<LocalFace,readonly string[]>();
 let scanRevision=0;
 export const validFontName=(n:unknown):n is string=>typeof n==='string'&&!!n.trim()&&n.length<=200&&!/[\x00-\x1f\x7f,'"\\;{}]/.test(n);
-const normalize=(n:string)=>n.normalize('NFC').trim();
+const normalize = normalizeFontName;
 const changed=()=>document.dispatchEvent(new CustomEvent('rhwp:local-fonts-updated'));
 function save(){try{if(snapshot)localStorage.setItem(key,JSON.stringify(snapshot));else localStorage.removeItem(key);}catch{message+=' 감지 결과를 저장하지 못했지만 이 탭에서는 사용할 수 있습니다.';}}
 function validFace(face:LocalFace){return face&&[face.family,face.fullName,face.postscriptName].every(validFontName)&&typeof face.style==='string'&&face.style.length<=200;}

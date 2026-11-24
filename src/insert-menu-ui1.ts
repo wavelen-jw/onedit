@@ -1,3 +1,4 @@
+import {heldMenuItem} from "./dialog-support.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import {activeWorkset} from './active-workset.js';
 import { browserShortcutScope } from "./browser-shortcut-scope.js";
@@ -37,11 +38,8 @@ export function mountInsertMenuUI1(doc: Document, editor: Interaction, actions: 
     button.addEventListener("click", click, true); disposers.push(() => button.removeEventListener("click", click, true));
   };
   const held = (parent: HTMLElement, letter: string, text: string, reason: string, key = "", arrow = false) => {
-    const b = doc.createElement("button"); b.type = "button"; b.disabled = true; b.textContent = text;
-    b.dataset.insertHeld = letter; b.dataset.menuLetter = letter; b.setAttribute("role", "menuitem"); b.setAttribute("aria-disabled", "true");
-    b.title = reason; b.setAttribute("aria-description", reason);
-    if (key) { const k = doc.createElement("kbd"); k.textContent = key; b.append(k); }
-    if (arrow) { const a = doc.createElement("span"); a.textContent = "›"; a.className = "insert-submenu-hint"; a.setAttribute("aria-hidden", "true"); b.append(a); }
+    const b = heldMenuItem(doc, text, reason, letter, key, arrow ? "insert-submenu-hint" : undefined);
+    b.dataset.insertHeld = letter;
     parent.append(b); return b;
   };
   const separator = (parent = panel) => { const hr = doc.createElement("hr"); hr.setAttribute("role", "separator"); parent.append(hr); };

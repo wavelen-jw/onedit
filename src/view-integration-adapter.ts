@@ -633,12 +633,15 @@ export function connectViewIntegration(
         !e.isComposing && e.keyCode !== 229 && !e.getModifierState("AltGraph");
       // Modifier-only keydown must not reveal the anchor before Shift-click.
       const modifierKey = ["Shift", "Control", "Alt", "Meta", "AltGraph"].includes(e.key);
-      // A paragraph split publishes and reveals its new caret from Command.
-      // Looking up its old position here can force layout before the edit.
-      const paragraphBreak = e.key === "Enter" && (selection.kind === "caret" || selection.kind === "text") &&
+      // Plain text deletion and paragraph splits reveal the resulting caret
+      // from the command handler. Revealing the old one can force layout before the edit.
+      const editableDelete = (e.key === "Backspace" || e.key === "Delete") &&
+        e.cancelable && !composing && connection.files.adapter.scope === "edit" &&
+        !connection.files.adapter.documentLocked && !connection.files.adapter.viewerOnlyReason;
+      const textEditKey = (e.key === "Enter" || editableDelete) && (selection.kind === "caret" || selection.kind === "text") &&
         !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey &&
         !e.isComposing && e.keyCode !== 229 && !e.getModifierState("AltGraph");
-      if (target === input && !nativeTextKey && !paragraphBreak && !modifierKey && !blocked())
+      if (target === input && !nativeTextKey && !textEditKey && !modifierKey && !blocked())
         queueMicrotask(revealAndPublish);
     },
     true,

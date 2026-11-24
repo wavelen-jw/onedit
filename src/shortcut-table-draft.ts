@@ -1,5 +1,5 @@
 import { editorFeedbackText } from "./editor-feedback-text.js";
-import { closeEditorDialog, showDocumentEditingDialog } from "./editor-popup-focus.js";
+import { bindModalNavigation, closeEditorDialog, showDocumentEditingDialog } from "./editor-popup-focus.js";
 import type {Interaction} from './interaction.js';
 import {nested} from './model.js';
 import {sameFormatTarget,formatInputGuard} from './integration/a-format-input-guard.js';
@@ -12,7 +12,7 @@ export function mountTableKeyDraft(doc:Document,editor:Interaction,actions:{bloc
   const count=number('count','1'),rows=number('rows','1'),cols=number('cols','2'),equal=doc.createElement('input');equal.type='checkbox';equal.name='equal';equal.checked=true;
   const label=(text:string,el:HTMLElement)=>{const l=doc.createElement('label');l.append(text,el);return l;};
   const ok=doc.createElement('button');ok.type='submit';ok.textContent='설정';ok.dataset.tableKeyApply='';
-  const cancel=doc.createElement('button');cancel.type='button';cancel.textContent='취소';cancel.dataset.tableKeyCancel='';cancel.onclick=()=>closeEditorDialog(dialog);
+  const cancel=doc.createElement('button');cancel.type='button';cancel.textContent='취소';cancel.dataset.tableKeyCancel='';
   const footer=doc.createElement('footer');footer.className='manager-footer';footer.append(cancel,ok);
   form.dataset.ui2Draft='';form.append(title,fields,status,footer);dialog.append(form);doc.body.append(dialog);const guard=formatInputGuard(form);
   let target:ReturnType<Interaction['capture']>|undefined,mode:'table-add'|'table-delete'|'cell-split'='table-add',exactTracks:{row?:number;col?:number}|undefined;
@@ -31,7 +31,9 @@ export function mountTableKeyDraft(doc:Document,editor:Interaction,actions:{bloc
     guard.consume();closeEditorDialog(dialog);actions.changed();
   }catch(error){status.textContent=editorFeedbackText(error);}};
   dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();target=undefined;});
-  form.addEventListener('keydown',e=>{e.stopPropagation();if(e.isComposing||e.keyCode===229)return;if(e.key==='Escape'){e.preventDefault();closeEditorDialog(dialog);}if(e.key==='Tab'){const all=[...form.querySelectorAll<HTMLElement>('button,select,input')].filter(e=>e.getClientRects().length&&!(e as HTMLInputElement).disabled),at=all.indexOf(doc.activeElement as HTMLElement);if(e.shiftKey&&at<=0||!e.shiftKey&&at===all.length-1){e.preventDefault();all[e.shiftKey?all.length-1:0]?.focus();}}});
+
+  guard.bindCancel(cancel, () => closeEditorDialog(dialog));
+  bindModalNavigation(form, dialog);
   return {show(next:typeof mode,tracks?:typeof exactTracks){if(actions.blocked()||dialog.open)return;const p=editor.selection.focus;
     if(p.kind!=='cell'||nested(p))throw Error('일반 표의 셀을 선택하세요.');
     if(next==='cell-split'&&editor.selection.kind!=='cells')throw Error('F5로 나눌 셀 블록을 먼저 선택하세요.');

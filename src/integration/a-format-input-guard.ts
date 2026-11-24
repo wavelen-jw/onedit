@@ -6,6 +6,8 @@ export function formatInputGuard(form: HTMLElement, view?: {root: HTMLElement; o
       if (!view || view.owns(event.target)) action(event);
     }, {capture, signal: life.signal});
   };
+  let cancelDraft: (() => void) | undefined;
+  let allowNativeCancel: (() => boolean) | undefined;
   let composing = false,
     settling = false,
     consumed = true,
@@ -37,9 +39,19 @@ export function formatInputGuard(form: HTMLElement, view?: {root: HTMLElement; o
   // Reuse the same local state/settling boundary as confirmation; never reset
   // the editor IME or alter the captured target/History to keep a modal open.
   form.closest("dialog")?.addEventListener("cancel", (e) => {
-    if (composing || settling) e.preventDefault();
-  });
+    if (composing || settling || allowNativeCancel?.() === false) {
+      e.preventDefault();
+    } else if (!e.defaultPrevented && cancelDraft) {
+      e.preventDefault();
+      cancelDraft();
+    }
+  }, {signal: life.signal});
   return {
+    bindCancel(button: HTMLButtonElement, close: () => void, canCancelNative?: () => boolean) {
+      cancelDraft = close;
+      allowNativeCancel = canCancelNative;
+      button.addEventListener("click", () => close(), {signal: life.signal});
+    },
     open() {
       generation++;
       composing = settling = consumed = false;
@@ -67,4 +79,11 @@ export function sameFormatTarget(
     a.revision === b.revision &&
     JSON.stringify(a.selection) === JSON.stringify(b.selection)
   );
+}
+
+export function isCurrentPointerTarget(
+  node: Node, busy: boolean, target: Parameters<typeof sameFormatTarget>[0],
+  capture: () => typeof target,
+) {
+  return !busy && node.isConnected && sameFormatTarget(target, capture());
 }

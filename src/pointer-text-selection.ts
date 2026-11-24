@@ -1,29 +1,7 @@
 import type {RhwpAdapter} from './adapter.js';
 import {paraIndex, sameContainer, type Position} from './model.js';
-import {f3WordRange} from './f3-word-range.js';
-
-// Core text-to-logical positions use before-object affinity. A real rendered
-// glyph can prove the after-object owner instead. Reuse the same Core word
-// queries as F3, but require a UNIQUE stream caret for this exact scalar; do not
-// assume caret-stop count equals logical length (inline slots need not appear).
-function wordRangeAtGlyph(a:RhwpAdapter,p:Position):[Position,Position]{
-  const scalar=a.textOffset(p);
-  if(a.logical(p,scalar)===p.offset)return f3WordRange(a,p);
-  let para=p.para;for(let sec=0;sec<p.sec;sec++)para+=a.doc.getParagraphCount(sec);
-  const chars=[...a.text(p)],stops=a.call<number[]>('getCaretStops',0,para);
-  if(!Array.isArray(stops)||!stops.length||stops.some((n,i)=>!Number.isSafeInteger(n)||n<0||(i>0&&n<=stops[i-1])))throw Error('개체 인접 단어의 캐럿 조회 불일치');
-  const index=(stream:number)=>{const n=a.call<{charIndex:number}>('getCharIndexAtStreamPos',0,para,stream).charIndex;if(!Number.isSafeInteger(n)||n<0||n>chars.length)throw Error('개체 인접 단어의 문자 조회 불일치');return n;};
-  let lo=0,hi=stops.length;while(lo<hi){const mid=(lo+hi)>>>1;if(index(stops[mid])<scalar)lo=mid+1;else hi=mid;}
-  const origin=stops[lo];
-  if(origin===undefined||index(origin)!==scalar||(lo+1<stops.length&&index(stops[lo+1])===scalar))throw Error('개체 인접 단어의 스트림 위치가 모호합니다.');
-  const starts=a.call<number[]>('getWordStarts',0,para);
-  if(!Array.isArray(starts)||starts.some((n,i)=>!Number.isSafeInteger(n)||n<0||(i>0&&n<=starts[i-1])||!stops.includes(n)))throw Error('개체 인접 단어 경계 조회 불일치');
-  const start=starts.findLast(n=>n<=origin),end=a.call<number|null>('getWordEnd',0,para,origin);
-  if(start===undefined||!Number.isSafeInteger(end)||!stops.includes(end!))throw Error('개체 인접 단어 끝 조회 불일치');
-  const from=index(start),to=index(end!);
-  if(from>scalar||to<=scalar||chars.slice(from,to).some(ch=>/\s/u.test(ch)))throw Error('개체 인접 단어 범위를 확인할 수 없습니다.');
-  return[{...p,offset:a.logical(p,from)},{...p,offset:a.logical(p,to)}];
-}
+import {bodyWordRange as coreBodyWordRange} from './f3-word-range.js';
+import {bodyWordParagraph} from './word-stream.js';
 
 type ControlOwner = {
   list: number;
@@ -33,9 +11,7 @@ type ControlOwner = {
 };
 
 function controlsAt(a: RhwpAdapter, p: Position): ControlOwner[] {
-  let para = paraIndex(p);
-  if (p.kind === 'body')
-    for (let sec = 0; sec < p.sec; sec++) para += a.doc.getParagraphCount(sec);
+  const para = p.kind === 'body' ? bodyWordParagraph(a, p) : paraIndex(p);
   const list = p.kind === 'body' ? 0 : a.list(p).listId;
   return a.call<ControlOwner[]>('getControls').filter(c => c.list === list && c.para === para);
 }
@@ -96,8 +72,9 @@ export function pointerTextRange(a: RhwpAdapter, page: number, x: number, y: num
   return textRange(a, p, from, to, controls);
 }
 
-function bodyWordRange(a: RhwpAdapter, p: Position, controls: ControlOwner[], includeFollowingSpace: boolean): [Position,Position] | undefined {
-  const [begin,end]=wordRangeAtGlyph(a,p),chars=[...a.text(p)],length=a.length(p);
+function bodyWordRange(a: RhwpAdapter, p: Extract<Position, {kind: 'body'}>, controls: ControlOwner[], includeFollowingSpace: boolean): [Position,Position] | undefined {
+  const afterObject = a.logical(p,a.textOffset(p)) !== p.offset;
+  const [begin,end]=coreBodyWordRange(a,p,afterObject),chars=[...a.text(p)],length=a.length(p);
   let from=begin.offset,to=end.offset;
   // Zero scalar advance is an existing logical control slot. Clip around the
   // clicked word owner; a word query must never drag an object into this range.

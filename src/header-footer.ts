@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from './adapter.js';
 import { copy, type Selection } from './model.js';
 export type HeaderFooterTarget = {section:number; isHeader:boolean; applyTo:number};
@@ -44,7 +45,7 @@ export function headerFooterEditReason(a:RhwpAdapter,s:Selection,v:HeaderFooterV
     if(!v.exists)throw Error(headerFooterCreationHold);
     if(v.paragraphs.some(p=>[...p.text].length!==p.charCount))throw Error('문자 위치 계약이 불명확하여 조회만 지원합니다.');
     return '';
-  }catch(error){return String(error).replace(/^Error: /,'');}
+  }catch(error){return editorFeedbackText(error);}
 }
 export function prepareHeaderFooter(a:RhwpAdapter,s:Selection,c:HeaderFooterChange):(()=>Selection)|undefined{
   if(!c||!['create','append'].includes(c.action)||typeof c.text!=='string'||[...c.text].length>2000||/[\u0000-\u001f\u007f]/.test(c.text))throw Error('평문 2000자 이내만 지원합니다. 줄바꿈·탭·제어문자는 지원하지 않습니다.');

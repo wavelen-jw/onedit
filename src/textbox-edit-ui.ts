@@ -4,7 +4,7 @@ import type { Interaction } from './interaction.js';
 import { textboxView } from './textbox-edit.js';
 import { copy, type Selection } from './model.js';
 import { formatInputGuard, sameFormatTarget } from './integration/a-format-input-guard.js';
-import { visibleManagerControls } from './manager-layout.js';
+import { wrapManagerTab } from './manager-layout.js';
 
 export function mountTextboxEditor(doc:Document,editor:Interaction,actions:{busy:()=>boolean;changed:()=>void;focus:()=>void;error:(e:unknown)=>void}){
   const launch=doc.createElement('button');launch.type='button';launch.id='textbox-edit-open';launch.textContent='글상자 내용 편집…  Enter';
@@ -65,8 +65,12 @@ export function mountTextboxEditor(doc:Document,editor:Interaction,actions:{busy
   paragraph.onchange=()=>{try{if(stale()||draft()||busy())throw Error('수정 중인 내용을 먼저 적용하거나 취소하세요.');const next=textboxView(editor.adapter,editor.selection,Number(paragraph.value));editor.selection=next.selection;read();text.focus();}catch(e){status.textContent=editorFeedbackText(e);}};
   for(const [button,again]of[[undo,false],[redo,true]]as const)button.onclick=()=>{try{if(stale()||draft()||busy()||!guard.ready())return;editor.undo(again);actions.changed();const s=editor.selection;if(s.kind==='object'&&s.textbox&&s.textbox.instanceId===view?.marker.instanceId&&s.textbox.scInstId===view.marker.scInstId){read();text.focus();}else close();}catch(e){status.textContent=editorFeedbackText(e);}};
   const close=()=>{guard.close();if(entry&&editor.adapter.revision===entryRevision)editor.selection=entry;closeEditorDialog(dialog);captured=undefined;view=undefined;entry=undefined;};
-  closeButton.onclick=close;dialog.addEventListener('cancel',e=>{e.preventDefault();if(!composing)close();});dialog.addEventListener('close',()=>{if(!dialog.open)guard.close();});
-  form.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Tab'&&!e.isComposing&&e.keyCode!==229){const all=visibleManagerControls(form),at=all.indexOf(doc.activeElement as HTMLElement);if(all.length&&(at<0||(e.shiftKey?at===0:at===all.length-1))){e.preventDefault();all[e.shiftKey?all.length-1:0].focus();}}});
+  guard.bindCancel(closeButton, close);
+  dialog.addEventListener('close',()=>{if(!dialog.open)guard.close();});
+  form.addEventListener('keydown', e => {
+    e.stopPropagation();
+    wrapManagerTab(form, e);
+  });
   host.closest("details")?.addEventListener("rhwp:menu-opening",sync);host.closest("details")?.addEventListener("toggle",sync);sync();
   return{sync};
 }

@@ -1,8 +1,9 @@
+import { setViewAttribute } from "./view-menu-presentation.js";
+import { hasOpenDialog } from "./dialog-support.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
-import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
+import { bindModalNavigation, closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import type { Interaction } from './interaction.js';
 import { formatInputGuard, sameFormatTarget } from './integration/a-format-input-guard.js';
-import { visibleManagerControls } from './manager-layout.js';
 import { headerFooterCatalog, headerFooterView, headerFooterEditReason, headerFooterCreationHold, headerFooterPages, type HeaderFooterView } from './header-footer.js';
 
 export function mountHeaderFooter(doc:Document,editor:Interaction,actions:{busy:()=>boolean;page:()=>number;changed:()=>void;focus:()=>void;error:(e:unknown)=>void}){
@@ -28,10 +29,12 @@ export function mountHeaderFooter(doc:Document,editor:Interaction,actions:{busy:
   form.append(title,fields,status,note,footer);dialog.append(form);doc.body.append(dialog);const guard=formatInputGuard(form);
   let captured:ReturnType<Interaction['capture']>|undefined,view:HeaderFooterView|undefined,rows:HeaderFooterView[]=[];
   const target=()=>{if(!/^(0|[1-9]\d*)$/.test(section.value)||!['header','footer'].includes(kind.value)||!['0','1','2'].includes(applyTo.value))throw Error('구역, 종류, 적용할 쪽을 다시 선택하세요.');return{section:Number(section.value),isHeader:kind.value==='header',applyTo:Number(applyTo.value)};};
-  const blocked=()=>actions.busy()||!!doc.querySelector('dialog[open]:not(#header-footer-dialog)');
+  const blocked=()=>actions.busy()||hasOpenDialog(doc, "header-footer-dialog");
   const stale=()=>!captured||!sameFormatTarget(captured,editor.capture());
   const sync=()=>{
-    launch.disabled=blocked();launch.title=launch.disabled?'입력·저장·열린 대화상자를 먼저 마치세요.':'기존 머리말·꼬리말을 보고 내용을 추가합니다.';
+    const disabled = blocked();
+    launch.toggleAttribute('disabled', disabled);
+    setViewAttribute(launch, 'title', disabled ? '입력·저장·열린 대화상자를 먼저 마치세요.' : '기존 머리말·꼬리말을 보고 내용을 추가합니다.');
     if(!dialog.open)return;
     const detail=stale()?'문서나 선택이 바뀌었습니다. 닫고 다시 여세요.':blocked()?'현재 작업을 먼저 마치세요.':view?headerFooterEditReason(editor.adapter,editor.selection,view):'정의를 다시 선택하세요.';
     const reason=detail===headerFooterCreationHold?'기존 머리말·꼬리말에만 내용을 추가할 수 있습니다.':detail;
@@ -59,8 +62,9 @@ export function mountHeaderFooter(doc:Document,editor:Interaction,actions:{busy:
     if(blocked()||stale()||!view)throw Error('문서·선택 또는 처리 상태가 변경되었습니다. 다시 여세요.');
     editor.execute({type:'header-footer',change:{action:view.exists?'append':'create',target:view.target,expected:view,text:text.value}},captured);
     guard.consume();close();actions.changed();
-  }catch(error){status.textContent=String(error).replace(/^Error: /,'');}};
-  cancel.onclick=close;dialog.addEventListener('cancel',e=>{e.preventDefault();close();});dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();captured=undefined;view=undefined;sync();});
-  form.addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.isComposing&&e.keyCode!==229){const all=visibleManagerControls(form),at=all.indexOf(doc.activeElement as HTMLElement);if(all.length&&(at<0||(e.shiftKey?at===0:at===all.length-1))){e.preventDefault();all[e.shiftKey?all.length-1:0].focus();}}e.stopPropagation();});
+  }catch(error){status.textContent=editorFeedbackText(error);}};
+  guard.bindCancel(cancel, close);
+  dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();captured=undefined;view=undefined;sync();});
+  bindModalNavigation(form, dialog);
   const observer=new MutationObserver(sync);observer.observe(doc.body,{subtree:true,attributes:true,attributeFilter:['open']});sync();return{sync,open};
 }

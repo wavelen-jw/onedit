@@ -1,3 +1,4 @@
+import { forwardDeleteCommand, lineBreakCommand } from "./text-edit-commands.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import {withTypingFormatPresentation} from './typing-format-presentation.js';
 import { LiveComposition } from "./live-composition.js";
@@ -58,7 +59,8 @@ export function mountCompositionInput(context: CompositionInputContext) {
     const backward = e.inputType === 'deleteContentBackward', forward = e.inputType === 'deleteContentForward';
     const boundaryDelete = backward && input.selectionStart === 0 && input.selectionEnd === 0 ||
       forward && input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
-    const line = e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak';
+    const softBreak = e.inputType === 'insertLineBreak';
+    const line = softBreak || e.inputType === 'insertParagraph';
     const history = e.inputType === 'historyUndo' || e.inputType === 'historyRedo';
     if ((!boundaryDelete || !backward && !forward) && !line && !history) return;
     if (!e.cancelable) return; // Do not run a Command beside an unpreventable native edit.
@@ -66,7 +68,8 @@ export function mountCompositionInput(context: CompositionInputContext) {
     safe(() => {
       editor.history.endTypingRun();
       if (history) runHistory(editor, e.inputType === 'historyRedo', false);
-      else editor.execute(line ? {type:'break'} : {type:'delete', backward});
+      else if (line) editor.execute(lineBreakCommand(softBreak));
+      else editor.execute(backward ? {type:'delete', backward: true} : forwardDeleteCommand(editor.selection));
     }, true);
   });
   // Moving from body IME to a toolbar/menu action should use the browser's own

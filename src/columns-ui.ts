@@ -1,9 +1,10 @@
+import { setViewAttribute } from "./view-menu-presentation.js";
+import { hasOpenDialog } from "./dialog-support.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
-import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
+import { bindModalNavigation, closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
 import {menuControlDemanded} from './menu-lifetime.js';
 import type { Interaction } from './interaction.js';
 import { formatInputGuard, sameFormatTarget } from './integration/a-format-input-guard.js';
-import { visibleManagerControls } from './manager-layout.js';
 import { columnView, columnEditReason, columnLimit, columnSpacingHu, type ColumnView } from './columns.js';
 
 export function mountColumns(doc:Document,editor:Interaction,actions:{busy:()=>boolean;changed:()=>void;focus:()=>void;error:(e:unknown)=>void}) {
@@ -21,10 +22,13 @@ export function mountColumns(doc:Document,editor:Interaction,actions:{busy:()=>b
   const cancel=doc.createElement('button');cancel.type='button';cancel.id='columns-cancel';cancel.textContent='취소';footer.append(ok,cancel);
   form.append(title,target,fields,status,note,footer);dialog.append(form);doc.body.append(dialog);const guard=formatInputGuard(form);
   let captured:ReturnType<Interaction['capture']>|undefined,view:ColumnView|undefined;
-  const busy=()=>actions.busy()||!!doc.querySelector('dialog[open]:not(#columns-dialog)');
+  const busy=()=>actions.busy()||hasOpenDialog(doc, "columns-dialog");
   const stale=()=>!captured||!sameFormatTarget(captured,editor.capture());
   const reason=()=>stale()?'문서·선택이 변경되었습니다. 취소 후 다시 여세요.':busy()?'입력·저장·열린 대화상자를 먼저 마치세요.':view?columnEditReason(editor.adapter,editor.selection,view):'기존 단 정의를 확인할 수 없습니다.';
-  const sync=()=>{launch.disabled=busy();launch.title=launch.disabled?'입력·저장·열린 대화상자를 먼저 마치세요.':columnLimit;
+  const sync=()=>{
+    const disabled = busy();
+    launch.toggleAttribute('disabled', disabled);
+    setViewAttribute(launch, 'title', disabled ? '입력·저장·열린 대화상자를 먼저 마치세요.' : columnLimit);
     if(!dialog.open&&!presets.some(menuControlDemanded)&&!menuControlDemanded(launch))return;
     let why='';try{why=busy()?'열린 작업을 마친 뒤 사용하세요.':columnEditReason(editor.adapter,editor.selection,columnView(editor.adapter,editor.selection.focus.sec));}catch(e){why=String(e);}
     for(const b of presets){b.disabled=!!why;b.setAttribute('aria-disabled',String(!!why));b.title=why?editorFeedbackText(why):'';}
@@ -39,14 +43,15 @@ export function mountColumns(doc:Document,editor:Interaction,actions:{busy:()=>b
     count.value=String(view.columnCount);spacing.value=String(view.spacing/100);
     doc.querySelectorAll('#main-menu details[open]').forEach(d=>d.removeAttribute('open'));guard.open();showEditorDialog(dialog);sync();(count.disabled?cancel:count).focus();
   }catch(error){captured=undefined;actions.error(error);}};
-  const close=()=>{guard.close();captured=undefined;view=undefined;closeEditorDialog(dialog);};cancel.onclick=close;
+  const close=()=>{guard.close();captured=undefined;view=undefined;closeEditorDialog(dialog);};
+  guard.bindCancel(cancel, close);
   form.onsubmit=e=>{e.preventDefault();if(!guard.ready())return;try{
     const r=reason();if(r||!view)throw Error(r);
     const n=Number(count.value);if(n!==1&&n!==2)throw Error('지원하는 단 수를 선택하세요.');
     editor.execute({type:'columns',change:{expected:view,count:n,spacing:columnSpacingHu(spacing.value)}},captured);
     guard.consume();close();actions.changed();
-  }catch(error){status.textContent=String(error).replace(/^Error: /,'');}};
-  dialog.addEventListener('cancel',e=>{e.preventDefault();close();});dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();captured=undefined;view=undefined;sync();});
-  form.addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.isComposing&&e.keyCode!==229){const controls=visibleManagerControls(form),at=controls.indexOf(doc.activeElement as HTMLElement);if(controls.length&&(at<0||(e.shiftKey?at===0:at===controls.length-1))){e.preventDefault();controls[e.shiftKey?controls.length-1:0].focus();}}e.stopPropagation();});
+  }catch(error){status.textContent=editorFeedbackText(error);}};
+  dialog.addEventListener('close',()=>{if(dialog.open)return;guard.close();captured=undefined;view=undefined;sync();});
+  bindModalNavigation(form, dialog);
   const observer=new MutationObserver(sync);observer.observe(doc.body,{subtree:true,attributes:true,attributeFilter:['open']});sync();return{sync};
 }

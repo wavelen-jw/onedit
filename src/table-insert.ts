@@ -51,9 +51,8 @@ export function mountTableInsert(doc: Document, editor: Interaction, actions: {
   for(const [selector,text]of [["#table","빠른 표 (2×2)"],["#inline-table","빠른 글자처럼 표 (2×2)"],["[data-command-proxy=\"#table\"]","빠른 표 (2×2)"],["[data-command-proxy=\"#inline-table\"]","빠른 글자처럼 표 (2×2)"]])for(const e of doc.querySelectorAll(selector))e.textContent=text;
   form.addEventListener("submit",e=>{e.preventDefault();if(!guard.ready())return;try{if(!captured)throw Error("대상 문서를 다시 선택하세요.");const target=assertTableInsertTarget(editor,captured,actions.busy()),command=tableInsertCommand(rows.value,cols.value,true);guard.consume();actions.execute(command,target);close();actions.changed();}catch(error){note.textContent=error instanceof Error?error.message:"표를 만들지 못했습니다.";guard.open();sync();}});
   const cancel=form.querySelector<HTMLButtonElement>("[data-cancel]")!;
-  cancel.onclick=close;
+  guard.bindCancel(cancel, close);
   const mouseFocus = [ok, cancel].map(button => keepDialogFieldFocus(dialog, button, () => !actions.busy()));
-  dialog.addEventListener("cancel",e=>{if(e.defaultPrevented)return;e.preventDefault();close();});
   dialog.addEventListener("close",()=>{if(dialog.open)return;guard.close();captured=undefined;sync();});
   form.addEventListener("keydown",e=>{if(e.key==="Tab"){const active=[...form.querySelectorAll<HTMLElement>("input:enabled,button:enabled")],at=active.indexOf(doc.activeElement as HTMLElement);if(active.length&&(at<0||(e.shiftKey?at===0:at===active.length-1))){e.preventDefault();active[e.shiftKey?active.length-1:0].focus();}}e.stopPropagation();});
   const observer=new MutationObserver(sync);

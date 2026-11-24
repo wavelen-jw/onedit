@@ -1,4 +1,4 @@
-import { borderLineStyles, sides } from './formatting.js';
+import { borderLineStyle, sides } from './formatting.js';
 import { objectLinePalette } from './object-line-palette.js';
 // UI1-TABLE-PROPERTIES-{EXISTING,MARGIN-CAPTION,TABLE,CELL} and
 // UI1-CELL-BORDER-{EACH,BACKGROUND,DIAGONAL}. Presentation of existing cell drafts.
@@ -244,7 +244,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
       const type = controls.get(`border${side}.type`)!.value, color = controls.get(`border${side}.color`)!.value;
       const widths = [.1, .12, .15, .2, .25, .3, .4, .5, .6, .7, 1, 1.5, 2, 3, 4, 5];
       const width = controls.get(`border${side}.width`)!.value;
-      const lineStyle = borderLineStyles.find(([value]) => value === type)?.[2] ?? "solid";
+      const lineStyle = borderLineStyle(type)?.[2] ?? "solid";
       const paint = /^#[\da-f]{6}$/i.test(color) ? color : "#aaa";
       const thickness = width === "" ? .1 : widths[Number(width)];
       sample.style.setProperty(`border-${side.toLowerCase()}`, lineStyle === "none" ? "none" : `${thickness}mm ${lineStyle} ${paint}`);

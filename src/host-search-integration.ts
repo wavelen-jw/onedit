@@ -1,6 +1,6 @@
 import { closeEditorDialog } from "./editor-popup-focus.js";
 import type { FileLifecycle } from "./file-lifecycle.js";
-import { mountSearch } from "./integration/a-search.js";
+import { mountSearch, openEditorSearch } from "./integration/a-search.js";
 import { searchShortcut } from "./keyboard.js";
 
 const bindings = new WeakMap<Document, () => void>();
@@ -12,7 +12,7 @@ export function connectHostSearch(files: FileLifecycle, doc: Document) {
   if (files.ui.standalone || !win || !input || !pages) return;
   bindings.get(doc)?.();
   const focus = () => input.focus({ preventScroll: true });
-  const search = mountSearch(files.editor, () => files.ui.change(true), focus);
+  const search = mountSearch(files.editor, () => files.ui.change(true), focus, () => files.busy || composing || !!doc.querySelector("dialog[open]"));
   const root = doc.getElementById("search-dialog")!;
   let documentId = files.adapter.documentId, composing = false;
   const sync = () => {
@@ -35,7 +35,7 @@ export function connectHostSearch(files: FileLifecycle, doc: Document) {
     if (e.target instanceof Element && e.target !== input &&
         e.target.closest("input,textarea,select,[contenteditable=true]")) return;
     e.preventDefault();e.stopImmediatePropagation();
-    if (!e.repeat) search.show(action === "replace");
+    if (!e.repeat) openEditorSearch(files.editor, action === "replace");
   };
   const protectDialog = (e: Event) => e.stopPropagation();
   const start = () => { composing = true; }, end = () => { composing = false; };
@@ -47,6 +47,6 @@ export function connectHostSearch(files: FileLifecycle, doc: Document) {
     observer.disconnect();win.removeEventListener("keydown", key, true);
     root.removeEventListener("keydown", protectDialog);
     doc.removeEventListener("compositionstart", start, true);
-    doc.removeEventListener("compositionend", end, true);root.remove();
+    doc.removeEventListener("compositionend", end, true);search.dispose();
   });
 }

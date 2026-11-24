@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from "./adapter.js";
 import type { Selection } from "./model.js";
 import { pageBreakReason } from "./page-break.js";
@@ -5,17 +6,23 @@ import { columnEditReason, columnView } from "./columns.js";
 
 // Reuse the proven body/control and existing column-definition contracts.
 // insertColumnBreak owns the split + explicit column break; never emulate Enter.
-function target(a: RhwpAdapter, s: Selection) {
-  const reason = pageBreakReason(a, s).replaceAll("쪽 나누기", "단 나누기");
-  if (reason) throw Error(reason);
-  if (s.kind !== "caret" || s.focus.kind !== "body") throw Error("단 나누기 본문 커서를 확인하세요.");
-  const columns = columnView(a, s.focus.sec), blocked = columnEditReason(a, s, columns);
+export function columnBreakTarget(a: RhwpAdapter, s: Selection, labelAsColumn = false) {
+  const reason = pageBreakReason(a, s);
+  if (reason) throw Error(labelAsColumn ? reason.replaceAll("쪽 나누기", "단 나누기") : reason);
+  if (s.kind !== "caret" || s.focus.kind !== "body")
+    throw Error(labelAsColumn ? "단 나누기 본문 커서를 확인하세요." : "본문 커서를 확인하세요.");
+  const p = s.focus, columns = columnView(a, p.sec), blocked = columnEditReason(a, s, columns);
   if (blocked) throw Error(blocked);
+  return {p, columns};
+}
+
+function target(a: RhwpAdapter, s: Selection) {
+  const {p, columns} = columnBreakTarget(a, s, true);
   if (typeof a.doc.insertColumnBreak !== "function") throw Error("기존 Core 단 나누기 API가 없습니다.");
-  return { p: s.focus, columns };
+  return {p, columns};
 }
 export function columnBreakReason(a: RhwpAdapter, s: Selection) {
-  try { target(a, s); return ""; } catch (error) { return String(error).replace(/^Error: /, ""); }
+  try { target(a, s); return ""; } catch (error) { return editorFeedbackText(error); }
 }
 export function prepareColumnBreak(a: RhwpAdapter, s: Selection): () => Selection {
   const { p, columns } = target(a, s), before = [...a.text(p)], at = a.textOffset(p), count = a.doc.getParagraphCount(p.sec);

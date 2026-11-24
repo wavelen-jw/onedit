@@ -1,4 +1,5 @@
-import { encodeClipboardBytes, MAX_CLIPBOARD_BYTES, type ClipboardData } from "./clipboard.js";
+import type { ClipboardData } from "./clipboard.js";
+import { encodeClipboardBytes, hasClipboardMarker, MAX_CLIPBOARD_BYTES } from "./clipboard-envelope.js";
 import { isHancomMixedPicture, type HancomMixedPicture } from "./clipboard-image.js";
 import type { Props } from "./model.js";
 import { PasteFormatUnavailable } from "./paste-format-fallback.js";
@@ -131,7 +132,7 @@ export function hancomTextDocumentModel(html: string, plain: string): { wire: st
 
 
 export function externalTextFormat(html: string, text: string): { text: string; props: Props } | undefined {
-  if (!html || html.includes("data-rhwp-next-clipboard") || html.length > MAX_CLIPBOARD_BYTES * 2 || hasHancomClipboardMetadata(html)) return;
+  if (!html || hasClipboardMarker(html) || html.length > MAX_CLIPBOARD_BYTES * 2 || hasHancomClipboardMetadata(html)) return;
   const starts = [...html.matchAll(/<!--StartFragment-->/gi)], ends = [...html.matchAll(/<!--EndFragment-->/gi)];
   let fragment: string;
   if (starts.length || ends.length) {
@@ -176,7 +177,7 @@ export function externalTextFormat(html: string, text: string): { text: string; 
 }
 export function pasteCompletion(data: ClipboardData): string {
   if (data.structured) return "구조화된 OS 클립보드 붙여넣기 완료";
-  if (data.html.includes("data-rhwp-next-clipboard")) return "RHWP HTML 붙여넣기 완료";
+  if (hasClipboardMarker(data.html)) return "RHWP HTML 붙여넣기 완료";
   if (hasHancomClipboardMetadata(data.html)) return "한/글 클립보드 서식 붙여넣기 완료";
   if (externalCoreHTML(data.html, data.text))
     return "외부 HTML 붙여넣기 완료 (지원 본문·표·CSS 서식 / HWP 전용 속성 제외)";
@@ -377,7 +378,7 @@ function paragraphForeground(css: string): string | undefined {
 /** Admission to the existing Core parser, not another HTML importer/renderer.
  * No incoming markup is attached to DOM or allowed to request resources. */
 export function externalCoreHTML(html: string, text: string, picture?: HancomMixedPicture, dpi = 96): string | undefined {
-  if (!html || html.includes("data-rhwp-next-clipboard") || externalTextFormat(html, text)) return;
+  if (!html || hasClipboardMarker(html) || externalTextFormat(html, text)) return;
   const refuse: (code: string) => never = (code) => { throw new PasteFormatUnavailable(`NOT_SUPPORTED: 이 HTML 구조·리소스는 서식 붙여넣기에서 지원하지 않습니다. [${code}]`); };
   if (html.length > MAX_CLIPBOARD_BYTES * 2) refuse("HTML_SIZE");
   const hancom = hasHancomClipboardMetadata(html);

@@ -12,7 +12,7 @@ const supported = new Map<string, { type: string; values: readonly string[] }>([
   ["ZoomX", {type: "short", values: ["100"]}],
   ["ZoomY", {type: "short", values: ["100"]}],
 ]);
-type PrintSettings = ReadonlyMap<string, string>;
+export type PrintSettings = ReadonlyMap<string, string>;
 const documentSettings = new WeakMap<object, PrintSettings>();
 
 function settingsRoot(xml: Document) {

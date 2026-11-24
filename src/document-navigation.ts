@@ -1,5 +1,7 @@
+import { hasOpenDialog } from "./dialog-support.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { Interaction } from "./interaction.js";
+import { revealEditorSelection } from "./command-state-integration.js";
 import { sameFormatTarget,formatInputGuard } from "./integration/a-format-input-guard.js";
 import { TextSearch } from "./integration/a-search.js";
 
@@ -26,7 +28,7 @@ export function mountDocumentNavigation(doc:Document,editor:Interaction,options:
   let frame=0;
   function reveal(){if(frame)cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{frame=0;if(panel.hidden||doc.body.dataset.editorLayout==="wide")return;const v=viewport.getBoundingClientRect(),b=panel.getBoundingClientRect(),r=[...doc.querySelectorAll<HTMLElement>("#pages .overlay .highlight,#pages .overlay .caret")].map(n=>n.getBoundingClientRect()).filter(r=>r.bottom>v.top&&r.top<v.bottom).at(-1);if(!r)return;const left=b.right+12,right=v.right-12;if(r.width<=right-left&&r.left<left)viewport.scrollLeft-=left-r.left;else if(r.right>right)viewport.scrollLeft+=r.right-right;});}
   let active="pages",origin:ReturnType<Interaction["capture"]>|undefined,owned:typeof origin,scroll:{left:number;top:number}|undefined,searchKey="",pageKey="";
-  const allowed=()=>!options.busy()&&!doc.querySelector("dialog[open]");
+  const allowed=()=>!options.busy()&&!hasOpenDialog(doc);
   function hide(restore=true,focus=true){
     if(panel.hidden)return;if(frame)cancelAnimationFrame(frame);frame=0;panel.hidden=true;toggle.setAttribute("aria-expanded","false");guard.close();
     if(restore&&origin&&owned&&sameFormatTarget(owned,editor.capture())){editor.adapter.captureSelection(origin.selection);editor.selection=structuredClone(origin.selection);options.changed();if(scroll){viewport.scrollLeft=scroll.left;viewport.scrollTop=scroll.top;}}
@@ -52,7 +54,7 @@ export function mountDocumentNavigation(doc:Document,editor:Interaction,options:
       if(!owned||!sameFormatTarget(owned,editor.capture()))throw Error("선택이 바뀌었습니다. 탐색을 닫고 다시 여세요.");
       const key=JSON.stringify([query.value,caseMatch.checked,cells.checked]);
       if(key!==searchKey){search.setScope("document");search.refresh(query.value,caseMatch.checked,cells.checked);searchKey=key;}
-      note.textContent=search.move(backward);owned=editor.capture();options.changed();doc.dispatchEvent(new CustomEvent("rhwp:reveal-selection"));reveal();query.focus({preventScroll:true});
+      note.textContent=search.move(backward);owned=editor.capture();options.changed();revealEditorSelection(doc);reveal();query.focus({preventScroll:true});
     }catch(error){note.textContent=editorFeedbackText(error);}
   }
   form.onsubmit=e=>{e.preventDefault();find();};previous.onclick=()=>find(true);

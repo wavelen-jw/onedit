@@ -1,5 +1,6 @@
+import { bindObjectSizeRatio } from "./object-size-inputs.js";
 import { editorFeedbackText } from "./editor-feedback-text.js";
-import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
+import { closeEditorDialog, showEditorDialog, wrapDialogTab } from "./editor-popup-focus.js";
 import type { Command } from "./model.js";
 import type { Interaction } from './interaction.js';
 import { mountHancomObjectDialog, resetHancomObjectDialog } from './hancom-object-dialog.js';
@@ -35,9 +36,6 @@ export function mountShapes(host: HTMLElement, editor: Interaction, actions: {
   form.append(title, label('너비(pt)', width), label('높이(pt)', height), label('가로 세로 비율 유지', ratio), message, note, ok, cancel);
   dialog.append(form); document.body.append(dialog);
   const guard = formatInputGuard(form);
-  let localComposing = false;
-  form.addEventListener('compositionstart', () => { localComposing = true; });
-  form.addEventListener('compositionend', () => { localComposing = false; });
   let inserting = false;
   let selected: ShapeTarget | undefined, ownerDocument = '', capture: ReturnType<Interaction['capture']> | undefined, factor = 1;
   let lineDraft: (() => { borderColor?: number; borderWidth?: number; lineType?: number; roundRate?: number; fillBgColor?: number }) | undefined;
@@ -139,8 +137,7 @@ export function mountShapes(host: HTMLElement, editor: Interaction, actions: {
       guard.open(); showEditorDialog(dialog);if(layout)layout.focus();else width.focus();
     } catch (e) { actions.error(e); }
   };
-  width.oninput = () => { if (ratio.checked && Number(width.value) > 0) height.value = (Math.round(Number(width.value) * 100 / factor) / 100).toString(); };
-  height.oninput = () => { if (ratio.checked && Number(height.value) > 0) width.value = (Math.round(Number(height.value) * 100 * factor) / 100).toString(); };
+  bindObjectSizeRatio(width, height, ratio, () => factor);
   form.onsubmit = e => {
     e.preventDefault();
     try {
@@ -157,18 +154,9 @@ export function mountShapes(host: HTMLElement, editor: Interaction, actions: {
       guard.consume(); closeEditorDialog(dialog); actions.changed();
     } catch (e) { message.dataset.error='true'; message.textContent = editorFeedbackText(e); }
   };
-  cancel.onclick = () => closeEditorDialog(dialog);
-  dialog.addEventListener('close', () => { if (dialog.open) return; capture = undefined; lineDraft = undefined; inserting = false; localComposing = false; guard.close(); sync(); });
-  dialog.addEventListener('cancel', e => { if (localComposing) e.preventDefault(); });
-  dialog.addEventListener('keydown', e => {
-    if (e.isComposing || e.keyCode === 229 || localComposing) return;
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEditorDialog(dialog); }
-    if (e.key === 'Tab') {
-      const controls = [...form.querySelectorAll<HTMLElement>('input,select,button')].filter(c=>!(c as HTMLInputElement).disabled&&c.tabIndex>=0&&c.getClientRects().length>0), at = controls.indexOf(document.activeElement as HTMLElement);
-      if (e.shiftKey && at <= 0) { e.preventDefault(); controls.at(-1)?.focus(); }
-      else if (!e.shiftKey && at === controls.length - 1) { e.preventDefault(); controls[0]?.focus(); }
-    }
-  });
+  guard.bindCancel(cancel, () => closeEditorDialog(dialog));
+  dialog.addEventListener('close', () => { if (dialog.open) return; capture = undefined; lineDraft = undefined; inserting = false; guard.close(); sync(); });
+  dialog.addEventListener('keydown', event => wrapDialogTab(event, dialog));
   // Presentation consumers may read only the existing explicit list target.
   // A caret in an object-owning paragraph never creates a property selection.
   const readSelected = () => {

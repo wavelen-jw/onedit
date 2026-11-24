@@ -1,3 +1,4 @@
+import { appendSelectionMark } from "./page-layers.js";
 import type { Interaction } from "./interaction.js";
 import type { LiveComposition } from "./live-composition.js";
 import { type Box } from "./model.js";
@@ -50,7 +51,7 @@ export function paintCompositionCursor(document: Document, pages: HTMLElement, b
     block.className = "composition-cursor";
     block.setAttribute("aria-hidden", "true");
     Object.assign(block.style, {left:`${b.x}px`,top:`${b.y}px`,width:`${b.width}px`,height:`${b.height}px`});
-    targets[index]!.append(block);
+    appendSelectionMark(pages, targets[index], block);
   });
   return true;
 }

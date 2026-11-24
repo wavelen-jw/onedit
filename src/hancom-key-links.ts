@@ -1,3 +1,5 @@
+import { characterStyleCommand } from "./character-style-commands.js";
+import { paragraphAlignmentCommand, paragraphMarginShortcut } from './paragraph-adjustments.js';
 import type { KeyInput, KeyRoute } from './keyboard.js';
 import type { Selection } from './model.js';
 import type { Interaction } from './interaction.js';
@@ -77,7 +79,7 @@ export function hancomKeyLink(e: KeyInput, s: Selection): KeyRoute | undefined {
   if(!e.ctrlKey&&e.altKey&&e.shiftKey&&(letter==='z'||letter==='a'))
     return {kind:'command',command:{type:'line-spacing-step',direction:letter==='z'?1:-1}};
   // Ctrl+Shift+W/Q browser/window ownership is not overridden; Z/A are the native non-conflicting aliases.
-  if(!e.ctrlKey&&e.altKey&&e.shiftKey&&letter==='c')return {kind:'command',command:{type:'char',props:{bold:false,italic:false,underline:false,underlineType:"None",strikethrough:false,superscript:false,subscript:false,outlineType:0,shadowType:0,emboss:false,engrave:false}}};
+  if(!e.ctrlKey&&e.altKey&&e.shiftKey&&letter==='c')return {kind:'command',command:characterStyleCommand("char-normal")};
   if(e.ctrlKey&&!e.altKey&&!e.shiftKey&&(key==='arrowleft' ||key==='arrowright')&&
       (s.kind==='caret'||s.kind==='text'))
     return {kind:'view',operation:'word',key:e.key,extend:false};
@@ -102,18 +104,19 @@ export function hancomKeyLink(e: KeyInput, s: Selection): KeyRoute | undefined {
     if(e.key==='Enter'&&s.focus.kind==='cell')return {kind:'command',command:{type:'table-edit',operation:'row-add'}};
     if(e.key==='Backspace'&&s.focus.kind==='cell')return {kind:'command',command:{type:'table-edit',operation:'row-delete'}};
     if(letter==='e'&&s.focus.kind==='body'&&(s.kind==='caret'||s.kind==='text'))return {kind:'command',command:{type:'delete',backward:false}};
-    if(letter==='i')return {kind:'command',command:{type:'toggle-char',property:'italic'}};
-    if(letter==='u')return {kind:'command',command:{type:'underline'}};
+    if(letter==='i')return {kind:'command',command:characterStyleCommand("italic")};
+    if(letter==='u')return {kind:'command',command:characterStyleCommand("underline")};
     if(letter==='j')return {kind:'command',command:{type:'page-break'}};
     const direction=e.code==='BracketRight'||!e.code&&key===']'?1:e.code==='BracketLeft'||!e.code&&key==='['?-1:0;
     if(direction)return {kind:'command',command:{type:'char-relative',change:{metric:'fontSize',direction}}};
   }
   // Ctrl+Shift+T restores a browser tab and is deliberately not added.
   if(e.ctrlKey&&!e.altKey&&e.shiftKey){
-    const margins={e:['marginLeft',-1],g:['marginLeft',1],d:['marginRight',1],f:['marginRight',-1]}as const;
-    const change=margins[letter as keyof typeof margins];
-    if(change)return {kind:'command',command:{type:'paragraph-relative',change:{metric:change[0],direction:change[1]}}};
+    const margin = paragraphMarginShortcut('letter', letter);
+    if (margin) return { kind: 'command', command: margin };
+    if (letter === 'c' || letter === 'r' || letter === 'm') {
+      const alignment = { c: 'center', r: 'right', m: 'justify' } as const;
+      return { kind: 'command', command: paragraphAlignmentCommand(alignment[letter]) };
+    }
   }
-  if(e.ctrlKey&&!e.altKey&&e.shiftKey&&['c','r','m'].includes(letter))return {
-    kind:'command',command:{type:'paragraph',props:{alignment:({c:'center',r:'right',m:'justify'}as const)[letter as 'c'|'r'|'m']}}};
 }

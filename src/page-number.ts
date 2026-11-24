@@ -1,3 +1,4 @@
+import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from './adapter.js';
 import { coreRuntimeHasCapability } from './core-runtime.js';
 import { copy, type Selection } from './model.js';
@@ -36,7 +37,7 @@ export function pageNumberTarget(a: RhwpAdapter, s: Selection) {
 
 export function pageNumberReason(a: RhwpAdapter, s: Selection) {
   try { pageNumberTarget(a, s); return ''; }
-  catch (error) { return String(error).replace(/^Error: /, ''); }
+  catch (error) { return editorFeedbackText(error); }
 }
 
 export function preparePageNumber(a: RhwpAdapter, s: Selection, kind: PageNumberKind): () => Selection {
