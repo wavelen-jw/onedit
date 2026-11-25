@@ -1,6 +1,6 @@
 import {bodyVisualLines,type BodyVisualLine} from "./body-visual-lines.js";
 import type {Interaction} from './interaction.js';
-import {cellPath,copy,nested,type Position,type Selection} from './model.js';
+import {cellPath,copy,nested,samePosition,type Position,type Selection} from './model.js';
 import {fragmentClipboardObjects,selectedCutObject} from './object-clipboard.js';
 import {captureParentTableCut} from './parent-table-cut.js';
 import {isCurrentPointerTarget,sameFormatTarget} from './integration/a-format-input-guard.js';
@@ -84,7 +84,7 @@ export function activeHandleObjects(editor:Interaction):Item[]{
 
 function sourceReason(editor:Interaction,item:Item){
   const p=item.selection.focus;
-  if(item.selection.kind==='table'&&p.kind==='cell'&&nested(p))return '중첩 표는 전체 선택만 지원합니다. 이동은 기존 소유 경로의 원자 이동 계약이 필요합니다.';
+  if(item.selection.kind==='table'&&p.kind==='cell'&&nested(p))return '중첩 표는 손잡이로 선택할 수 있습니다. 끌어서 이동할 수는 없습니다.';
   if(item.selection.kind==='object'&&p.kind==='cell'&&!item.inline)return '셀 안의 떠 있는 그림은 전체 선택만 지원합니다. 기존 셀 배치 위치 이동 계약이 필요합니다.';
   try{editor.adapter.assertEditable(p);if(item.selection.kind==='object'&&p.kind==='cell')selectedCutObject(editor.adapter,item.selection);if(!item.inline)prepareControlOffset(editor.adapter,item.selection,0,0);return '';}
   catch(error){return String(error).replace(/^Error: /,'');}
@@ -244,23 +244,42 @@ export function mountObjectHandles(pages:HTMLElement,editor:Interaction,actions:
       occupied.push({page:b.page,x,y});
       const button=doc.createElement('button');button.type='button';button.className='object-grip';button.textContent='⋮⋮';button.dataset.objectId=item.id;
       button.dataset.objectKind=item.name;button.dataset.objectPage=String(b.page);
-      button.setAttribute('aria-label',`${item.name} 전체 선택 · 선택하거나 끌어서 이동`);button.title=`${item.name} 전체 선택 · 선택하거나 끌어서 이동${item.boxes.length>1?' · 여러 쪽에 걸친 같은 표 전체':''}`;
+      const canMove = item.selection.kind !== 'table' || !nested(item.selection.focus);
+      const label = `${item.name} 전체 선택${canMove ? ' · 선택하거나 끌어서 이동' : ''}`;
+      button.setAttribute('aria-label',label);button.title=`${label}${item.boxes.length>1?' · 여러 쪽에 걸친 같은 표 전체':''}`;
       button.setAttribute('aria-pressed',String(selected(item)));
       Object.assign(button.style,{left:x+'px',top:y+'px'});
-      const hint=()=>{emphasize(item.id);if(!drag){status.hidden=false;status.textContent=`${item.name} · 선택하거나 끌어서 이동`;}};
+      const hint=()=>{emphasize(item.id);if(!drag){status.hidden=false;status.textContent=label;}};
       const leave=()=>{if(!drag){emphasize();status.hidden=true;}};
       button.addEventListener('pointerenter',hint);button.addEventListener('pointerleave',leave);
       button.addEventListener('focus',hint);button.addEventListener('blur',leave);
       // Keyboard/assistive click has no pointer sequence and never initiates a move.
-      button.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(e.detail!==0||drag||actions.busy())return;choose(item);});
+      button.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(e.detail!==0||drag||actions.busy())return;try{choose(resolveGrip(item));}catch(error){actions.error(error);}});
       registerPageChrome(page,button);page.append(button);mountedParts.push({page,node:button});
     }
   }
   function choose(item:Item){editor.adapter.validate(item.selection.focus);editor.selection=copy(item.selection);editor.block=false;editor.preferredX=undefined;actions.selectionChanged();sync();actions.focus();}
+  function resolveGrip(item: Item) {
+    const a = editor.adapter;
+    const reference = a.captureSelection(item.selection);
+    const selection = a.resolveSelection(reference);
+    if (key(selection) !== item.id || !samePosition(selection.focus, item.selection.focus))
+      throw Error('개체 소유권이 변경되었습니다. 다시 선택하세요.');
+    const current = selection.kind === 'table' && selection.focus.kind === 'cell'
+      ? tableHandleObject(a, selection.focus)
+      : pictureHandleObjects(editor, item.id)[0];
+    if (!current) throw Error('현재 개체를 찾을 수 없습니다. 다시 선택하세요.');
+    return current;
+  }
   const valid=(d:Drag)=>{
     if(!isCurrentPointerTarget(d.button, actions.busy(), d.target, () => editor.capture()))throw Error('문서·선택이 변경되어 이동을 취소했습니다.');
-    const current=handleObjects(editor).find(i=>i.id===d.item.id);
-    if(!current||JSON.stringify(current)!==JSON.stringify(d.item))throw Error('개체 소유권·위치가 변경되어 이동을 취소했습니다.');
+    const current = resolveGrip(d.item);
+    // The visible handle may represent only the active page. Compare the
+    // drag origin's live rectangle, rather than the whole display catalog.
+    if (d.moved && (current.inline !== d.item.inline ||
+        !current.boxes.some(b => b.page === d.box.page && b.x === d.box.x && b.y === d.box.y && b.w === d.box.w && b.h === d.box.h)))
+      throw Error('개체 위치가 변경되어 이동을 취소했습니다.');
+    return current;
   };
   function preview(e:PointerEvent,d:Drag){
     clearPreview();d.to=undefined;d.reason=sourceReason(editor,d.item);
@@ -328,7 +347,7 @@ export function mountObjectHandles(pages:HTMLElement,editor:Interaction,actions:
     if(Math.hypot(e.clientX-d.start.x,e.clientY-d.start.y)<6&&!d.moved)return;d.moved=true;
     if(!sameFormatTarget(d.target,editor.capture())||actions.busy()){cancel();return;}preview(e,d);};
   const up=(e:PointerEvent)=>{const d=drag;if(!d||e.pointerId!==d.id)return;e.preventDefault();e.stopImmediatePropagation();
-    try{valid(d);if(!d.moved){drag=undefined;choose(d.item);return;}
+    try{const current=valid(d);if(!d.moved){drag=undefined;choose(current);return;}
       preview(e,d);if(d.reason){drag=undefined;clearPreview();status.hidden=false;status.textContent=d.reason;return;}
       drag=undefined;clearPreview();const original=copy(editor.selection);
       if(d.item.inline){if(!d.to||!d.wire)throw Error('본문 삽입 위치·개체 캡처를 확인할 수 없습니다.');relocate(editor,d.item,d.to.position,d.wire);}
@@ -345,9 +364,9 @@ export function mountObjectHandles(pages:HTMLElement,editor:Interaction,actions:
     e.preventDefault();e.stopImmediatePropagation();
     if(drag||actions.busy()||editor.adapter.transientEdit||e.shiftKey||e.ctrlKey||e.altKey||e.metaKey)return;
     try{
-      const item=items.find(i=>i.id===button.dataset.objectId),current=item&&handleObjects(editor).find(i=>i.id===item.id);
-      if(!item||!current||JSON.stringify(item)!==JSON.stringify(current))throw Error('개체 소유권·위치가 변경되었습니다. 다시 선택하세요.');
-      choose(current);status.hidden=true;
+      const item=items.find(i=>i.id===button.dataset.objectId);
+      if(!item)throw Error('개체가 변경되었습니다. 다시 선택하세요.');
+      choose(resolveGrip(item));status.hidden=true;
       if(e.type==='dblclick'){const reason=actions.properties();if(reason){status.hidden=false;status.textContent=reason;}}
       else actions.context(e.clientX,e.clientY);
     }catch(error){actions.error(error);actions.focus();}

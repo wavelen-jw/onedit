@@ -1,8 +1,8 @@
 import {PassiveOwnerBatchRetired} from './passive-owner-batch.js';
 import type {RhwpAdapter} from './adapter.js';
-import {copy,nested,samePosition,type Position,type Props,type Selection} from './model.js';
+import {copy,nested,samePosition,sameTable,type Position,type Props,type Selection} from './model.js';
 export function selectedTableObject(a:RhwpAdapter,s:Selection,transpose=false, prepareBatch?:(focus:Position)=>((page:number)=> (()=>boolean)|undefined)|undefined, allowCaret=false){
-  if((s.kind!=='table' && !(allowCaret && s.kind==='caret'))||s.focus.kind!=='cell'||nested(s.focus))throw Error('본문의 일반 표 개체 한 개를 선택하세요. 셀 블록·중첩 표는 기존 별도 명령을 사용하세요.');
+  if((s.kind!=='table' && !(allowCaret && (s.kind==='caret' || (s.kind==='cells' || s.kind==='text') && sameTable(s.anchor,s.focus))))||s.focus.kind!=='cell'||nested(s.focus))throw Error('본문의 일반 표 개체 한 개를 선택하세요. 셀 블록·중첩 표는 기존 별도 명령을 사용하세요.');
   const p=s.focus;a.validate(p);a.assertEditable(p);
   let global=p.para;for(let sec=0;sec<p.sec;sec++)global+=a.doc.getParagraphCount(sec);
   const row=a.call<any[]>('getControls').find(c=>c.list===0&&c.para===global&&c.controlIndex===p.control);

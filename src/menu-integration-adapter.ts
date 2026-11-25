@@ -19,6 +19,7 @@ import { selectionContextOptIn, selectionTargetNativeOptIn } from "./selection-c
 import { committedDormantTableTools, editorChanged, editorHistoryTravelled } from "./editor-state-adapter.js";
 import { CellDisplayBatch } from "./cell-display-batch.js";
 import type { OwnerProjection } from "./owner-projection.js";
+import { readCellBorderPreview } from "./cell-border-preview.js";
 import { projectCellDraft } from "./cell-dialog-projection.js";
 import { connectCellDialogCommand, type CellDialogMode, type CellDialogTarget } from "./cell-dialog-command.js";
 import {keepTypingFormatPresentation,checkpointFormatPresentation,withFormatPresentationRead,readFormatPresentation,readPassiveFormatPresentation} from './typing-format-presentation.js';
@@ -98,7 +99,7 @@ import type { Interaction } from "./interaction.js";
 import type { Command } from "./model.js";
 import { nested } from "./model.js";
 import {
-  type FormatKind,
+  displayed, mixed, type FormatKind,
 } from "./formatting.js";
 import type { ParagraphAdjustment } from "./paragraph-adjustments.js";
 import { mountFields as basicFields } from "./format-dialog.js";
@@ -443,11 +444,27 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   // captures the current target again and never trusts projected DOM state.
   const isBlock = (mode: CellDialogMode) => mode === "block-border" || mode === "block-background";
   const prepareCell = (mode: CellDialogMode, expected?: CellDialogTarget, displayOwner?: OwnerProjection, coordinated = false) => {
-    if (mode==="properties" && nested(editor.selection.focus) && nestedValignSupported(editor,doc)) {
-      const capture=editor.capture();
-      if(expected&&!sameFormatTarget(expected,capture))throw Error("문서·리비전·선택이 변경되었습니다. 메뉴를 다시 여세요.");
-      const nestedDraft=captureNestedValign(editor,doc);
-      return {capture,state:{verticalAlign:nestedDraft.verticalAlign},nestedDraft};
+    const focus = editor.selection.focus;
+    if (mode === "properties" && focus.kind === "cell" && nested(focus)) {
+      const capture = editor.capture();
+      if (expected && !sameFormatTarget(expected, capture))
+        throw Error("문서·리비전·선택이 변경되었습니다. 메뉴를 다시 여세요.");
+      const selection = capture.selection;
+      const p = selection.focus as typeof focus;
+      const a = files.adapter;
+      a.validate(p);
+      const cells = selection.kind === "table" || selection.kind === "cells"
+        ? editor.cells(selection).map(cell => cell.cellIdx) : [p.cell];
+      const path = a.path(p);
+      const state = mixed(cells.map(cell => displayed("cell",
+        a.call("getCellPropertiesByPath", p.sec, p.para, path, cell))));
+      let nestedDraft: ReturnType<typeof captureNestedValign> | undefined;
+      if (nestedValignSupported(editor, doc) && (selection.kind === "caret" ||
+          selection.kind === "cells" && selection.phase === 1)) {
+        try { nestedDraft = captureNestedValign(editor, doc); }
+        catch (error) { if (a.viewerOnlyReason) throw error; }
+      }
+      return {capture, state, nestedDraft};
     }
     const read = () => {
     const capture = editor.capture();
@@ -466,7 +483,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   function cellReason(mode: CellDialogMode, displayOwner?: OwnerProjection, coordinated = false) {
     if (unavailable()) return "입력·저장 또는 열린 대화상자를 먼저 마치세요.";
     if (editor.selection.focus.kind !== "cell" || nested(editor.selection.focus) &&
-      (mode!=="properties" || !nestedValignSupported(editor,doc))) return "일반 셀을 선택하세요.";
+      mode !== "properties") return "일반 셀을 선택하세요.";
     if (isBlock(mode) && editor.selection.kind !== "cells") return "하나의 셀 범위는 일반 셀 블록에서 사용하세요.";
     try { prepareCell(mode, undefined, displayOwner, coordinated); return ""; }
     catch (error) {
@@ -482,7 +499,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     open(mode, expected, beforeShow) {
       if (unavailable()) { files.ui.error("입력·저장 또는 열린 대화상자를 먼저 마치세요."); return false; }
       const opened = showFormat("cell", false, mode === "properties" ? "기본" : "테두리·배경", isBlock(mode), mode, expected, beforeShow);
-      if (opened && mode === "block-background") doc.getElementById("cell-border-tab-1")?.click();
+      if (opened && mode === "block-background") doc.querySelector<HTMLElement>('#format [data-cell-color="background"]')?.focus();
       return opened;
     },
   });
@@ -532,9 +549,9 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
         const next = merged.draft.verticalAlign;
         state = {...state, verticalAlign:next,
           ...("__mixedFields" in state && Array.isArray(state.__mixedFields)
-            ? {__mixedFields:state.__mixedFields.filter(key=>key!=="verticalAlign")} : {}),
+            ? {__mixedFields:state.__mixedFields.filter((key): key is string => typeof key === "string" && key !== "verticalAlign")} : {}),
           ...("__unavailableFields" in state && Array.isArray(state.__unavailableFields)
-            ? {__unavailableFields:state.__unavailableFields.filter(key=>key!=="verticalAlign")} : {})};
+            ? {__unavailableFields:state.__unavailableFields.filter((key): key is string => typeof key === "string" && key !== "verticalAlign")} : {})};
       }
       // Pending passive menu work describes the pre-modal background.
       // The modal has its own publication; the next ordinary editor action
@@ -569,6 +586,8 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
         mountHancomParagraphDialog(doc.getElementById("fields")!);
       else if (kind === "paragraph" && form.querySelector('input[name="spacingBefore"]:enabled:not([readonly])'))
         appendDialogShortcutHelp(doc.getElementById("fields")!, [["문단모양", [["u", "문단 위 간격 선택"]]]]);
+      let cellDialog: ReturnType<typeof mountHancomCellDialog> | undefined;
+      const inspectNested = kind === "cell" && nested(capture.selection.focus) && !nestedDraft;
       if(kind === "cell") {
         const focus = capture.selection.focus;
         let pagination: TablePaginationDisplay | undefined;
@@ -579,26 +598,49 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
               pagination = {treatAsChar, pageBreak};
           } catch { /* The cell editor still works when table-level values are unavailable. */ }
         }
-        mountHancomCellDialog(doc.getElementById("fields")!, group === "테두리·배경", nested(focus),cellBlock,!!nestedDraft,pagination);
+        let preview: ReturnType<typeof readCellBorderPreview>;
+        try { preview = readCellBorderPreview(editor, capture.selection, cellBlock); }
+        catch { /* Preserve edit admission if only the diagram is unavailable. */ }
+        cellDialog = mountHancomCellDialog(doc.getElementById("fields")!, group === "테두리·배경", nested(focus), cellBlock, !!nestedDraft, pagination, inspectNested, preview);
       }
       form.onsubmit = (e) => {
         e.preventDefault();
         if (busy() || !format.open) return;
-        const s6=kind==="cell"&&cellMode==="properties"&&!cellBlock&&!nestedDraft&&!merged?.draft&&
-          capture.selection.kind==="caret"&&capture.selection.focus.kind==="cell"&&!nested(capture.selection.focus)&&
-          studioS6DormantToolsEnabled(doc.defaultView,coreRuntimeIdentity(editor.adapter.doc)?.sha256);
-        const previousEntry=s6?editor.history.undoStack.at(-1):undefined;
         try {
+          if (inspectNested) { closeEditorDialog(format); return; }
+          const placement = cellDialog?.readPlacement();
+          const s6=kind==="cell"&&cellMode==="properties"&&!cellBlock&&!nestedDraft&&!merged?.draft&&!placement&&
+            capture.selection.kind==="caret"&&capture.selection.focus.kind==="cell"&&!nested(capture.selection.focus)&&
+            studioS6DormantToolsEnabled(doc.defaultView,coreRuntimeIdentity(editor.adapter.doc)?.sha256);
+          const previousEntry=s6?editor.history.undoStack.at(-1):undefined;
           if (nestedDraft) {
             if (!guard.ready()) return;
             applyNestedValign(editor,doc,nestedDraft,read());
           } else if (!submitFormatDraft(editor, kind, capture, guard, read, readList,
             "paragraphAdjustmentChange" in read ? read.paragraphAdjustmentChange as () => ParagraphAdjustment | undefined : undefined,
             cellBlock, (command, target) => {
+              const applyFormat = () => {
+                if (merged?.draft && command.type === "cell" && "verticalAlign" in command.props)
+                  applyMergedValign(editor, doc, merged.draft, command.props);
+                else executeSearch(command, target);
+              };
+              if (!placement || command.type === "table-object") { applyFormat(); return; }
               if (merged?.draft && command.type === "cell" && "verticalAlign" in command.props)
-                applyMergedValign(editor,doc,merged.draft,command.props);
-              else executeSearch(command,target);
-            },localCellSubmit && cellMode === "properties")) return;
+                throw Error("병합 셀 세로 정렬과 표 배치는 한 항목씩 적용하세요.");
+              const original = editor.selection;
+              const restore = editor.captureDocumentReplacementRollback();
+              try {
+                editor.selection = editor.history.atomic("표/셀 속성", original, () => {
+                  applyFormat();
+                  editor.execute({type: "table-object", action: "pagination", props: placement}, editor.capture());
+                  return editor.selection;
+                });
+              } catch (error) {
+                restore();
+                throw error;
+              }
+            }, localCellSubmit && cellMode === "properties" && !placement,
+              placement && {type: "table-object", action: "pagination", props: placement})) return;
           if(f5SliceEnabled&&cellMode&&files.adapter.revision===capture.revision)f5Render.armClose(format);
           let dormantTableTools:(()=>boolean)|undefined;
           const endpoint=s6?capture.paths.focus:undefined;
@@ -616,10 +658,10 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
           if (files.adapter.revision !== capture.revision) {
             const own = cellModal;
             const quick = quickFormat;
-            const ordinary = kind==="cell"&&cellMode==="properties"&&!nestedDraft&&!merged?.draft&&own?.open&&quick&&
+            const ordinary = kind==="cell"&&cellMode==="properties"&&!nestedDraft&&!merged?.draft&&!placement&&own?.open&&quick&&
               own.document===editor.adapter.doc&&own.id===editor.adapter.documentId&&changedApplyDisplayEnabled(editor);
             if (!ordinary) {
-              if (synchronousDisplayEnabled(editor)&&kind==="cell"&&cellMode==="properties"&&!nestedDraft&&!merged?.draft)
+              if (synchronousDisplayEnabled(editor)&&kind==="cell"&&cellMode==="properties"&&!nestedDraft&&!merged?.draft&&!placement)
                 publishChange(undefined,true,true,dormantTableTools);
               else if(dormantTableTools)publishChange(undefined,false,false,dormantTableTools);
               else changed();
@@ -644,6 +686,9 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       };
       form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
         false;
+      formatConfirm.hidden = inspectNested;
+      const cancel = format.querySelector<HTMLButtonElement>("#cancel")!;
+      cancel.textContent = inspectNested ? "닫기" : "취소";
       formatTarget = capture;
       guard.open();
       cellModal = cellMode ? { open: false, document: editor.adapter.doc, id: capture.documentId,
@@ -672,7 +717,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       // A direct menu can open a non-default group. Its first DOM input may
       // belong to a hidden tab; focus an actual supported visible field instead.
       [...doc.getElementById("fields")!.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
-        kind === "cell" ? '[role=tab][aria-selected=true]' : kind === "char" && group === "기본" ? "[data-font-input]" : group === "여백·들여쓰기 증감" ? "[name=paragraphAdjustment]" : listFocus ? "input[name=paragraphListMode], [name=listMode]" : kind === "paragraph" && group === "기본" && !nested(capture.selection.focus) ? "[data-paragraph-align][aria-pressed=true], [data-paragraph-align]" : "input,select",
+        kind === "cell" ? '[role=tab][aria-selected=true], [data-cell-edge][aria-pressed=true]' : kind === "char" && group === "기본" ? "[data-font-input]" : group === "여백·들여쓰기 증감" ? "[name=paragraphAdjustment]" : listFocus ? "input[name=paragraphListMode], [name=listMode]" : kind === "paragraph" && group === "기본" && !nested(capture.selection.focus) ? "[data-paragraph-align][aria-pressed=true], [data-paragraph-align]" : "input,select",
       )].find(control => !control.disabled && control.getClientRects().length > 0)?.focus();
       return true;
     } catch (e) {
@@ -723,7 +768,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     if(s.kind==='table'&&key!=='p'){e.preventDefault();e.stopImmediatePropagation();tableObjectDraft.show(key==='l'?'line':'background');return;}
     e.preventDefault();e.stopImmediatePropagation();
     if(key==='p')cellCommand.open('properties');
-    else if(cellCommand.open('border-properties')&&key==='c')doc.getElementById('cell-border-tab-1')?.click();
+    else if(cellCommand.open('border-properties')&&key==='c')doc.querySelector<HTMLElement>('#format [data-cell-color="background"]')?.focus();
   });
   const blockFormat=(e:Event)=>cellCommand.open((e as CustomEvent<boolean>).detail ? "block-background" : "block-border");
   doc.addEventListener('rhwp:cell-block-format',blockFormat);
@@ -1446,7 +1491,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
           case "previous-cell": case "next-cell":
             syncTable.invoke(action === "previous-cell" ? "previous" : "next", target); return;
           case "cell-properties": cellCommand.open("properties", target); return;
-          case "download-copy": void files.downloadCopy(); return;
+          case "download-copy": void files.exportCopy(); return;
           case "confirm-download": doc.getElementById("download-confirm")?.click(); return;
           case "character": showFormat("char"); return;
           case "paragraph": showFormat("paragraph"); return;

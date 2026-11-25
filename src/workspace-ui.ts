@@ -206,9 +206,7 @@ export function mountWorkspaceUI(
   fileSeparator(); fileHeld("XML 문서(M)", heldFile, "", true, "F13"); fileSeparator();
   fileLive("s", "저장하기(S)", "#save", fileAccessShortcuts[2].shortcut);
   fileLive("a", "다른 이름으로 저장하기(A)…", "#save-as", fileAccessShortcuts[3].shortcut);
-  if (doc.querySelector("[data-download-save-copy]"))
-    fileLive("", "HWPX 사본 다운로드", "[data-download-save-copy]");
-  fileLive("f", "PDF로 저장하기(F)… (인쇄 창)", "#print-button");
+  fileLive("", "HWPX로 내보내기", "#export-hwpx-copy");
   fileHeld("모바일 최적화 문서로 저장하기(B)…", heldFile, "", false, "F12");
   fileSeparator(); fileLive("i","문서 정보(I)… · 지원 조회","#document-info-open","Ctrl+Q,I / Ctrl+Q,D");
   fileHeld("DAISY 문서(W)", heldFile, "", true, "F16");
@@ -216,6 +214,7 @@ export function mountWorkspaceUI(
   fileSeparator(); fileHeld("점자로 바꾸기(L)", heldFile, "", true, "F18"); fileHeld("보내기(E)", heldFile, "", true, "F19");
   fileSeparator();
   fileLive("p", "인쇄(P)…", "#print-button", "Ctrl+P / Alt+P");
+  fileLive("f", "PDF로 저장…", "#print-button");
   fileSeparator(); fileHeld("최근 문서 목록", "로컬 경로·최근 문서 목록을 수집하거나 재현하지 않습니다.").dataset.fileEntry = 'recent';
   // Later approved UI: hide titlebar X, retain the real File Close entrance.
   // Use its current identity rather than the historically excluded c row.

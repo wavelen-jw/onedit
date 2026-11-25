@@ -1,4 +1,6 @@
-import { borderLineStyle, sides } from './formatting.js';
+import { sides } from './formatting.js';
+import type { Props } from './model.js';
+import { mountCellBorderPreview, type CellBorderPreview } from './cell-border-preview.js';
 import { objectLinePalette } from './object-line-palette.js';
 // UI1-TABLE-PROPERTIES-{EXISTING,MARGIN-CAPTION,TABLE,CELL} and
 // UI1-CELL-BORDER-{EACH,BACKGROUND,DIAGONAL}. Presentation of existing cell drafts.
@@ -10,7 +12,7 @@ export function resetHancomCellDialog(root: HTMLElement) {
 }
 export type TablePaginationDisplay = {treatAsChar:boolean; pageBreak:0|1|2};
 
-export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, nestedOwner = false, blockScope = false, nestedValign = false, pagination?: TablePaginationDisplay) {
+export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, nestedOwner = false, blockScope = false, nestedValign = false, pagination?: TablePaginationDisplay, inspectOnly = false, preview?: CellBorderPreview) {
   const lifetime = new AbortController(); lifetimes.set(root, lifetime);
   const dialog = root.closest<HTMLDialogElement>("dialog")!;
   const rows = new Map([...root.querySelectorAll<HTMLElement>("label[data-field]")].map(r => [r.dataset.field!, r]));
@@ -18,23 +20,22 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   if(blockScope)for(const [name,control]of controls)if(name!=='background'&&!/^border(Left|Right|Top|Bottom)\./.test(name)){
     control.disabled=true;control.title='선택 범위의 바깥선과 단색 배경을 바꿀 수 있습니다.';
   }
-  // Existing Command rejects layout changes for nested owners. Reflect that
-  // admission here, while keeping supported border/background drafts available.
-  if (nestedValign) for (const [name,control] of controls) if (name!=="verticalAlign") {
-    control.disabled=true;control.title="중첩 셀에서는 세로 정렬만 바꿀 수 있습니다.";
+  for (const [name, control] of controls) {
+    if (inspectOnly || nestedValign && name !== "verticalAlign") {
+      control.disabled = true;
+      control.title = "이 중첩 셀의 속성은 조회할 수 있습니다.";
+    }
   }
-  if (nestedOwner && !nestedValign) for (const name of ["verticalAlign", "applyInnerMargin", "paddingLeft", "paddingRight", "paddingTop", "paddingBottom"]) {
-    controls.get(name)!.disabled = true;
-    controls.get(name)!.title = "표 안의 표에서는 안 여백과 세로 정렬을 바꿀 수 없습니다.";
-  }
-  const pages: HTMLElement[] = [], borderPages: HTMLElement[] = [];
-  let mode = borderFirst, page = 3, borderPage = 0, edge = blockScope ? "All" : "Left";
+  const panels: HTMLElement[] = [];
+  const borderOnly = borderFirst || blockScope;
+  const outerAvailable = blockScope || preview?.length === 1 && !inspectOnly && !nestedValign;
+  let page = 0, edge = blockScope ? "All" : "Left";
   const pageOf = new Map<string, number>();
   const nav = document.createElement("nav"), tabs = document.createElement("div");
   tabs.className = "cell-dialog-tabs"; tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "표/셀 속성 탭"); nav.append(tabs);
   function panel() { const p = document.createElement("section"); p.className = "cell-tab-panel"; p.setAttribute("role", "tabpanel"); return p; }
-  for (let i = 0; i < 4; i++) pages.push(panel());
-  for (let i = 0; i < 3; i++) borderPages.push(panel());
+  for (let i = 0; i < (borderOnly ? 1 : 2); i++) panels.push(panel());
+  const layout = panels[1] ?? panel();
   function group(p: HTMLElement, title: string, cls = "") {
     const f = document.createElement("fieldset"), l = document.createElement("legend");
     f.className = cls; l.textContent = title; f.append(l); p.append(f); return f;
@@ -45,7 +46,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     if (caption) { const span = row.querySelector("span"); if (span?.firstChild) span.firstChild.textContent = caption; }
   }
   function marginProxy(name: string, target: HTMLElement, caption: string) {
-    move(name, target, 3); const source = controls.get(name) as HTMLInputElement;
+    move(name, target, 1); const source = controls.get(name) as HTMLInputElement;
     const row = rows.get(name)!; row.dataset.cellBacking = "true";
     const label = document.createElement("label"), text = document.createElement("span"), input = document.createElement("input");
     text.textContent = caption; input.type = "number"; input.min = "0"; input.max = String(327.67 * 25.4 / 72); input.step = "any";
@@ -58,35 +59,55 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
       source.value = input.value === "" ? "" : String(Math.round(Number(input.value) * 72 / 25.4 * 100) / 100);
       source.dispatchEvent(new Event("input", { bubbles: true }));
     };
-    input.addEventListener("invalid", () => { mode = false; page = 3; sync(); }, true);
+    input.addEventListener("invalid", () => { page = 1; marginDetails.open = true; sync(); }, true);
     label.append(text, input, document.createTextNode("mm")); target.append(label);
   }
-  const breaks = group(pages[2], "여러 쪽 지원");
-  if (!blockScope && pagination) {
-    const setting = document.createElement("dl");
-    const value = (label: string, name: string, text: string) => {
-      const term = document.createElement("dt"), data = document.createElement("dd");
-      term.textContent = label; data.dataset.tablePagination = name; data.textContent = text;
-      setting.append(term, data);
-    };
-    value("글자처럼 취급", "inline", pagination ? (pagination.treatAsChar ? "켜짐" : "꺼짐") : "확인할 수 없음");
-    value("쪽 경계에서", "mode", pagination ? (["나누지 않음", "셀 단위로 나눔", "행 단위로 나눔"] as const)[pagination.pageBreak] : "확인할 수 없음");
+  const breaks = group(layout, "표 배치와 쪽 나누기", "cell-placement-controls");
+  const inline = document.createElement("input");
+  const pageBreak = document.createElement("select");
+  if (!borderOnly && pagination) {
+    const placement = document.createElement("label");
+    inline.type = "checkbox";
+    inline.checked = pagination.treatAsChar;
+    inline.dataset.tablePagination = "inline";
+    inline.disabled = nestedOwner;
+    placement.append(inline, document.createTextNode("글자처럼 취급"));
+    const boundary = document.createElement("label");
+    pageBreak.dataset.tablePagination = "mode";
+    pageBreak.setAttribute("aria-label", "쪽 경계에서");
+    for (const [value, text] of ["나누지 않음", "셀 단위로 나눔", "행 단위로 나눔"].entries())
+      pageBreak.add(new Option(text, String(value)));
+    pageBreak.value = String(pagination.pageBreak);
+    boundary.append(document.createTextNode("쪽 경계에서"), pageBreak);
     const detail = document.createElement("p");
-    detail.textContent = pagination?.treatAsChar
-      ? "글자처럼 취급하는 표에는 쪽 나누기 설정을 적용하지 않습니다."
-      : nestedOwner ? "이 표의 쪽 나누기 값을 확인할 수 없습니다."
-      : "표 메뉴의 ‘표 쪽 나누기’에서 변경할 수 있습니다.";
-    breaks.append(setting, detail);
+    const syncPlacement = () => {
+      pageBreak.disabled = nestedOwner || inline.checked;
+      detail.textContent = nestedOwner ? "중첩 표의 배치를 조회할 수 있습니다."
+        : inline.checked ? "표를 글자처럼 배치할 때는 쪽 나누기를 설정할 수 없습니다." : "";
+      detail.hidden = !detail.textContent;
+    };
+    inline.onchange = syncPlacement;
+    syncPlacement();
+    breaks.append(placement, boundary, detail);
+    detail.className = "cell-placement-note";
   }
-  const margins = group(pages[3], "안 여백 지정", "cell-margins"); move("applyInnerMargin", margins, 3, "안 여백 지정");
+  const marginDetails = document.createElement("details");
+  marginDetails.className = "cell-margin-details";
+  const marginSummary = document.createElement("summary");
+  marginSummary.textContent = "안쪽 여백";
+  marginDetails.append(marginSummary);
+  const margins = group(marginDetails, "", "cell-margins");
+  margins.querySelector("legend")!.remove();
+  move("applyInnerMargin", margins, 1, "안 여백 지정");
   const apply = controls.get("applyInnerMargin") as HTMLSelectElement;
   rows.get("applyInnerMargin")!.dataset.cellBacking = "true";
   const applyLabel = document.createElement("label"), applyProxy = document.createElement("input"); applyProxy.type = "checkbox"; applyProxy.dataset.cellInnerMargin = "true";
   applyProxy.onchange = () => { apply.value = String(applyProxy.checked); apply.dispatchEvent(new Event("change", { bubbles: true })); };
   applyLabel.className = "cell-inner-toggle"; applyLabel.append(applyProxy, document.createTextNode("안 여백 지정")); margins.append(applyLabel);
   for (const [side, label] of [["Left", "왼쪽"], ["Top", "위쪽"], ["Right", "오른쪽"], ["Bottom", "아래쪽"]]) marginProxy("padding" + side, margins, label);
-  const properties = group(pages[3], "속성", "cell-properties");
-  move("verticalAlign", properties, 3); rows.get("verticalAlign")!.dataset.cellBacking = "true";
+  const properties = group(layout, "셀 속성", "cell-properties");
+  layout.append(marginDetails);
+  move("verticalAlign", properties, 1); rows.get("verticalAlign")!.dataset.cellBacking = "true";
   const align = controls.get("verticalAlign") as HTMLSelectElement, aligns = document.createElement("div"); aligns.className = "cell-aligns";
   const alignTitle = document.createElement("span"); alignTitle.textContent = "세로 정렬"; aligns.append(alignTitle);
   const alignButtons: HTMLButtonElement[] = [];
@@ -129,15 +150,25 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     trigger.disabled = backing.disabled; trigger.title = backing.disabled ? backing.title : label;
     parent.append(palette.row); palettes.set(name, palette);
   }
-  const border = group(borderPages[0], "테두리", "cell-border-controls");
+  const border = group(panels[0], "테두리", "cell-border-controls");
+  const editor = document.createElement("div");
+  editor.className = "cell-border-editor";
+  const lineSamples: Record<string, string> = {"1":"━━━━━", "2":"━ ━ ━", "3":"·······"};
+  const borderInitial = new Map<string, string>();
+  for (const [name, control] of controls) {
+    if (name === "background" || name.startsWith("border")) borderInitial.set(name, control.value);
+    if (name.endsWith(".type") && control instanceof HTMLSelectElement)
+      for (const option of control.options)
+        if (lineSamples[option.value]) option.text += "  " + lineSamples[option.value];
+  }
   const edges = document.createElement("div"); edges.className = "cell-edge-picker"; const edgeButtons: HTMLButtonElement[] = [];
   for (const [side, label] of [["Left", "왼쪽"], ["Right", "오른쪽"], ["Top", "위쪽"], ["Bottom", "아래쪽"]]) {
     const b = document.createElement("button"); b.type = "button"; b.dataset.cellEdge = side; b.textContent = label;
     b.onclick = () => { edge = side; sync(); }; edges.append(b); edgeButtons.push(b);
-    for (const [key, text] of [["type", "선 모양"], ["width", "굵기"]]) move(`border${side}.${key}`, border, 4, text);
-    colorProxy(`border${side}.color`, border, '색', `${label} 테두리 색`, 4);
+    for (const [key, text] of [["type", "선 모양"], ["width", "굵기"]]) move(`border${side}.${key}`, editor, 0, text);
+    colorProxy(`border${side}.color`, editor, '색', `${label} 테두리 색`, 0);
   }
-  const allBorders = blockScope ? document.createElement("div") : undefined;
+  const allBorders = outerAvailable ? document.createElement("div") : undefined;
   const allSelectors = new Map<string, HTMLSelectElement>();
   const sideFields = (key: string) => sides.map(side => controls.get(`border${side}.${key}`)!);
   const commonValue = (key: string) => {
@@ -159,6 +190,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     for (const [key, caption] of [["type", "선 모양"], ["width", "굵기"]]) {
       const row = document.createElement("label"), label = document.createElement("span"), select = document.createElement("select");
       label.textContent = caption; select.dataset.cellOuter = key;
+      select.setAttribute("aria-label", caption);
       const mixed = new Option("혼합 / 유지", ""); mixed.disabled = true;
       select.add(mixed);
       for (const option of (sideFields(key)[0] as HTMLSelectElement).options)
@@ -166,7 +198,7 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
       select.onchange = () => setOuterDraft(key, select.value);
       row.append(label, select); allBorders.append(row); allSelectors.set(key, select);
     }
-    border.append(allBorders);
+    editor.append(allBorders);
   }
   const allPalette = allBorders && objectLinePalette(commonValue("color"), lifetime.signal, {
     id: "cell-color-outer-popup", label: "바깥 전체 테두리 색", caption: "색", boundary: root,
@@ -174,59 +206,83 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
   });
   if (allPalette && allBorders) {
     allPalette.row.classList.add("cell-color-palette");
+    const trigger = allPalette.row.querySelector<HTMLButtonElement>("[data-object-line-color]")!;
+    delete trigger.dataset.objectLineColor;
+    trigger.dataset.cellColor = "outer";
     allBorders.append(allPalette.row);
   }
-  border.append(edges);
-  const sample = document.createElement("div"); sample.className = "cell-border-sample"; sample.setAttribute("aria-label", "셀 테두리·단색 배치 예시 · 실제 문서 미리보기 아님"); border.append(sample);
-  const background = group(borderPages[1], "채우기"); colorProxy("background", background, "면 색", "셀 배경 면 색", 5);
-  const switcher = document.createElement("button"); switcher.type = "button"; switcher.className = "cell-dialog-switch";
-  switcher.onclick = () => { mode = !mode; sync(); tabs.querySelector<HTMLElement>('[aria-selected="true"]')?.focus(); };
-  switcher.hidden = blockScope;
+  const sample = document.createElement("figure");
+  sample.className = "cell-border-sample";
+  const caption = document.createElement("figcaption");
+  caption.textContent = "적용 미리보기";
+  sample.append(caption);
+  const renderPreview = mountCellBorderPreview(sample, preview);
+  border.append(edges, editor, sample);
+  const background = group(panels[0], "배경");
+  colorProxy("background", background, "배경색", "셀 배경 면 색", 0);
   const note = document.createElement("p"); note.className = "cell-scope-note"; note.textContent = "선택한 셀에 바꾼 항목만 적용합니다.";
-  note.hidden = !blockScope;
-  if(blockScope)note.textContent='선택한 범위의 바깥선과 단색 배경을 바꿉니다. 안쪽 선은 유지됩니다.';
-  for(const p of [...pages,...borderPages])for(const f of p.querySelectorAll<HTMLFieldSetElement>('fieldset'))
+  note.hidden = !blockScope && !inspectOnly;
+  if (inspectOnly) note.textContent = "중첩 표에서 선택한 셀의 속성을 보고 있습니다.";
+  if(blockScope)note.textContent='선택 범위의 안쪽 선은 유지됩니다. 이웃 셀과 맞닿은 선은 양쪽에서 함께 바뀝니다.';
+  for(const p of panels)for(const f of p.querySelectorAll<HTMLFieldSetElement>('fieldset'))
     if(!f.querySelector('input,select,button,output,[data-table-pagination]'))f.hidden=true;
-  root.replaceChildren(nav, ...pages, ...borderPages, switcher);
+  root.replaceChildren(nav, ...panels);
   // Keep admission/preservation guidance visible beside the action buttons,
   // without adding another footer row to the captured native window height.
   dialog.querySelector("form")!.append(note);
   const close = document.createElement("button"); close.type = "button"; close.className = "cell-close"; close.setAttribute("aria-label", "표/셀 대화상자 닫기"); close.textContent = "×"; close.onclick = () => dialog.querySelector<HTMLButtonElement>("#cancel")!.click(); root.before(close);
+  const tabButtons = panels.length === 1 ? [] : ["테두리·배경", "표·셀 배치"].map((label, index) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.textContent = label;
+    tab.setAttribute("role", "tab");
+    tab.id = index === 0 ? "cell-border-tab-0" : "cell-properties-tab-1";
+    tab.onclick = () => { page = index; sync(); };
+    tab.onkeydown = event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) ||
+          event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+      event.preventDefault();
+      const next = tabButtons[event.key === "Home" ? 0 : event.key === "End" ? 1 : 1 - index];
+      next.click();
+      next.focus();
+    };
+    panels[index].id = tab.id + "-panel";
+    tab.setAttribute("aria-controls", panels[index].id);
+    panels[index].setAttribute("aria-labelledby", tab.id);
+    tabs.append(tab);
+    return tab;
+  });
+  nav.hidden = !tabButtons.length;
+  if (!tabButtons.length) panels[0].removeAttribute("role");
+  dialog.querySelector("#format-title")!.textContent = borderOnly
+    ? blockScope ? "셀 테두리/배경 · 하나의 셀처럼" : "셀 테두리/배경"
+    : "표/셀 속성";
   function sync() {
-    dialog.dataset.cellPage = mode ? "border" : "properties";
-    dialog.dataset.cellScope=blockScope?'block':'each';
-    dialog.querySelector("#format-title")!.textContent = mode ? (blockScope?'셀 테두리/배경 · 하나의 셀처럼':'셀 테두리/배경') : "표/셀 속성";
-    const indices = mode ? [0, 1] : blockScope || !pagination ? [3] : [2, 3];
-    const labels = mode ? ["테두리", "배경"] : blockScope || !pagination ? ["셀"] : ["표", "셀"];
-    if (tabs.dataset.mode !== String(mode)) {
-      tabs.replaceChildren(); tabs.dataset.mode = String(mode);
-      labels.forEach((text, ordinal) => {
-        const i = indices[ordinal];
-        const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.setAttribute("role", "tab"); b.id = `cell-${mode ? "border" : "properties"}-tab-${i}`;
-        b.onclick = () => { if (mode) borderPage = i; else page = i; sync(); };
-        b.onkeydown = e => {
-          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return;
-          e.preventDefault(); const next = e.key === "Home" ? 0 : e.key === "End" ? labels.length - 1 : (ordinal + (e.key === "ArrowLeft" ? -1 : 1) + labels.length) % labels.length;
-          (tabs.children[next] as HTMLButtonElement).click(); (tabs.children[next] as HTMLElement).focus();
-        }; tabs.append(b);
-      });
+    dialog.dataset.cellPage = borderOnly ? "border" : "properties";
+    dialog.dataset.cellScope = blockScope ? "block" : "each";
+    tabButtons.forEach((tab, index) => {
+      const active = index === page;
+      tab.setAttribute("aria-selected", String(active));
+      (tab as HTMLElement).tabIndex = active ? 0 : -1;
+    });
+    panels.forEach((panel, i) => panel.hidden = page !== i);
+    for (const [name, row] of rows) {
+      const side = /^border(Left|Right|Top|Bottom)\./.exec(name)?.[1];
+      row.hidden = pageOf.get(name) !== page || !!side && side !== edge;
     }
-    [...tabs.children].forEach((b, ordinal) => { const i=indices[ordinal], active = i === (mode ? borderPage : page), p = (mode ? borderPages : pages)[i]; b.setAttribute("aria-selected", String(active)); (b as HTMLElement).tabIndex = active ? 0 : -1; p.id = b.id + "-panel"; b.setAttribute("aria-controls", p.id); p.setAttribute("aria-labelledby", b.id); });
-    pages.forEach((p, i) => p.hidden = mode || page !== i); borderPages.forEach((p, i) => p.hidden = !mode || borderPage !== i);
-    for (const [name, row] of rows) { const side = /^border(Left|Right|Top|Bottom)\./.exec(name)?.[1]; row.hidden = pageOf.get(name) !== (mode ? borderPage + 4 : page) || !!side && side !== edge; }
     for (const [name, palette] of palettes) {
       palette.row.hidden = rows.get(name)!.hidden; palette.setValue(controls.get(name)!.value);
       if (palette.row.hidden) palette.close(false);
     }
     if (allBorders && allPalette) {
-      allBorders.hidden = !mode || borderPage !== 0 || edge !== "All";
+      allBorders.hidden = page !== 0 || edge !== "All";
       for (const [key, select] of allSelectors) {
         const value = commonValue(key);
         select.value = [...select.options].some(option => option.value === value) ? value : "";
         select.disabled = sideFields(key).some(field => field.disabled);
       }
       allPalette.setValue(commonValue("color"));
-      allPalette.row.querySelector<HTMLButtonElement>("[data-object-line-color]")!.disabled =
+      allPalette.row.querySelector<HTMLButtonElement>('[data-cell-color="outer"]')!.disabled =
         sideFields("color").some(field => field.disabled);
       if (allBorders.hidden) allPalette.close(false);
     }
@@ -240,20 +296,28 @@ export function mountHancomCellDialog(root: HTMLElement, borderFirst = false, ne
     for (const b of alignButtons) { b.disabled = align.disabled; b.title = align.title || b.getAttribute("aria-label")!;b.dataset.valueState=align.dataset.valueState;
       if(align.value===""&&align.dataset.valueState==="unavailable")b.removeAttribute("aria-pressed");else b.setAttribute("aria-pressed", align.value === "" ? "mixed" : String(b.dataset.cellAlign === align.value)); }
     for (const b of edgeButtons) b.setAttribute("aria-pressed", String(b.dataset.cellEdge === edge));
-    for (const side of ["Left", "Right", "Top", "Bottom"]) {
-      const type = controls.get(`border${side}.type`)!.value, color = controls.get(`border${side}.color`)!.value;
-      const widths = [.1, .12, .15, .2, .25, .3, .4, .5, .6, .7, 1, 1.5, 2, 3, 4, 5];
-      const width = controls.get(`border${side}.width`)!.value;
-      const lineStyle = borderLineStyle(type)?.[2] ?? "solid";
-      const paint = /^#[\da-f]{6}$/i.test(color) ? color : "#aaa";
-      const thickness = width === "" ? .1 : widths[Number(width)];
-      sample.style.setProperty(`border-${side.toLowerCase()}`, lineStyle === "none" ? "none" : `${thickness}mm ${lineStyle} ${paint}`);
+    if (page === 0) {
+      const delta: Props = {};
+      for (const [name, initial] of borderInitial) {
+        const control = controls.get(name)!;
+        if (!control.disabled && control.value && control.value !== initial)
+          delta[name] = /\.(type|width)$/.test(name) ? Number(control.value) : control.value;
+      }
+      renderPreview(delta);
     }
-    const bg = controls.get("background")!.value; sample.style.background = /^#[\da-f]{6}$/i.test(bg) ? bg : "white";
-    switcher.textContent = mode ? "표/셀 속성…" : "셀 테두리/배경…";
   }
   root.addEventListener("change", sync, { signal: lifetime.signal });
-  root.addEventListener("invalid", event => { const name = (event.target as HTMLInputElement).name, at = pageOf.get(name); if (at !== undefined) { mode = at > 3; if (mode) borderPage = at - 4; else page = at; const side = /^border(Left|Right|Top|Bottom)\./.exec(name)?.[1]; if (side) edge = side; sync(); } }, { capture: true, signal: lifetime.signal });
+  root.addEventListener("invalid", event => { const name = (event.target as HTMLInputElement).name, at = pageOf.get(name); if (at !== undefined) { page = at; if (name.startsWith("padding")) marginDetails.open = true; const side = /^border(Left|Right|Top|Bottom)\./.exec(name)?.[1]; if (side) edge = side; sync(); } }, { capture: true, signal: lifetime.signal });
   dialog.addEventListener("keydown", e => { if (e.isComposing || e.keyCode === 229 || e.getModifierState("AltGraph") || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return; if (e.key.toLowerCase() === "d") { e.preventDefault(); dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); } }, { signal: lifetime.signal });
   sync();
+  return {
+    readPlacement() {
+      if (borderOnly || nestedOwner || !pagination) return;
+      const treatAsChar = inline.checked;
+      const next = Number(pageBreak.value);
+      if (next !== 0 && next !== 1 && next !== 2) throw Error("표의 쪽 나누기 방식을 선택하세요.");
+      if (treatAsChar !== pagination.treatAsChar || !treatAsChar && next !== pagination.pageBreak)
+        return {treatAsChar, pageBreak: next};
+    },
+  };
 }

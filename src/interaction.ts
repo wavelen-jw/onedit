@@ -30,7 +30,7 @@ import {prepareUngroup} from './object-ungroup.js';
 import {prepareEqualCells} from './cell-equal.js';
 import {prepareParagraphMove} from './paragraph-move.js';
 import { cellBorderPlan, type CellBorderDraft } from "./cell-border-plan.js";
-import { cellBlockPlan } from './cell-block-scope.js';
+import { prepareCellBlockEdit } from "./cell-block-edit.js";
 import { wordPosition } from './word-navigation.js';
 import { paragraphPosition } from './paragraph-navigation.js';
 import { f3WordRange } from './f3-word-range.js';
@@ -931,11 +931,7 @@ export class Interaction {
     }
     return targets;
   }
-  private formatPlan(kind: FormatKind, props: Props, s: Selection, borders?: CellBorderDraft, cellScope?: 'block') {
-    if(cellScope && (kind!=='cell'||s.kind!=='cells'||s.focus.kind!=='cell'||nested(s.focus)||borders))
-      throw Error('하나의 셀 범위의 일반 셀 블록을 다시 선택하세요. 원본은 유지됩니다.');
-    const blockPlan=cellScope && s.focus.kind==='cell'
-      ? cellBlockPlan(this.adapter.cells(s.focus),this.formatTargets(kind,s).map(t=>(t.p as Extract<Position,{kind:'cell'}>).cell),props) : undefined;
+  private formatPlan(kind: FormatKind, props: Props, s: Selection, borders?: CellBorderDraft) {
     const byCell = borders && kind === "cell" && s.focus.kind === "cell"
       ? cellBorderPlan(this.adapter.cells(s.focus), this.formatTargets(kind,s).map(t => (t.p as Extract<Position,{kind:"cell"}>).cell), borders)
       : undefined;
@@ -949,7 +945,6 @@ export class Interaction {
     return targets
       .map((t) => {
         const requested = host ? (t.p === host ? {alignment} : remaining)
-          : blockPlan && t.p.kind === "cell" ? blockPlan.get(t.p.cell) ?? {}
           : byCell && t.p.kind === "cell" ? {...props,...byCell.get(t.p.cell)} : props;
         const samples = this.formatSamples(kind, t);
         const delta = Object.fromEntries(
@@ -3285,7 +3280,22 @@ export class Interaction {
         if (JSON.stringify(expected) !== JSON.stringify(current))
           throw Error("대화상자 대상 문단 범위가 변경되었습니다.");
       }
-      const plan = this.formatPlan(kind, command.props, s, command.type === "cell" ? command.borders : undefined, command.type === 'cell' ? command.cellScope : undefined);
+      if (command.type === "cell" && command.cellScope === "block") {
+        const p = s.focus;
+        if (s.kind !== "cells" || p.kind !== "cell" || nested(p) || command.borders)
+          throw Error("일반 셀 범위를 다시 선택하세요.");
+        const apply = prepareCellBlockEdit(a, p, a.cells(p), this.cells(s).map(cell => cell.cellIdx), command.props);
+        if (apply) {
+          const reference = a.captureSelection(s);
+          this.selection = this.history.transact(kind, s, () => {
+            apply();
+            return a.resolveSelection(reference);
+          });
+          this.preferredX = undefined;
+        }
+        return true;
+      }
+      const plan = this.formatPlan(kind, command.props, s, command.type === "cell" ? command.borders : undefined);
       if (!plan.length) return true;
       if (kind === "paragraph" && s.kind === "table") {
         for (const target of plan)
@@ -3299,19 +3309,11 @@ export class Interaction {
           t.p.kind === "cell" ? t.p.cell : -1,
         ),
       );
-      const outside =
-        kind === "cell" && s.focus.kind === "cell"
-          ? this.adapter
-              .cells(s.focus)
-              .filter((c) => !selected.has(c.cellIdx))
-              .map((c) => ({
-                p: { ...s.focus, cell: c.cellIdx } as Position,
-                props: this.adapter.cellProps({
-                  ...s.focus,
-                  cell: c.cellIdx,
-                } as Position),
-              }))
-          : [];
+      const grid = kind === "cell" && s.focus.kind === "cell" ? a.cells(s.focus) : [];
+      const outside = grid.filter(c => !selected.has(c.cellIdx)).map(c => {
+        const p = { ...s.focus, cell: c.cellIdx } as Position;
+        return { p, props: a.cellProps(p) };
+      });
       // Hancom's uninterrupted character Border/Fill trace keeps the forward
       // single-body-paragraph block on apply/Undo, then restores its start
       // caret on Redo. Scope this to an actual Border/Fill delta; ordinary
@@ -3339,7 +3341,7 @@ export class Interaction {
         for (const t of outside)
           if (JSON.stringify(a.cellProps(t.p)) !== JSON.stringify(t.props))
             throw Error(
-              "Core 공유 테두리가 비선택 셀을 변경합니다. 이웃 셀도 선택하거나 바깥쪽 테두리를 사용하세요.",
+              "셀별 테두리 변경이 선택 밖의 공유선을 바꾸므로 적용을 취소했습니다. 범위의 바깥선을 바꾸려면 ‘하나의 셀처럼’을 사용하세요.",
             );
         return a.resolveSelection(selectionReference);
       }, undefined, characterBorderRedo);

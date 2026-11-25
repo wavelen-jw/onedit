@@ -134,6 +134,7 @@ const files = new FileLifecycle(adapter, editor, {
   prompt: (message, name) => prompt(message, name),
   pickSaveTarget: nativeSavePicker(window),
   download: downloadHwpx,
+  copyDownloaded: showCopyNotice,
   loadOpenFonts,
   prepareDisplay: (candidate, localOpen) => {
     if (localOpen) {
@@ -184,6 +185,18 @@ bindEditorDialogFormSubmit(document.getElementById("format-form") as HTMLFormEle
 let saveNoticeToken: string | undefined;
 let saveNoticeTimer: number | undefined;
 let saveNoticeExpired = false;
+let copyNoticeDoc: string | undefined;
+let copyNoticeTimer: number | undefined;
+function showCopyNotice() {
+  copyNoticeDoc = adapter.documentId;
+  window.clearTimeout(copyNoticeTimer);
+  copyNoticeTimer = window.setTimeout(() => {
+    copyNoticeDoc = undefined;
+    copyNoticeTimer = undefined;
+    projectSaveNotice();
+  }, 3500);
+  projectSaveNotice();
+}
 function saveSuccessToken() {
   const message = files.notice;
   if (!message.endsWith(" 저장 완료") && !message.endsWith(" 다운로드 파일 저장 확인됨")) return;
@@ -195,6 +208,13 @@ function saveSuccessToken() {
 }
 function projectSaveNotice() {
   const panel = $("file-notice");
+  const copyFeedback = copyNoticeDoc === adapter.documentId;
+  panel.toggleAttribute("data-copy-notice", copyFeedback);
+  if (copyFeedback) {
+    projectText("file-status", "HWPX 사본 다운로드를 시작했습니다.");
+    panel.hidden = false;
+    return;
+  }
   const token = saveSuccessToken();
   if (token !== saveNoticeToken) {
     if (saveNoticeTimer !== undefined) window.clearTimeout(saveNoticeTimer);
@@ -1243,6 +1263,7 @@ function paintSelection(owners?:OwnerProjection, changedCellClose?:()=>void, pro
   $("download-confirm").hidden = !files.pending;
   const saveBlocked = files.saveBlockReason !== null;
   $("save").toggleAttribute("disabled", saveBlocked);
+  $("export-hwpx-copy").toggleAttribute("disabled", !files.ui.standalone || !!files.transitionBlockReason);
   $("save-as").toggleAttribute("disabled", saveBlocked || !files.ui.standalone);
   $("download-confirm").toggleAttribute("disabled", files.busy || !files.ui.standalone);
   if(!activeWorkset(document))for (const id of ["new", "open", "close-document"])
@@ -1498,6 +1519,11 @@ $("save").onclick = (e) => {
 };
 $("save-as").onclick = (e) => {
   if (e.detail < 2) void save(true);
+};
+$("export-hwpx-copy").onclick = async () => {
+  $("error").hidden = true;
+  await files.exportCopy();
+  input.focus({preventScroll: true});
 };
 $("download-confirm").onclick = () => {
   const pending = files.pending;

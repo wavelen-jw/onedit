@@ -1063,13 +1063,14 @@ export class RhwpAdapter {
       throw Error("Core API 미지원: 중첩 셀 속성 변경");
     return this.call("getCellOwnProperties", p.sec, p.para, p.control, p.cell);
   }
-  cellFormat(p: Position, props: Props) {
+  cellFormat(p: Position, props: Props, preserveNeighborBorders = false) {
     if (p.kind !== "cell" || nested(p))
       throw Error("Core API 미지원: 중첩 셀 속성 변경");
     const current = this.cellProps(p);
     if (hasCellLayout(props)) validateCellLayout(current, props);
     // Clone the existing border-fill in Core; don't reconstruct unrelated fill/diagonal fields.
     const patch: any = { borderFillId: current.borderFillId };
+    if (preserveNeighborBorders) patch.preserveNeighborBorders = true;
     for (const [key, value] of Object.entries(props)) {
       if (key === "background") {
         patch.fillType = value === "none" ? "none" : "solid";

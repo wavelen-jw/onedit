@@ -19,6 +19,7 @@ export function submitFormatDraft(
   cellBlock = false,
   execute: (command:Command,target:ReturnType<Interaction["capture"]>)=>void = (command,target)=>editor.execute(command,target),
   localCellCapture = false,
+  tablePlacement?: Extract<Command, {type: "table-object"}>,
 ) {
   if (!guard.ready() || submittingFormats.has(guard)) return false;
   const target = editTarget(editor, captured, {
@@ -32,9 +33,10 @@ export function submitFormatDraft(
     const list = readList?.();
     const adjustment = readAdjustment?.();
     if(adjustment && (list || Object.keys(props).length)) throw Error("문단 증감과 다른 서식은 따로 적용하세요. 초안은 유지됩니다.");
-    if (adjustment || list || Object.keys(props).length) {
+    if (adjustment || list || Object.keys(props).length || tablePlacement) {
       const command: Command = adjustment ? paragraphAdjustmentCommand(adjustment)
         : list ? { type: "paragraph-list", list, props }
+        : tablePlacement && !Object.keys(props).length ? tablePlacement
         : kind === "cell" && cellBlock ? { type: kind, props, cellScope: "block" }
         : { type: kind, props };
       target.apply(capture => execute(command, capture));

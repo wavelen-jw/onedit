@@ -2,7 +2,7 @@
 
 브라우저에서 **HWP·HWPX 문서를 열고 편집한 결과를 HWPX로 저장**할 수 있는 한글 문서 편집기입니다. 독립 편집기와 다른 앱에 편집 화면을 연결하는 JavaScript·TypeScript Host SDK를 제공합니다.
 
-[온라인 편집기](https://edit.govpress.cloud/) · [v1.2.1 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.2.1) · [패치노트](CHANGELOG.md) · [Host SDK](sdk/QUICKSTART.md)
+[온라인 편집기](https://edit.govpress.cloud/) · [v1.2.2 다운로드](https://github.com/wavelen-jw/onedit/releases/tag/v1.2.2) · [패치노트](CHANGELOG.md) · [Host SDK](sdk/QUICKSTART.md)
 
 ## 주요 기능
 
@@ -15,7 +15,7 @@
 
 ## 로컬 실행
 
-[v1.2.1](https://github.com/wavelen-jw/onedit/releases/tag/v1.2.1)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
+[v1.2.2](https://github.com/wavelen-jw/onedit/releases/tag/v1.2.2)에서 `onedit-browser-runtime.tar.gz`와 `SHA256SUMS`를 내려받으세요. Node.js 22 이상이 필요합니다.
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
@@ -29,10 +29,10 @@ node start-ai-editor.mjs 4173
 
 ## 다른 앱에 연결
 
-[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.2.1/onedit-ai-host-sdk-1.2.1.tgz)를 설치합니다.
+[같은 릴리스의 Host SDK](https://github.com/wavelen-jw/onedit/releases/download/v1.2.2/onedit-ai-host-sdk-1.2.2.tgz)를 설치합니다.
 
 ```bash
-npm install --ignore-scripts ./onedit-ai-host-sdk-1.2.1.tgz
+npm install --ignore-scripts ./onedit-ai-host-sdk-1.2.2.tgz
 ```
 
 승인된 파일 열기를 사용하는 SDK 예제는 같은 릴리스의 `onedit-sdk-editor-runtime.tar.gz`로 실행합니다. 독립 편집에는 `onedit-browser-runtime.tar.gz`를 사용합니다.

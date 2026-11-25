@@ -334,9 +334,11 @@ button[aria-pressed="mixed"] {
 #working-copy-list time { display: block; font-size: .85em; }
 #working-copy-list button { flex: none; }
 
-#file-notice[data-save-success] {
+#file-notice:is([data-save-success], [data-copy-notice]) {
   pointer-events: none;
 }
+
+#file-notice[data-copy-notice] button { display: none; }
 
 /* RHW-32 added formatting menu; native details and existing dialog only. */
 #format-additions { flex-shrink: 0; }

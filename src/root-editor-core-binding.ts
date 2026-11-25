@@ -1,5 +1,5 @@
 // Generated from development-runtime.json by scripts/core-runtime-selection.mjs.
-export const rootEditorCoreSha256: string = "203415b16f2e534e22a56b7f7c2e87c902b641b06337d92363c4cbe55d4c76fe";
+export const rootEditorCoreSha256: string = "7fd9812553d53a089397a05cdf23822104e190570da5db906ff1168afad4fdff";
 type CoreAdmission = "checked-external-open" | "editor-format-snapshot" | "editor-owner-bindings";
 const admissions: readonly CoreAdmission[] = [
   "checked-external-open",

@@ -53,6 +53,7 @@ type UI = {
   prepareDiscard?: () => () => void;
   prompt: (message: string, name: string) => string | null;
   pickSaveTarget?: (suggestedName: string) => Promise<NativeSaveTarget | null>;
+  copyDownloaded?: () => void;
   download: (bytes: Uint8Array, name: string, requestId: string) => void;
   prepareDisplay?: (candidate: RhwpAdapter, localOpen: boolean) => void;
   loadOpenFonts?: (candidate: RhwpAdapter) => Promise<void>;
@@ -524,6 +525,23 @@ export class FileLifecycle {
     const r = this.request;
     return this.ui.standalone && r?.documentId === this.adapter.documentId && r.status === "failed" &&
       r.failure !== undefined && r.failure !== "export";
+  }
+  exportCopy() {
+    if (!this.ui.standalone || this.continuation) return Promise.resolve(false);
+    return this.run(async () => {
+      const {doc, documentId, revision} = this.adapter;
+      const current = () => this.adapter.doc === doc && this.adapter.documentId === documentId &&
+        this.adapter.revision === revision;
+      let name: string;
+      try { name = hwpxName(this.filename); } catch { name = "새 문서.hwpx"; }
+      const original = this.restrictedOriginal;
+      const bytes = original?.documentId === documentId
+        ? original.bytes : (await exportDocumentHwpx(this.adapter, current)).bytes;
+      if (!current()) throw Error("문서가 바뀌었습니다. 사본을 다시 내려받으세요.");
+      this.ui.download(bytes, name, `${documentId}:copy:${++this.sequence}`);
+      this.ui.copyDownloaded?.();
+      return true;
+    });
   }
   downloadCopy() {
     if (!this.ui.standalone || this.continuation) return Promise.resolve(false);
