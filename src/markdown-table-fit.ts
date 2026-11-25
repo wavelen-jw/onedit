@@ -8,7 +8,7 @@ import {copy,type Position} from './model.js';
 export function fitMarkdownTable(editor:Interaction,p:Extract<Position,{kind:'cell'}>){
   const a=editor.adapter,skip=(reason:string)=>({admitted:false,reason}),all=a.cells(p);
   if(p.ancestors?.length||!all.length||all.length>400||all.some(c=>c.colSpan!==1||c.rowSpan!==1||c.pageIndex!==all[0].pageIndex))return skip('complex-or-split-table');
-  const dims=a.call('getTableDimensions',p.sec,p.para,p.control),cols=dims.colCount,rows=dims.rowCount;
+  const dims=a.readLayout('getTableDimensions',p.sec,p.para,p.control),cols=dims.colCount,rows=dims.rowCount;
   if(cols<2||cols>12||rows*cols!==all.length)return skip('not-ordinary-grid');
   const tableProps=a.call('getTableProperties',p.sec,p.para,p.control),total=tableProps.tableWidth;
   const widths=Array.from({length:cols},(_,col)=>a.cellProps({...p,cell:all.find(c=>c.row===0&&c.col===col)!.cellIdx}).width as number);

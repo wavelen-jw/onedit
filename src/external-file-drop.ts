@@ -19,7 +19,7 @@ export function mountExternalFileDrop(doc:Document,pages:HTMLElement,files:FileL
   };
   const bodyAt=(e:DragEvent):Body=>{
     const page=pageAt(e);if(!page||page.hasAttribute('data-render-pending'))throw Error('그림은 표시된 본문 글줄에 놓으세요.');
-    const index=Number(page.dataset.page),{x,y}=pagePoint(page,e.clientX,e.clientY),a=editor.adapter,info=a.call('getPageInfo',index);
+    const index=Number(page.dataset.page),{x,y}=pagePoint(page,e.clientX,e.clientY),a=editor.adapter,info=a.readLayout('getPageInfo',index);
     if(x<info.bodyLeft||x>info.bodyRight||y<info.headerArea.y+info.headerArea.height||y>=info.footerArea.y)
       throw Error('그림은 쪽 여백이 아닌 본문 글줄에 놓으세요.');
     if((a.call('getPageControlLayout',index).controls??[]).some((c:any)=>x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h))

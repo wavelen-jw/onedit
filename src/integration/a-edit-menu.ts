@@ -223,7 +223,8 @@ export function mountEditMenu(
     }
   });
   const tools=mountEditTools(root.ownerDocument, buttons, () => editor.capture(), invoke, () => busy() || !!root.ownerDocument.querySelector("dialog[open]"));
-  if (context) bodyContext = mountBodyContext(root.ownerDocument, editor, busy, buttons, invoke, context.select, context.focus, feedback, context.formatInvoke);
+  if (context) bodyContext = mountBodyContext(root.ownerDocument, editor, busy, buttons,
+    () => editMenuState(editor, busy()), invoke, context.select, context.focus, feedback, context.formatInvoke);
   refresh();
   return Object.assign(refresh, {
     // No map is retained; menu opening and invoke keep the fresh path.

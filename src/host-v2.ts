@@ -1,6 +1,6 @@
 import { composeMarkdownHwpx } from "./markdown-compose.js";
 import { assertSafeHwpxEntryNames } from "./hwpx-open-boundary.js";
-import { exportCheckedDocumentHwpx, inspectHwpxPreservation, rememberHwpxPreservation } from "./adapter-save.js";
+import { exportDocumentHwpx } from "./adapter-save.js";
 import { RhwpAdapter } from "./adapter.js";
 import { siblingDocument } from "./core-runtime.js";
 import { type Position, type Selection, copy, paraIndex } from "./model.js";
@@ -559,11 +559,9 @@ export class ExternalHost {
           probe.call("getControls");
           probe.semantic();
           probe.rect({ kind: "body", sec: 0, para: 0, offset: 0 });
-          const metadata = await inspectHwpxPreservation(bytes);
           this.cleanLifecycle(p);
           requireHost(this.a.doc === original && equal(binding, p.binding),
             "REVISION_CONFLICT", "문서 또는 작업본이 달라졌습니다. 다시 여세요.");
-          rememberHwpxPreservation(probe.doc, metadata);
           transferred = true;
           state = this.host.adoptInspectedHwpx(probe.doc, binding);
         } finally {
@@ -582,7 +580,7 @@ export class ExternalHost {
         requireHost(p.approved === true, "APPROVAL_REQUIRED", "미리보기와 제한을 확인한 뒤 생성하세요.");
         if (method === "createMarkdownDocument") this.cleanLifecycle(p);
         let out;
-        try { out = composeMarkdownHwpx(this.a.doc, p); }
+        try { out = composeMarkdownHwpx(this.editor, p); }
         catch (error) {
           const e = error as Error & {code?: string; details?: unknown};
           throw new HostError(e.code ?? "MARKDOWN_REJECTED", e.message, e.details);
@@ -663,7 +661,7 @@ export class ExternalHost {
         );
         this.pendingExports++;
         try {
-          const out = await exportCheckedDocumentHwpx(this.a, () => {
+          const out = await exportDocumentHwpx(this.a, () => {
             this.current(p);
             checkBinding();
             return true;

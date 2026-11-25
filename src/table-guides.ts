@@ -83,7 +83,7 @@ export function paintTableGuides(editor:Interaction,pages:HTMLElement){
         // small root tables before asking Core to locate their page fragments.
         if(mode==="selected"&&!scoped&&!nested(owner)){
           try{
-            const {cellCount}=a.call("getTableDimensions",owner.sec,owner.para,owner.control);
+            const {cellCount}=a.readLayout("getTableDimensions",owner.sec,owner.para,owner.control);
             if(Number.isSafeInteger(cellCount)&&cellCount>0&&cellCount<=256){
               let cell=0;
               for(;cell<cellCount;cell++){

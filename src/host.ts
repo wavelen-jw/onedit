@@ -1,3 +1,6 @@
+import { exportDocumentHwpx } from "./adapter-save.js";
+import { replaceEditorDocument } from "./editor-document-replacement.js";
+import { siblingDocument } from "./core-runtime.js";
 import { assertPictureFreeTextEdit } from "./search-object-safety.js";
 import type { HwpDocument } from "../development/core/rhwp.js";
 import { RhwpAdapter } from "./adapter.js";
@@ -61,9 +64,14 @@ export class NextHostAdapter {
       case "getSemanticSnapshot":
         this.check(params);
         return a.semantic();
-      case "exportHwpx":
+      case "exportHwpx": {
         this.check(params);
-        return { ...a.exportChecked(), binding: this.binding };
+        const binding = this.binding;
+        return exportDocumentHwpx(a, () => {
+          this.check(params);
+          return this.binding === binding;
+        }).then(out => ({ ...out, binding }));
+      }
       case "markSaved":
         return this.markSaved(a, params);
       case "setEditScope":
@@ -154,28 +162,26 @@ export class NextHostAdapter {
         for (const key of ["documentId", "workingCopyId", "baseVersion"])
           if (typeof params.binding?.[key] !== "string" || !params.binding[key])
             throw Error("작업본 바인딩이 필요합니다.");
-        a.open(params.bytes);
-        return this.opened(params.binding);
+        a.completeLocalBodyFlow();
+        return this.adoptInspectedHwpx(siblingDocument(a.doc, params.bytes), params.binding);
   }
 
   /** Host v2 already inspected this exact detached document. This path consumes it. */
   adoptInspectedHwpx(candidate: HwpDocument, binding: NonNullable<NextHostAdapter["binding"]>) {
+    let next: ReturnType<RhwpAdapter["openedDocumentState"]>;
     try {
       if (this.adapter.revision !== this.adapter.savedRevision || this.adapter.transientEdit)
         throw Error("저장하지 않은 변경이 있어 문서 전환을 거부합니다.");
       this.adapter.completeLocalBodyFlow();
+      next = this.adapter.openedDocumentState(candidate);
     } catch (error) {
-      candidate.free();
+      if (candidate !== this.adapter.doc) candidate.free();
       throw error;
     }
-    this.adapter.adoptOpenedDocument(candidate);
-    return this.opened(binding);
-  }
-
-  private opened(binding: NonNullable<NextHostAdapter["binding"]>) {
-    this.editor.history.detachForDocumentReplacement();
-    this.editor.reset();
-    this.binding = { ...binding };
+    replaceEditorDocument(this.editor, next, {
+      initialize: () => { this.binding = { ...binding }; },
+      cleanupError: error => console.error("이전 문서 정리 실패", error),
+    });
     return this.state();
   }
 

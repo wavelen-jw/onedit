@@ -41,16 +41,13 @@ import {UnsupportedTableOperation,recordTableRefusal,tableOperationNotice} from 
 import {authorizeLocalResize,localResizeCommand} from './cell-local-resize.js';
 import { mountTextboxEditor } from "./textbox-edit-ui.js";
 import { clipboardPictureSize } from "./clipboard-image.js";
-import { pasteCompletion } from "./external-text-format.js";
-import { prepareHancomLinkedHwpx, restoreHancomNativeLink } from "./hancom-linked-hwpx.js";
-import { adoptPreparedHancomPaste, inspectPreparedHancomPaste } from "./hancom-paste-adoption.js";
-import { siblingDocument, wasCreatedBlank } from "./core-runtime.js";
-import { hancomFragmentRequested, readHancomQaHwpx } from "./hancom-native-qa.js";
-import { encodeHancomNativeRange } from "./clipboard.js";
+import { hasHancomClipboardMetadata, pasteCompletion } from "./external-text-format.js";
+import { adoptPreparedHancomPaste } from "./hancom-paste-adoption.js";
+import { clipboardMarkdownPlan, prepareClipboardPaste } from "./clipboard-paste.js";
+import { hancomFragmentRequested } from "./hancom-native-qa.js";
 import { hasClipboardMarker } from "./clipboard-envelope.js";
 import { mountPasteResult } from "./paste-result-ui.js";
 import { offerPlainPaste, PasteFormatUnavailable } from "./paste-format-fallback.js";
-import { clipboardMarkdown } from "./clipboard-markdown.js";
 import { invalidatePaintedGlyphs, selectionPaintBoxes } from "./selection-display.js";
 import { viewportPoint,pagePoint } from "./integration/a-view-menu.js";
 import { paintTableGuides } from "./table-guides.js";
@@ -63,6 +60,8 @@ import {
   clipboardSupport,
   mayRestoreClipboardFocus,
 } from "./clipboard-ui-state.js";
+import { editTarget } from "./edit-target.js";
+import { mountWorkingCopyRecovery } from "./working-copy-recovery.js";
 import { nativeSavePicker } from "./native-save-picker.js";
 import { FileLifecycle, downloadHwpx } from "./file-lifecycle.js";
 import { type FormatKind, type FormatState } from "./formatting.js";
@@ -74,7 +73,7 @@ import { mountCompositionInput } from "./composition-input.js";
 import { mountQaInputBoundary } from "./qa-input-boundary.js";
 import { mountKeyboardInput } from "./keyboard-input.js";
 import { mountNativeClipboardInput } from "./native-clipboard-input.js";
-import { readClipboard, readNativePaste, writeClipboard, type ClipboardRead, type NativePastePayload } from "./clipboard-transport.js";
+import { writeClipboard, type NativePastePayload } from "./clipboard-transport.js";
 import { selectedCutObject } from './object-clipboard.js';
 import { loadCoreRuntime,coreRuntimeSha256,coreRuntimeIdentity } from "./core-runtime.js";
 import type { LiveComposition } from "./live-composition.js";
@@ -211,7 +210,7 @@ function projectSaveNotice() {
   projectText("file-status", files.notice);
   panel.toggleAttribute("data-save-success", token !== undefined);
   // Persistent viewer restrictions are displayed outside this panel.
-  const viewerRestriction = !!adapter.viewerOnlyReason && !files.canDownloadTrackedOriginal &&
+  const viewerRestriction = !!adapter.viewerOnlyReason && !files.canDownloadOriginal &&
     files.notice.startsWith("읽기 전용 표시 · ");
   panel.hidden = !files.notice || viewerRestriction || saveNoticeExpired;
 }
@@ -442,7 +441,7 @@ function prepareBodySelectionSurfaces():boolean {
   const epoch=adapter.localBodyEnvironmentToken(true);
   if(epoch===undefined)return false;
   const changed=epoch!==owner.epoch;
-  const info=changed?Array.from({length:count},(_,page)=>adapter.call('getPageInfo',page)):undefined;
+  const info=changed?Array.from({length:count},(_,page)=>adapter.readLayout('getPageInfo',page)):undefined;
   const needed=new Set<number>(),current=editor.cursorRect().pageIndex;
   if(!Number.isSafeInteger(current)||current<0||current>=count)return false;
   needed.add(current);
@@ -462,7 +461,7 @@ function prepareBodySelectionSurfaces():boolean {
     for(const page of needed){
       const div=pages.children[page] as HTMLElement;
       if(changed||div.hasAttribute('data-render-pending'))
-        renderPage(page,info?.[page]??adapter.call('getPageInfo',page),div,owner.fonts,true);
+        renderPage(page,info?.[page]??adapter.readLayout('getPageInfo',page),div,owner.fonts,true);
     }
   });
   if(info)owner.dimensions=info.map(value=>({width:value.width,height:value.height}));
@@ -478,7 +477,7 @@ function prepareBodySelectionSurfaces():boolean {
 const paperBoxes = mountedPaperBoxes(pages);
 function readPaperSizes(count: number, allowMounted: boolean) {
   if (typeof adapter.doc.getPageSizeRuns !== "function") return;
-  const runs = adapter.call<number[][]>("getPageSizeRuns");
+  const runs = adapter.readLayout("getPageSizeRuns");
   const mounted = allowMounted ? paperBoxes.current(count, runs) : undefined;
   if (mounted) return {sizes: mounted, runs, mounted: true};
   const sizes = new Array<Pick<BodyPageInfo, "width" | "height">>(count);
@@ -558,7 +557,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
   const mounted = paperSizes?.mounted;
   const previousPages = reusePageSurfaces && !mounted ? Array.from(pages.children) as HTMLElement[] : [];
   const fullInfos = prioritize && !paperSizes
-    ? Array.from({length: pageCount}, (_, page) => viewAdapter.call<BodyPageInfo>("getPageInfo", page)) : undefined;
+    ? Array.from({length: pageCount}, (_, page) => viewAdapter.readLayout("getPageInfo", page)) : undefined;
   const infos = paperSizes?.sizes ?? fullInfos;
   let needed: Set<number> | undefined;
   let editedFocusPage: number | undefined;
@@ -662,7 +661,7 @@ function render(visibleComposition = false, visibleBodyEdit = false, visibleResi
     try {
       // Render the edited page directly. Compare only neighboring pages.
       const compare = receiptPages?.has(page) && page !== editedFocusPage;
-      const info = fullInfos?.[page] ?? viewAdapter.call<BodyPageInfo>("getPageInfo", page);
+      const info = fullInfos?.[page] ?? viewAdapter.readLayout("getPageInfo", page);
       renderPage(page, info, div, fontRevision, reusePageSurfaces, prioritize && visibleComposition && !!composition?.text, resize,
         compare ? receiptView : undefined);
     } catch (error) {
@@ -794,7 +793,7 @@ function finishResizePages() {
       if (!div) { deferredCompositionPages = false; return; }
       const page = Number(div.dataset.page);
       adapter.withUpdateReads(() => {
-        renderPage(page, adapter.call("getPageInfo", page), div, fonts, true);
+        renderPage(page, adapter.readLayout("getPageInfo", page), div, fonts, true);
       });
       // Multiple visible pieces of a selected table must all have fresh ink
       // before paint(), which otherwise correctly falls back to a full render.
@@ -823,7 +822,7 @@ function flushCompositionPages() {
       const fresh=visible.filter(p=>!p.hasAttribute('data-render-pending'));
       if(!fresh.length||fresh.some(p=>!activePageReady(p))){render();return;}
       adapter.withUpdateReads(()=>{for(const n of needed){const div=visible[n];
-        if(div?.hasAttribute('data-render-pending'))renderPage(n,adapter.call('getPageInfo',n),div,fontSupplyRevision(),true);}});
+        if(div?.hasAttribute('data-render-pending'))renderPage(n,adapter.readLayout('getPageInfo',n),div,fontSupplyRevision(),true);}});
       for(const div of visible)if(!needed.has(Number(div.dataset.page))&&!div.contains(document.activeElement)){
         hideWorksetPage(div);
       }
@@ -851,7 +850,7 @@ function flushCompositionPages() {
       adapter.withUpdateReads(() => {
         for (const div of needed) {
           const page = Number(div.dataset.page);
-          renderPage(page, adapter.call('getPageInfo',page), div, fontSupplyRevision(), true);
+          renderPage(page, adapter.readLayout('getPageInfo',page), div, fontSupplyRevision(), true);
         }
       });
       deferredCompositionPages = !!pages.querySelector('[data-render-pending]');
@@ -896,7 +895,7 @@ function finishCompositionPages() {
       // Page metadata, marker settings and label geometry share only this
       // synchronous page application. Next hidden page starts a fresh scope.
       adapter.withUpdateReads(() => {
-        renderPage(page, adapter.call("getPageInfo", page), div, fontSupplyRevision(), true);
+        renderPage(page, adapter.readLayout("getPageInfo", page), div, fontSupplyRevision(), true);
       });
       deferredCompositionPages = !!pages.querySelector("[data-render-pending]");
       if (pages.querySelector('[data-render-pending]:not([data-render-pending="font"])')) schedule();
@@ -965,7 +964,7 @@ function publishCellInsert(): boolean {
       for (const page of update.pages) {
         const node = pages.children[page] as HTMLElement | undefined;
         if (!node || node.hasAttribute("data-render-pending")) continue;
-        renderPage(page, adapter.call("getPageInfo", page), node, fontSupplyRevision(), true);
+        renderPage(page, adapter.readLayout("getPageInfo", page), node, fontSupplyRevision(), true);
         changed.push(pages.children[page] as HTMLElement);
       }
     });
@@ -1714,76 +1713,52 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
       if (kind === "paste" || kind === "paste-text") pasteResult.failed(support.reason!, false);
       return;
     }
-    const unchanged = () => {
-      if (!document.hasFocus())
-        throw Error("클립보드 작업 중 편집기 포커스가 변경되었습니다.");
-      const current = editor.capture();
-      if (
-        current.documentId !== captured.documentId ||
-        current.revision !== captured.revision ||
-        JSON.stringify(current.selection) !== JSON.stringify(captured.selection)
-      )
-        throw Error(
-          "클립보드 대기 중 문서 또는 선택이 변경되어 작업을 취소했습니다.",
-        );
-    };
+    const isPaste = kind === "paste" || kind === "paste-text";
+    const origin = editor.adapter, nativeDoc = origin.doc;
+    const generation = editor.currentSelectionGeneration, undo = editor.history.undoStack.length,
+      redo = editor.history.redoStack.length;
+    const pasteMessage = "붙여넣을 위치가 바뀌었습니다. 위치를 선택해 다시 붙여넣으세요.";
+    const target = editTarget(editor, captured, {
+      message: isPaste ? pasteMessage : "클립보드 대기 중 문서 또는 선택이 변경되어 작업을 취소했습니다.",
+      current: () => {
+        if (!document.hasFocus())
+          throw Error("클립보드 작업 중 편집기 포커스가 변경되었습니다.");
+        return !isPaste || (!composing && !files.busy && !origin.transientEdit &&
+          !hasOpenDialog(document) && editor.currentSelectionGeneration === generation &&
+          editor.history.undoStack.length === undo && editor.history.redoStack.length === redo);
+      },
+    });
     $("error").hidden = true;
     $("clipboard-status").textContent = "클립보드 처리 중";
-    if (kind === "paste" || kind === "paste-text") {
-      const origin = editor.adapter, nativeDoc = origin.doc,
-        generation = editor.currentSelectionGeneration, undo = editor.history.undoStack.length,
-        redo = editor.history.redoStack.length;
-      let plain = kind === "paste-text", data: ClipboardRead | undefined, refused: PasteFormatUnavailable | undefined;
+    if (isPaste) {
+      let plain = kind === "paste-text";
       const dest = captured.selection;
-      const blankTarget = dest.kind === "caret" && dest.focus.kind === "body" &&
-        dest.focus.sec === 0 && dest.focus.para === 0 && dest.focus.offset === 0 &&
-        undo === 0 && redo === 0 && captured.revision === 0 &&
-        wasCreatedBlank(nativeDoc) && nativeDoc.isEmptyDocument();
-      const nativeFragment = !plain && hancomFragmentRequested();
-      const qaNative = !plain && (blankTarget || nativeFragment) ? await readHancomQaHwpx(native) : undefined;
-      if (qaNative && nativeFragment &&
-          ((dest.kind !== "caret" && dest.kind !== "text" && dest.kind !== "cells") ||
-           (dest.kind === "text" && !sameContainer(dest.anchor, dest.focus))))
-        throw Error("한/글 조각은 같은 본문 구역 또는 같은 셀의 커서나 텍스트 범위에 붙여넣으세요.");
-      unchanged();
-      const fragment = qaNative && nativeFragment ? encodeHancomNativeRange(origin, qaNative.bytes) : undefined;
-      if (dest.kind === "cells" && editor.cells(dest).length > 1 && !fragment)
-        throw Error("확인된 한/글 셀 범위가 필요합니다.");
-      const qaLinked = !fragment && qaNative?.sourceFormat === "hwpx" && native
-        ? await restoreHancomNativeLink(qaNative.bytes, native.html, native.text) : undefined;
-      const qaBytes = fragment ? undefined : qaLinked?.bytes ?? qaNative?.bytes;
-      try {
-        data = (fragment || qaBytes) && native ? {html: native.html, text: native.text, structured: fragment} :
-          native ? await readNativePaste(native) : await readClipboard(plain);
-      }
-      catch (e) { if (!(e instanceof PasteFormatUnavailable)) throw e; refused = e; }
-      unchanged();
-      let markdown: ReturnType<typeof clipboardMarkdown>;
+      const source = await prepareClipboardPaste(editor, captured, plain, native, target.assertCurrent);
+      target.assertCurrent();
+      let { data, refused } = source;
+      let markdown: ReturnType<typeof clipboardMarkdownPlan>;
       if (data?.image) {
         const size = clipboardPictureSize(data.image);
-        editor.execute({type:"picture",change:{action:"insert",file:data.image,...size,placement:"inline",replaceSelection:true}},captured);
+        const image = data.image;
+        target.apply(capture => editor.execute({type:"picture",change:{action:"insert",file:image,...size,placement:"inline",replaceSelection:true}},capture));
       } else if (data) {
         try {
-          if (!plain && !data.structured && !hasClipboardMarker(data.html) && (data.markdown || !data.html))
-            markdown = clipboardMarkdown(data.text, data.markdown);
-          const wholeNative=!qaBytes && !plain && !data.structured && !data.mixedPicture &&
-            !markdown && blankTarget
-            ? await prepareHancomLinkedHwpx(data.html,data.text,()=>siblingDocument(nativeDoc)).catch(() => {
-                throw new PasteFormatUnavailable("한/글 링크 포함 붙여넣기를 확인하지 못했습니다.");
-              })
-            : undefined;
-          const preparedBytes = qaBytes ?? wholeNative?.bytes;
-          const prepared = preparedBytes && await inspectPreparedHancomPaste(preparedBytes,
-            qaLinked?.expected ?? wholeNative?.expected, qaNative?.sourceFormat === "hwp", !!qaBytes);
-          unchanged();
-          if(prepared){
-            if(origin.doc!==nativeDoc||editor.currentSelectionGeneration!==generation||
-               origin.scope!=="edit"||origin.documentLocked||composing||origin.transientEdit||
-               files.busy||hasOpenDialog(document))
-              throw new PasteFormatUnavailable("붙여넣을 위치가 변경되었습니다.");
-            adoptPreparedHancomPaste(editor, dest, prepared, next => files.ui.prepareDisplay?.(next, true));
-          } else editor.execute({ type: "paste", text: data.text, html: data.html, structured: data.structured,
-            markdown, mixedPicture: data.mixedPicture, nativeHancomRange: !!fragment }, captured);
+          markdown = clipboardMarkdownPlan(data, plain);
+          const { prepared, fragment } = await source.plan(data, markdown);
+          const content = data;
+          if (prepared) {
+            const assertDestination = () => {
+              target.assertCurrent();
+              if (origin.scope !== "edit" || origin.documentLocked)
+                throw Error(pasteMessage);
+            };
+            assertDestination();
+            adoptPreparedHancomPaste(editor, dest, prepared,
+              next => files.ui.prepareDisplay?.(next, true), assertDestination);
+          } else target.apply(capture => editor.execute({
+            type: "paste", text: content.text, html: content.html, structured: content.structured,
+            markdown, mixedPicture: content.mixedPicture, nativeHancomRange: !!fragment,
+          }, capture));
         } catch (e) {
           const refusedRichScope = e instanceof UnsupportedTableOperation &&
             ["clipboard-target-scope", "clipboard-owner-width", "clipboard-body-oversized-table"].includes(e.code);
@@ -1794,26 +1769,15 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
       }
       if (refused) {
         const text = refused.alternativeText ?? data?.plainAlternative ?? data?.text;
-        if (plain || !text) {
+        const hancomFile = !plain && files.ui.standalone && hasHancomClipboardMetadata(native?.html ?? data?.html ?? "");
+        if (plain || (!text && !hancomFile)) {
           const message = "이 형식은 붙일 수 없고, 클립보드에 대신 붙일 텍스트도 없습니다.";
           pasteResult.failed(message, false);
           $("clipboard-status").textContent = "붙여넣지 않음";
           return;
         }
-        const checkContext = () => {
-          if (!document.hasFocus() || composing || files.busy || origin.transientEdit ||
-              hasOpenDialog(document) || editor.adapter !== origin || origin.doc !== nativeDoc ||
-              editor.currentSelectionGeneration !== generation || origin.revision !== captured.revision ||
-              editor.history.undoStack.length !== undo || editor.history.redoStack.length !== redo)
-            throw Error("붙여넣을 위치가 바뀌었습니다. 위치를 선택해 다시 붙여넣으세요.");
-        };
         const validateAlternative = () => {
-          checkContext();
-          const live = editor.capture();
-          if (live.documentId !== captured.documentId ||
-              JSON.stringify(live.selection) !== JSON.stringify(captured.selection) ||
-              JSON.stringify(live.paths) !== JSON.stringify(captured.paths))
-            throw Error("붙여넣을 위치가 바뀌었습니다. 위치를 선택해 다시 붙여넣으세요.");
+          const live = target.assertCurrent();
           if (live.selection.kind !== "caret" && live.selection.kind !== "text")
             throw Error("텍스트를 붙일 위치에 커서를 두거나 텍스트를 선택하세요.");
           for (const {p} of editor.targets(live.selection)) {
@@ -1822,21 +1786,26 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
             if (live.selection.kind === "text" && p.kind === "body" && origin.hasBodyLayoutObject(p))
               throw Error("개체를 피해서 텍스트를 붙일 위치를 선택하세요.");
           }
-          checkContext();
         };
-        validateAlternative();
+        if (!hancomFile) validateAlternative();
         $("clipboard-status").textContent = "";
         fallbackDialog = true;
         restoreTarget = captured;
-        if (!await offerPlainPaste(document, markdown || data?.mixedPicture || refused.alternativeText && !data?.html ? editorFeedbackText(refused) : undefined)) {
+        const fileOption = hancomFile ? { canPasteText: !!text, open: () => {
+          // The browser requires the original click for the standard chooser.
+          // Selection and unsaved work are handled by the existing file open.
+          openControl.click();
+        } } : undefined;
+        if (!await offerPlainPaste(document, markdown || data?.mixedPicture || refused.alternativeText && !data?.html ? editorFeedbackText(refused) : undefined, fileOption)) {
           $("clipboard-status").textContent = "붙여넣기 취소";
           return;
         }
+        if (!text) return;
         validateAlternative();
         plain = true;
         data = {text, html: ""};
         pasteResult.start(true);
-        editor.execute({type: "paste", text, html: ""}, captured);
+        target.apply(capture => editor.execute({type: "paste", text, html: ""}, capture));
       }
       if (!data) return;
       pasteApplied = adapter.revision !== captured.revision;
@@ -1860,12 +1829,12 @@ async function clipboardAction(kind: "copy" | "cut" | "paste" | "paste-text", na
       if (!data.text && !data.html) throw Error("복사할 영역을 선택하세요.");
       const path = await writeClipboard(data);
       osWriteCompleted = true;
-      unchanged();
       if (kind === "cut") {
-        editor.execute(objectSource ? { type: 'cut-object', source: objectSource }
-          : { type: "delete", backward: false }, parentTableCut?{...captured,parentTableCut}:cellBlockCut?{...captured,cellBlockCut}:captured);
+        target.apply(capture => editor.execute(objectSource ? { type: 'cut-object', source: objectSource }
+          : { type: "delete", backward: false },
+          parentTableCut ? { ...capture, parentTableCut } : cellBlockCut ? { ...capture, cellBlockCut } : capture));
         files.ui.change(true);
-      }
+      } else target.assertCurrent();
       $("clipboard-status").textContent =
         `${path} ${kind === "cut" ? "잘라내기" : "복사"} 완료`;
     }
@@ -1922,6 +1891,7 @@ connectConfiguredAIHost(externalHost, (bytes,binding,_generated,source,prepared)
 },()=>files.busy||clipboardBusy||composing||hasOpenDialog(document),render,
  publish=>{publishHostState=publish;});
 installMarkdownImport(externalHost, files);
+mountWorkingCopyRecovery(document, files, () => composing || clipboardBusy);
 // D mounts workspace menus in its existing FileLifecycle adapter microtask.
 // Connect only after those exact U24 launchers and toolbar mirrors exist.
 queueMicrotask(() => {

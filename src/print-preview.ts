@@ -20,7 +20,7 @@ export function printSnapshot(a: RhwpAdapter, range: string) {
   const id = a.documentId,
     revision = a.revision;
   const pages = withoutViewMarkers(a, () => parsePrintRange(range, a.pageCount).map((page) => {
-    const info = a.call("getPageInfo", page);
+    const info = a.readLayout("getPageInfo", page);
     if (
       !Number.isFinite(info.width) ||
       !Number.isFinite(info.height) ||

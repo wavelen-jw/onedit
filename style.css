@@ -325,6 +325,15 @@ button[aria-pressed="mixed"] {
   z-index: 4;
   font-size: 12px;
 }
+#working-copy-open { white-space: nowrap; }
+#working-copy-notice:empty, #working-copy-feedback:empty { display: none; }
+#working-copy-dialog { width: min(460px, calc(100vw - 24px)); }
+#working-copy-list { padding: 0; list-style: none; margin: 12px 0; }
+#working-copy-list li { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid #d9e0e8; }
+#working-copy-list li div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#working-copy-list time { display: block; font-size: .85em; }
+#working-copy-list button { flex: none; }
+
 #file-notice[data-save-success] {
   pointer-events: none;
 }

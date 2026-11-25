@@ -2,7 +2,6 @@ import { contextMenuAnchor, showContextMenuAt } from "./context-menu-placement.j
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import { subscribeWhileOpen } from "./ui-demand-lifetime.js";
 import { activeWorkset } from "./active-workset.js";
-import { editMenuState } from "./integration/a-edit-menu.js";
 import { formatMenuState } from "./integration/a-format-menu.js";
 import { contextRow } from "./context-row.js";
 import {registerPopupLifetime} from './menu-lifetime.js';
@@ -32,6 +31,7 @@ export function bodyContextAppShortcut(e: Pick<KeyboardEvent, "key" | "ctrlKey" 
 /** Body-only presentation of existing commands. Cell/object menus keep their owners. */
 export function mountBodyContext(doc: Document, editor: Interaction, busy: () => boolean,
   sources: Map<EditAction, HTMLButtonElement>,
+  readEditState: () => ReadonlyMap<EditAction, string>,
   invoke: (id: EditAction, target: ReturnType<Interaction["capture"]>) => void,
   select: (page: number, x: number, y: number) => void,
   restoreFocus: () => void, feedback: (reason: string) => void, formatInvoke?: (id:string,target:ReturnType<Interaction["capture"]>)=>void) {
@@ -47,7 +47,7 @@ export function mountBodyContext(doc: Document, editor: Interaction, busy: () =>
   const eligible = () => (editor.selection.kind === "caret" || editor.selection.kind === "text") && editor.selection.focus.kind === "body";
   const sync = () => {
     if(activeWorkset(doc)&&!captured)return;
-    const editStates=activeWorkset(doc)?editMenuState(editor,busy()):undefined;
+    const editStates=activeWorkset(doc)?readEditState():undefined;
     const formats=activeWorkset(doc)?formatMenuState(editor,busy()):undefined;
     if (captured && (busy() || !valid() || !eligible())) close();
     for (const [id,{button, source}] of items) {

@@ -1,7 +1,7 @@
 import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
 import type {RhwpAdapter} from './adapter.js';
 import {coreRuntimeIdentity,tableTrackResizeOptIn} from './core-runtime.js';
-import {cellPath,type CellBox,type Position,type Selection} from './model.js';
+import {cellPath, sameTable,type CellBox,type Position,type Selection} from './model.js';
 import {UnsupportedTableOperation} from './table-capability.js';
 
 type Cell=Extract<Position,{kind:'cell'}>;
@@ -28,13 +28,6 @@ function port(a:RhwpAdapter):CorePort|undefined {
   if(typeof d.oneditResizeTableTracksV1==='function')return d as CorePort;
 }
 export const hasNativeTrackResize=(a:RhwpAdapter)=>!!port(a);
-
-export function sameTrackTable(a:Cell,b:Cell){
-  const ap=cellPath(a),bp=cellPath(b);
-  return a.sec===b.sec&&a.para===b.para&&ap.length===bp.length&&
-    ap.every((h,i)=>h.controlIndex===bp[i].controlIndex&&
-      (i===ap.length-1||h.cellIndex===bp[i].cellIndex&&h.cellParaIndex===bp[i].cellParaIndex));
-}
 
 // Layout evidence from the selected root table, never a global page count.
 export function hasSplitTableFrames(owner:Cell,grid:readonly CellBox[]){
@@ -169,11 +162,11 @@ export function prepareNativeTrackResize(a:RhwpAdapter,s:Selection,c:{width:numb
   let page:number;
   if(c.nativeEdge){
     const edge=c.nativeEdge;
-    if(edge.axis!==axis||!sameTrackTable(owner,edge.owner))throw refusal('invalidTarget');
+    if(edge.axis!==axis||!sameTable(owner,edge.owner))throw refusal('invalidTarget');
     owner=edge.owner;page=edge.page;
     intent={intent:edge.intent,boundary:edge.boundary,delta};
   }else{
-    if(s.kind!=='cells'||s.anchor.kind!=='cell'||!sameTrackTable(owner,s.anchor))return;
+    if(s.kind!=='cells'||s.anchor.kind!=='cell'||!sameTable(owner,s.anchor))return;
     const grid=a.cells(owner);
     const splitRoot=!owner.ancestors?.length&&new Set(grid.map(x=>x.pageIndex)).size>1;
     const splitRange=splitRoot&&axis==='row'&&s.anchor.cell!==owner.cell;
@@ -183,7 +176,7 @@ export function prepareNativeTrackResize(a:RhwpAdapter,s:Selection,c:{width:numb
       if(!c.splitRangeKey||s.phase!==2||c.redistribute||!hasSplitTableFrames(owner,grid))
         throw splitTableResizeRefusal();
       if(a.transientEdit||a.hasPendingLocalBodyFlow())throw refusal('unsettledLayout');
-      const {rowCount,colCount}=a.call('getTableDimensions',owner.sec,owner.para,owner.control);
+      const {rowCount,colCount}=a.readLayout('getTableDimensions',owner.sec,owner.para,owner.control);
       const ends=grid.filter(x=>x.cellIdx===owner.cell||x.cellIdx===s.anchor.cell);
       const f=ends.find(x=>x.cellIdx===owner.cell),t=ends.find(x=>x.cellIdx===s.anchor.cell);
       if(ends.length!==2||!f||!t||f.pageIndex!==t.pageIndex||
@@ -240,7 +233,7 @@ export function prepareNativeTrackResize(a:RhwpAdapter,s:Selection,c:{width:numb
         throw splitTableResizeRefusal();
       if(!frame)throw refusal('splitPageUnconfirmed');
       if(grid.some(x=>x.rowSpan!==1||x.colSpan!==1))throw refusal('unsupportedAffectedContent');
-      const {rowCount,colCount}=a.call('getTableDimensions',owner.sec,owner.para,owner.control);
+      const {rowCount,colCount}=a.readLayout('getTableDimensions',owner.sec,owner.para,owner.control);
       if(coarseCut&&current.length===1)throw splitTableResizeRefusal();
       if(current.length!==1){
         if(!c.splitRangeKey||(!coarseCut&&Math.abs(delta)!==300)||hitPage!==frame.pageIndex||

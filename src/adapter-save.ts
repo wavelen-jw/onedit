@@ -1,30 +1,15 @@
-import { RhwpAdapter } from "./adapter.js";
-import { siblingDocument } from "./core-runtime.js";
+import type { RhwpAdapter } from "./adapter.js";
+import type { HwpDocument } from "../development/core/rhwp.js";
 import { result } from "./adapter-core.js";
 import { projectSemanticParts } from "./adapter-semantic.js";
 import { finishResponsiveWork } from "./responsive-work.js";
-import { extractLinkZOrder, rememberLinkZOrder, retainLinkZOrder } from "./hwpx-link-zorder.js";
-import { readPrintSettings, rememberPrintSettings, retainPrintSettings } from "./hwpx-print-settings.js";
 
-// Optional metadata already supported by the archive helpers is tracked per Core handle.
-export async function inspectHwpxPreservation(bytes: Uint8Array) {
-    const [zOrder, printSettings] = await Promise.all([
-        extractLinkZOrder(bytes, "local-open").catch(() => undefined),
-        readPrintSettings(bytes).catch(() => undefined),
-    ]);
-    return {zOrder, printSettings};
-}
-
-export function rememberHwpxPreservation(doc: object, metadata: Awaited<ReturnType<typeof inspectHwpxPreservation>>) {
-    rememberLinkZOrder(doc, metadata.zOrder);
-    rememberPrintSettings(doc, metadata.printSettings);
-}
-
-// Internal responsibility only; no state ownership or policy changes.
+// The synchronous verification and file export both require a lossless Core snapshot.
 function exportLosslessHwpx(this: RhwpAdapter) {
     if (this.transientEdit) throw Error("한글 조합을 확정하거나 취소한 뒤 저장하세요.");
     if (this.viewerOnlyReason)
       throw Error(`${this.viewerOnlyReason} 원본 보존을 위해 이 읽기 전용 문서의 저장은 지원하지 않습니다.`);
+    this.completeLocalBodyFlow();
     const out = this.doc.exportHwpxWithReport();
     let bytes: Uint8Array;
     try {
@@ -41,7 +26,7 @@ function exportLosslessHwpx(this: RhwpAdapter) {
 }
 
 function* verifyCheckedReopen(a: RhwpAdapter, bytes: Uint8Array) {
-    const reopened = new RhwpAdapter(siblingDocument(a.doc, bytes));
+    const reopened = a.openVerificationSibling(bytes);
     try {
       const actual = yield* projectSemanticParts.call(reopened);
       const expected = yield* projectSemanticParts.call(a);
@@ -52,23 +37,30 @@ function* verifyCheckedReopen(a: RhwpAdapter, bytes: Uint8Array) {
     }
 }
 
-export function exportCheckedHwpx(this: RhwpAdapter) {
+// Synchronous round-trip for command validation and detached in-memory documents.
+export function exportCheckedCoreHwpx(this: RhwpAdapter) {
     const bytes = exportLosslessHwpx.call(this);
     const verification = verifyCheckedReopen(this, bytes);
     while (!verification.next().done) { /* Synchronous command verification. */ }
     return {bytes, documentId: this.documentId, revision: this.revision};
 }
 
-export async function exportCheckedDocumentHwpx(a: RhwpAdapter, current: () => boolean) {
+/** Prepare the final bytes delivered by file save, working-copy recovery or Host. */
+export async function exportDocumentHwpx(a: RhwpAdapter, current: () => boolean) {
     const {documentId, revision, doc} = a;
-    if (!a.transientEdit && !a.viewerOnlyReason) a.completeLocalBodyFlow();
-    const linked = await retainLinkZOrder(doc, exportLosslessHwpx.call(a));
-    const bytes = await retainPrintSettings(doc, linked);
-    if (!current()) throw Error("문서 작업 대상이 변경되었습니다. 다시 시도하세요.");
+    const sameDocument = () => current() && a.documentId === documentId &&
+      a.revision === revision && a.doc === doc && !a.transientEdit && !a.viewerOnlyReason;
+    const requireCurrent = () => {
+      if (!sameDocument()) throw Error("문서 작업 대상이 변경되었습니다. 다시 시도하세요.");
+    };
+    // The checked output is the Core's final archive. Source-bound field
+    // metadata and opaque settings are emitted alongside the document.
+    const bytes = exportLosslessHwpx.call(a);
+    requireCurrent();
     const verification = verifyCheckedReopen(a, bytes);
     try {
-      await finishResponsiveWork(verification, current);
-      if (!current()) throw Error("문서 작업 대상이 변경되었습니다. 다시 시도하세요.");
+      await finishResponsiveWork(verification, sameDocument);
+      requireCurrent();
       return {bytes, documentId, revision};
     } finally {
       verification.return(undefined);

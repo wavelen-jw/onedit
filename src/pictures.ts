@@ -1,4 +1,4 @@
-import {bodyParagraphOwners} from './adapter-position.js';
+import {bodyParagraphOwners} from './body-paragraph-owners.js';
 import type { RhwpAdapter } from './adapter.js';
 import { copy, ordered, sameContainer, paraIndex, withPara, type Selection } from './model.js';
 import { inlineCellPicture } from './inline-cell-picture.js';

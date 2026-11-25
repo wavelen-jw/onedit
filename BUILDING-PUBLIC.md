@@ -15,7 +15,7 @@ Open http://127.0.0.1:4173/ in a browser. Standalone editing does not require an
 To install the SDK into a separate consumer directory:
 
 ```sh
-npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.2.0.tgz
+npm install --offline --ignore-scripts ./onedit-ai-host-sdk-1.2.1.tgz
 node --input-type=module -e 'import { OneditHostClient, version } from "onedit-ai-host-sdk"; console.log(typeof OneditHostClient, version)'
 ```
 

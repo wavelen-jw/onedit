@@ -16,6 +16,7 @@ import type { Props } from "./model.js";
 import { languages, toCoreCharacter, toCoreParagraph, type FormatState } from "./formatting.js";
 import { formatMenuItems, formatMenuState, type CatalogCommand } from "./integration/a-format-menu.js";
 import { fontSuggestions, fontStatus } from "./integration/a-font-availability.js";
+import { editTarget } from "./edit-target.js";
 import { formatInputGuard, sameFormatTarget } from "./integration/a-format-input-guard.js";
 import { formatValueState, formatValueHint, markFormatValue, formatToggleState, markFormatToggle } from "./format-value-state.js";
 
@@ -168,7 +169,10 @@ export function bindQuickDraft(form: HTMLFormElement, editor: Interaction, busy:
     event.preventDefault();
     if (!guard.ready() || busy()) return;
     try {
-      if (invalidated || !captured || !sameFormatTarget(captured, editor.capture())) throw Error("문서·리비전·선택이 바뀌었습니다. 편집기에서 다시 선택하세요.");
+      const message = "문서·리비전·선택이 바뀌었습니다. 편집기에서 다시 선택하세요.";
+      if (invalidated || !captured) throw Error(message);
+      const target = editTarget(editor, captured, { message, current: () => !busy() });
+      target.assertCurrent();
       const reason = formatMenuState(editor, busy(), blockedReason()).get(kind === "char" ? "character" : "paragraph")?.reason;
       if (reason) throw Error(reason);
       // Number inputs expose incomplete text (e.g. "1e") as an empty value.
@@ -177,7 +181,7 @@ export function bindQuickDraft(form: HTMLFormElement, editor: Interaction, busy:
       const malformed = controls.find(control => control instanceof HTMLInputElement && control.validity.badInput);
       if (malformed) { malformed.focus(); throw Error("숫자를 끝까지 입력하세요. 빈칸은 기존 값 유지에만 사용합니다."); }
       const props = read();
-      if (Object.keys(props).length) execute(props, captured);
+      if (Object.keys(props).length) target.apply(capture => execute(props, capture));
       guard.consume(); captured = undefined; invalidated = false; sync(); restoreFocus();
     } catch (error) { note.title = note.textContent = editorFeedbackText(error); }
   };

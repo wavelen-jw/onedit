@@ -38,6 +38,7 @@ import { cellRowBlock } from './cell-row-block.js';
 import { exactParagraphPosition, prepareCurrentPosition } from './paragraph-current-position.js';
 import { lowerPairGrid } from './table-boundary-grid.js';
 import type { SelectionBox } from "./selection-display.js";
+import { bodyPageBounds } from "./body-corner-guides.js";
 import { stylesUnavailable } from "./style-availability.js";
 import { cellLayoutKeys, cellLayoutHold, hasCellLayout, validateCellLayout } from "./cell-layout.js";
 import { prepareShapeSize, prepareTextboxInsert } from "./shapes.js";
@@ -99,7 +100,17 @@ import {
   cellPath,
   nested,
 } from "./model.js";
-type ExecutionCapture = NonNullable<Parameters<Interaction["execute"]>[1]>;
+type ExecutionCapture = {
+  documentId: string;
+  revision: number;
+  selection: Selection;
+  paths?: SelectionReference;
+  paragraphTargets?: ParagraphTarget[];
+  cellBlockCut?: CellBlockObjectCut;
+  parentTableCut?: ParentTableCut;
+  // Drag operation targets may differ from the actual pointerdown selection.
+  resizeSelectionBefore?: Selection;
+};
 export type WidthPreviewAdmission = (position: Position, resolved: ParagraphTarget|undefined, grid:readonly import("./model.js").CellBox[])=>WidthLookup|undefined;
 // Exact Core reviewed for survivor identity in flat floating 2×1 row delete.
 
@@ -411,6 +422,10 @@ export class Interaction {
   history: History;
   constructor(readonly adapter: RhwpAdapter) {
     this.history = new History(adapter);
+  }
+  /** @internal An isolated Markdown draft gets its own selection and History. */
+  createDraftEditor(adapter: RhwpAdapter) {
+    return new Interaction(adapter);
   }
   refreshFontGeometry() {
     // Font supply changes derived geometry, never selection offsets or History.
@@ -1051,7 +1066,7 @@ export class Interaction {
     const s=this.selection;
     if(s.kind!=='cells'||nested(s.focus))return {};
     const chosen=this.cells(s), all=this.uniqueCells(this.adapter.cells(s.focus));
-    const dim=this.adapter.call('getTableDimensions',s.focus.sec,s.focus.para,s.focus.control);
+    const dim=this.adapter.readLayout('getTableDimensions',s.focus.sec,s.focus.para,s.focus.control);
     const rows=dim.rowCount,cols=dim.colCount;
     if(!Number.isSafeInteger(rows)||!Number.isSafeInteger(cols)||rows<1||cols<1||
         all.length!==rows*cols||new Set(all.map(c=>c.row+':'+c.col)).size!==all.length||
@@ -1542,7 +1557,7 @@ export class Interaction {
             let height = 0;
             for (let n = 0; n < a.pageCount; n++) {
               offsets.push(height);
-              height += a.call("getPageInfo", n).height;
+              height += a.readLayout("getPageInfo", n).height;
             }
             const global = (l: { page: number; y: number }) =>
               offsets[l.page] + l.y;
@@ -1831,7 +1846,7 @@ export class Interaction {
     if(command.cellOnly&&!independentRowWidth&&(selected.length!==1||selected[0].cellIdx!==p.cell||all.some(c=>c.rowSpan!==1||c.colSpan!==1)||new Set(all.map(c=>axis==='x'?c.row:c.col)).size!==1))
       throw new UnsupportedTableOperation('local-resize-scope','일반 표의 세로·병합·중첩 부분 경계 조절은 아직 지원하지 않습니다.');
     if(independentRowWidth){
-      const grid=a.call('getTableDimensions',p.sec,p.para,p.control),width=a.call('getTableProperties',p.sec,p.para,p.control).tableWidth;
+      const grid=a.readLayout('getTableDimensions',p.sec,p.para,p.control),width=a.call('getTableProperties',p.sec,p.para,p.control).tableWidth;
       if(all.length!==grid.rowCount*grid.colCount||!Number.isSafeInteger(width)||width<=0||Array.from({length:grid.rowCount},(_,row)=>all.filter(c=>c.row===row).reduce((sum,c)=>sum+a.cellProps({...p,cell:c.cellIdx}).width,0)).some(sum=>sum!==width))
         throw new UnsupportedTableOperation('local-width-closed-row','각 행의 선언 너비가 정확히 닫힌 일반 표에서만 부분 가로 경계를 조절합니다.');
     }
@@ -1887,7 +1902,7 @@ export class Interaction {
       if(rows.size)return all.filter(c=>rows.has(c.row));
     }
     if(!command.trackBoundary||command.redistribute)return s.kind==="cells"||s.kind==="table"?this.cells(s):all.filter(c=>c.cellIdx===p.cell);
-    const grid=a.call("getTableDimensions",p.sec,p.para,p.control),focus=all.find(c=>c.cellIdx===p.cell);
+    const grid=a.readLayout("getTableDimensions",p.sec,p.para,p.control),focus=all.find(c=>c.cellIdx===p.cell);
     if(!focus)throw new UnsupportedTableOperation('resize-whole-width','전체 너비 조절의 현재 셀을 확인할 수 없습니다.');
     const columns=new Set((s.kind==='cells'||s.kind==='table'?this.cells(s):[focus]).map(c=>c.col));
     const ordinary=all.every(c=>c.rowSpan===1&&c.colSpan===1)&&all.length===grid.rowCount*grid.colCount;
@@ -2325,7 +2340,7 @@ export class Interaction {
     for (const p of points) {
       if (p.kind !== "cell") continue;
       const {pageIndex, x, y} = a.rect(p);
-      if (y < a.call("getPageInfo", pageIndex).height) continue;
+      if (y < a.readLayout("getPageInfo", pageIndex).height) continue;
       try {
         a.call("hitTest", pageIndex, x, y);
       } catch (error) {
@@ -2339,17 +2354,7 @@ export class Interaction {
   }
   execute(
     command: Command,
-    captured?: {
-      documentId: string;
-      revision: number;
-      selection: Selection;
-      paths?: SelectionReference;
-      paragraphTargets?: ParagraphTarget[];
-      cellBlockCut?: CellBlockObjectCut;
-      parentTableCut?: ParentTableCut;
-      // Drag operation targets may differ from the actual pointerdown selection.
-      resizeSelectionBefore?: Selection;
-    },
+    captured?: ExecutionCapture,
   ) {
     try {
       const doc=this.adapter.doc;
@@ -2362,17 +2367,7 @@ export class Interaction {
   }
   private executeObserved(
     command: Command,
-    captured?: {
-      documentId: string;
-      revision: number;
-      selection: Selection;
-      paths?: SelectionReference;
-      paragraphTargets?: ParagraphTarget[];
-      cellBlockCut?: CellBlockObjectCut;
-      parentTableCut?: ParentTableCut;
-      // Drag operation targets may differ from the actual pointerdown selection.
-      resizeSelectionBefore?: Selection;
-    },
+    captured?: ExecutionCapture,
   ) {
     const { a, s } = this.prepareCommandExecution(command, captured);
     // An empty insertion at an exact caret has no edit or History effect.
@@ -3369,7 +3364,7 @@ export class Interaction {
     const resizeDimensions = () => {
       const p = s.focus;
       if (p.kind !== "cell") throw Error("크기 변경 대상 셀이 없습니다.");
-      const grid = a.call("getTableDimensions", p.sec, p.para, p.control);
+      const grid = a.readLayout("getTableDimensions", p.sec, p.para, p.control);
       if (!Number.isSafeInteger(grid.cellCount) || grid.cellCount <= 0)
         throw Error("크기 변경 대상 표 구성을 확인할 수 없습니다.");
       const sizes = Array.from({ length: grid.cellCount }, (_, cell) => {
@@ -3798,7 +3793,7 @@ export class Interaction {
         const count=command.count??1;
         const rowDelete=command.operation==='row-delete';
         if(command.operation==='col-delete'||rowDelete){
-          const before=a.call('getTableDimensions',p.sec,p.para,p.control);
+          const before=a.readLayout('getTableDimensions',p.sec,p.para,p.control);
           const axis=(c:{row:number;col:number})=>row?c.row:c.col;
           const survivor=a.cells(p)
             .filter(c=>axis(c)<at||axis(c)>=at+count)
@@ -3833,7 +3828,7 @@ export class Interaction {
           if(destination.kind!=='cell'||!sameTable(p,destination))
             throw Error('삭제 후 남은 셀의 표 소유자가 일치하지 않습니다.');
           a.validate(destination);
-          const after=a.call('getTableDimensions',destination.sec,destination.para,destination.control);
+          const after=a.readLayout('getTableDimensions',destination.sec,destination.para,destination.control);
           const shift=axis(survivor)>=at+count?count:0;
           const expectedRow=survivor.row-(row?shift:0);
           const expectedCol=survivor.col-(row?0:shift);
@@ -3934,7 +3929,9 @@ export class Interaction {
         const rows = pageRuns(page).map(r => ({r, candidate:runOwner(r)}))
           .filter((row): row is {r:Run;candidate:Position} => !!row.candidate && sameContainer(p,row.candidate));
         if (!rows.length) continue;
-        const columns: {x:number;width:number}[] = p.kind === "body" ? a.call("getPageInfo",page).columns ?? [] : [];
+        const pageInfo = p.kind === "body" ? a.readLayout("getPageInfo",page) : undefined;
+        const bodyBounds = pageInfo && bodyPageBounds(pageInfo);
+        const columns: {x:number;width:number}[] = pageInfo?.columns ?? [];
         const lineStarts = new Map<string,number>(), flowLefts = new Map<string,number>();
         const columnOf = (r:Run) => columns.find(c=>Number.isFinite(c.x)&&Number.isFinite(c.width)&&c.width>0&&r.x>=c.x&&r.x<c.x+c.width);
         const lineYs = new Map<string, number[]>();
@@ -3966,9 +3963,12 @@ export class Interaction {
           const key=lineKey(r,candidate), scope=JSON.stringify(flow(candidate));
           const column=columnOf(r);
           const left=candidate.kind === "body" ? column?.x : flowLefts.get(scope);
+          const clip = bodyBounds && (column ? { ...bodyBounds,
+            left: Math.max(bodyBounds.left, column.x), right: Math.min(bodyBounds.right, column.x + column.width),
+          } : bodyBounds);
           textRects.push({ pageIndex: page, x: r.x + r.charX[begin], y: r.y,
             width: r.charX[end] - r.charX[begin], height: r.h, textOnly: true,
-            rangeStart:r.charStart+begin, rangeEnd:r.charStart+end,
+            rangeStart:r.charStart+begin, rangeEnd:r.charStart+end, clip,
             lineKey:key, flowKey:left===undefined?undefined:JSON.stringify([page,scope,column]),flowLeft:left,
             continues:paraIndex(candidate)>paraIndex(p)||lineStarts.get(key)!>a.textOffset(p) });
         }

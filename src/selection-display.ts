@@ -1,6 +1,7 @@
 import type { Box } from "./model.js";
+type Bounds = { left: number; right: number; top: number; bottom: number };
 export type SelectionBox = Box & { textOnly?: boolean; lineKey?: string;
-  flowKey?: string; flowLeft?: number; continues?: boolean; rangeStart?: number; rangeEnd?: number };
+  flowKey?: string; flowLeft?: number; continues?: boolean; rangeStart?: number; rangeEnd?: number; clip?: Bounds };
 // These are browser-painted glyph bounds, not the Core run-layout cache.
 // The weak SVG identity changes on render/edit/undo/open. Observe only the SVG
 // so selection overlays cannot invalidate their own measurement on every paint.
@@ -82,6 +83,13 @@ export function unionSelectionBoxes(rects: Box[]): Box[] {
   }
   return result;
 }
+function clipBox<T extends Box>(rect: T, bounds: Bounds): T[] {
+  const x = Math.max(rect.x, bounds.left), y = Math.max(rect.y, bounds.top);
+  const right = Math.min(rect.x + rect.width, bounds.right);
+  const bottom = Math.min(rect.y + rect.height, bounds.bottom);
+  return right > x && bottom > y ? [{ ...rect, x, y, width: right - x, height: bottom - y }] : [];
+}
+
 export function selectionPaintBoxes(pages: HTMLElement, rects: SelectionBox[]): Box[] {
   const glyphs = new Map<number, Box[]>();
   for (const pageIndex of new Set(rects.filter((r) => r.textOnly).map((r) => r.pageIndex))) {
@@ -112,9 +120,10 @@ export function selectionPaintBoxes(pages: HTMLElement, rects: SelectionBox[]): 
     bands.set(r.lineKey, { y: Math.min(old?.y ?? r.y, r.y),
       bottom: Math.max(old?.bottom ?? r.y + r.height, r.y + r.height) });
   }
-  const ink = painted.map((r) => {
+  const ink = painted.flatMap((r) => {
     const band = r.lineKey && bands.get(r.lineKey);
-    return band ? { ...r, y: band.y, height: band.bottom - band.y } : r;
+    const row = band ? { ...r, y: band.y, height: band.bottom - band.y } : r;
+    return row.clip ? clipBox(row, row.clip) : [row];
   });
   const joins: Box[] = [];
   const neighbors = new Map<string, SelectionBox[]>();
@@ -142,7 +151,8 @@ export function selectionPaintBoxes(pages: HTMLElement, rects: SelectionBox[]): 
   }
   const flows = new Map<string,SelectionBox[]>();
   for (const r of lines.values()) {
-    const left=r.continues&&Number.isFinite(r.flowLeft)?Math.min(r.x,r.flowLeft!):r.x;
+    const left=r.continues&&Number.isFinite(r.flowLeft)
+      ? Math.max(r.clip?.left ?? -Infinity, Math.min(r.x,r.flowLeft!)) : r.x;
     const line={...r,x:left,width:r.x+r.width-left};
     const group=flows.get(r.flowKey!)??[];group.push(line);flows.set(r.flowKey!,group);
   }
@@ -176,5 +186,16 @@ export function selectionPaintBoxes(pages: HTMLElement, rects: SelectionBox[]): 
     }
     return pieces;
   });
-  return unionSelectionBoxes([...ink,...joins,...whitespace]);
+  // Objects and auxiliary regions may legitimately occupy the margins. All
+  // overlay fragments still share the physical boundary of the mounted page.
+  const frames = new Map<number, Bounds>();
+  for (const page of pages.querySelectorAll<HTMLElement>("[data-page]")) {
+    const right = parseFloat(page.style.width), bottom = parseFloat(page.style.height);
+    if (Number.isFinite(right) && Number.isFinite(bottom) && right > 0 && bottom > 0)
+      frames.set(Number(page.dataset.page), { left: 0, top: 0, right, bottom });
+  }
+  return unionSelectionBoxes([...ink,...joins,...whitespace].flatMap(rect => {
+    const frame = frames.get(rect.pageIndex);
+    return frame ? clipBox(rect, frame) : [];
+  }));
 }

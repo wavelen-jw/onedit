@@ -81,7 +81,7 @@ export function fontCycleCommand(state:FormatState,choices:readonly string[],sco
 
 export function columnPosition(a:RhwpAdapter,p:Position,lines:{page:number;y:number;runs:Run[]}[],direction:-1|1):Position{
   a.validate(p);if(p.kind!=='body')throw Error('단 이동은 본문 커서에서 지원합니다. 셀·개체 대상은 유지합니다.');
-  const caret=a.rect(p),info=a.call<any>('getPageInfo',caret.pageIndex),cols=info.columns;
+  const caret=a.rect(p),info=a.readLayout('getPageInfo',caret.pageIndex),cols=info.columns;
   if(!Array.isArray(cols)||cols.some((c:any)=>!Number.isFinite(c.x)||!Number.isFinite(c.width)||c.width<=0))throw Error('현재 쪽의 단 경계를 조회할 수 없습니다.');
   const index=cols.findIndex((c:any)=>caret.x>=c.x-.1&&caret.x<=c.x+c.width+.1);if(index<0)throw Error('현재 커서의 단을 확인할 수 없습니다.');
   const target=cols[index+direction];if(!target)return {...p};

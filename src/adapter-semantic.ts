@@ -1,6 +1,6 @@
 import { editorFeedbackText } from "./editor-feedback-text.js";
 import type { RhwpAdapter } from "./adapter.js";
-import { UnsupportedTableOwner } from "./adapter.js";
+import { UnsupportedTableOwner } from "./adapter-core.js";
 import { type Position, cellPath, withPara } from "./model.js";
 import { captionCatalog } from "./caption-preservation.js";
 import { noteCatalog } from "./notes.js";
@@ -195,7 +195,7 @@ export function* projectSemanticParts(this: RhwpAdapter, use: "compare" | "valid
           col: l.col,
           rowSpan: l.rowSpan,
           colSpan: l.colSpan,
-          dimensions: this.call(
+          dimensions: this.readLayout(
             "getTableDimensionsByPath",
             p.sec,
             p.para,

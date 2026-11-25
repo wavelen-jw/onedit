@@ -1,5 +1,5 @@
 import { closeEditorDialog, showEditorDialog } from "./editor-popup-focus.js";
-import type { FileLifecycle } from "./file-lifecycle.js";
+import type { FileLifecycle, UnsavedChoice } from "./file-lifecycle.js";
 
 export function guardDocumentTransitionKeys(event: KeyboardEvent) {
   // Tab wraps within the existing decision buttons. Enter/Escape stay native.
@@ -46,10 +46,12 @@ export function connectDocumentTransition(files: FileLifecycle, doc: Document) {
         note = doc.createElement("p");
       title.id = "document-transition-title";
       title.textContent = "저장하지 않은 변경이 있습니다";
-      note.textContent = `${message} 저장을 선택하면 실제 파일 저장 확인이 끝난 뒤에 계속합니다.`;
+      note.textContent = files.ui.pickSaveTarget
+        ? `${message} 저장 확인이 끝나면 계속합니다.`
+        : `${message} HWPX 사본을 내려받고 저장된 파일을 확인하면 계속합니다.`;
       dialog.append(title, note);
       let settled = false;
-      const finish = (choice: "save" | "continue" | "cancel") => {
+      const finish = (choice: UnsavedChoice) => {
         if (settled) return;
         settled = true;
         if (dialog.open) closeEditorDialog(dialog, choice === "cancel");
@@ -58,11 +60,12 @@ export function connectDocumentTransition(files: FileLifecycle, doc: Document) {
         cancel = null;
         resolve(choice);
       };
-      for (const [choice, label] of [
-        ["save", "저장하고 계속"],
-        ["continue", "저장하지 않고 계속"],
-        ["cancel", "취소"],
-      ] as const) {
+      const choices: [UnsavedChoice, string][] = [
+        ["save", files.ui.pickSaveTarget ? "저장하고 계속" : "HWPX 사본 저장 후 계속"],
+      ];
+      if (files.ui.keepWorkingCopy) choices.push(["keep", "복구본으로 남기고 계속"]);
+      choices.push(["continue", "저장하지 않고 계속"], ["cancel", "취소"]);
+      for (const [choice, label] of choices) {
         const button = doc.createElement("button");
         button.type = "button";
         button.dataset.transitionChoice = choice;
@@ -144,5 +147,5 @@ export function syncFileRecovery(files: FileLifecycle, doc: Document) {
   // The file menu also invokes this command; only the recovery notice is conditional.
   copy.hidden = !files.canDownloadCopy;
   copy.disabled = files.busy || !!transition;
-  copy.title = files.canDownloadTrackedOriginal ? "변경 추적 이력을 포함한 원본 파일을 내려받습니다." : "";
+  copy.title = files.canDownloadOriginal ? "원본과 같은 파일을 사본으로 내려받습니다." : "";
 }

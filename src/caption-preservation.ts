@@ -1,4 +1,4 @@
-import {bodyParagraphOwners} from './adapter-position.js';
+import {bodyParagraphOwners} from './body-paragraph-owners.js';
 import type {RhwpAdapter} from './adapter.js';
 export type CaptionTarget={kind:'table'|'picture'|'shape';sec:number;para:number;control:number};
 export function captionView(a:RhwpAdapter,t:CaptionTarget){

@@ -2,7 +2,8 @@ import type { Interaction } from "./interaction.js";
 import type { Command, Props } from "./model.js";
 import type { ParagraphListChange } from "./paragraph-lists.js";
 import { paragraphAdjustmentCommand, type ParagraphAdjustment } from "./paragraph-adjustments.js";
-import { sameFormatTarget, type formatInputGuard } from "./integration/a-format-input-guard.js";
+import { editTarget } from "./edit-target.js";
+import type { formatInputGuard } from "./integration/a-format-input-guard.js";
 
 // Per-guard synchronous lock; all compatibility exports share this one instance.
 const submittingFormats = new WeakSet<ReturnType<typeof formatInputGuard>>();
@@ -20,22 +21,24 @@ export function submitFormatDraft(
   localCellCapture = false,
 ) {
   if (!guard.ready() || submittingFormats.has(guard)) return false;
-  if (
-    captured.documentId !== editor.adapter.documentId ||
-    captured.revision !== editor.adapter.revision ||
-    !sameFormatTarget(captured, editor.capture(localCellCapture && kind === "cell" && !cellBlock))
-  )
-    throw Error(
-      "대화상자 대상 문서 또는 선택이 변경되었습니다. 취소 후 다시 열어 주세요.",
-    );
+  const target = editTarget(editor, captured, {
+    message: "대화상자 대상 문서 또는 선택이 변경되었습니다. 취소 후 다시 열어 주세요.",
+    coalesceCellCaret: localCellCapture && kind === "cell" && !cellBlock,
+  });
+  target.assertCurrent();
   submittingFormats.add(guard);
   try {
     const props = read(); // Invalid drafts stay retryable and never consume History.
     const list = readList?.();
     const adjustment = readAdjustment?.();
     if(adjustment && (list || Object.keys(props).length)) throw Error("문단 증감과 다른 서식은 따로 적용하세요. 초안은 유지됩니다.");
-    if (adjustment || list || Object.keys(props).length)
-      execute(adjustment ? paragraphAdjustmentCommand(adjustment) : list ? { type: "paragraph-list", list, props } : kind==='cell'&&cellBlock ? {type:'cell',props,cellScope:'block'} : { type: kind, props }, captured);
+    if (adjustment || list || Object.keys(props).length) {
+      const command: Command = adjustment ? paragraphAdjustmentCommand(adjustment)
+        : list ? { type: "paragraph-list", list, props }
+        : kind === "cell" && cellBlock ? { type: kind, props, cellScope: "block" }
+        : { type: kind, props };
+      target.apply(capture => execute(command, capture));
+    }
     guard.consume();
     return true;
   } finally {

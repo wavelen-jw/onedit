@@ -1,4 +1,5 @@
 import { editorFeedbackText } from "./editor-feedback-text.js";
+import { editTarget } from "./edit-target.js";
 import type { Interaction } from "./interaction.js";
 import type { Command } from "./model.js";
 import { formatInputGuard, sameFormatTarget } from "./integration/a-format-input-guard.js";
@@ -62,12 +63,18 @@ export function bindPanelDraft<T>(form: HTMLFormElement, editor: Interaction, op
     let attempted=false;
     try {
       if(!guard.ready())return;
-      if(invalidated||!current())throw Error("선택·문서가 바뀌었습니다. 편집기에서 다시 선택하세요.");
+      const message = "선택·문서가 바뀌었습니다. 편집기에서 다시 선택하세요.";
+      if (invalidated || !captured) throw Error(message);
+      const target = editTarget(editor, captured, { message });
+      target.assertCurrent();
       const reason=options.reason();if(reason)throw Error(reason);
       const bad=controls.find(c=>c instanceof HTMLInputElement&&c.validity.badInput);if(bad){bad.focus();throw Error("숫자를 끝까지 입력하세요.");}
-      const command=options.command(initial),target=captured!;
+      const command=options.command(initial);
       const revision=editor.adapter.revision;
-      if(command){attempted=true;applying=true;try{options.execute(command,target);}finally{applying=false;}}
+      if (command) target.apply(capture => {
+        attempted = applying = true;
+        try { options.execute(command, capture); } finally { applying = false; }
+      });
       const changed=editor.adapter.revision!==revision;
       guard.consume();captured=undefined;invalidated=false;reset();feedback(changed?"설정했습니다. 실행 취소로 되돌릴 수 있습니다.":"변경 없음 · 기존 이력 유지",changed?"applied":"unchanged");options.focus();sync();
     }catch(error){feedback((attempted?"결과 확인 필요 · ":"적용하지 않았습니다 · ")+editorFeedbackText(error),attempted?"unknown":"rejected");options.note.title=options.note.textContent??"";}

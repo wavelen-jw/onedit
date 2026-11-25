@@ -1,5 +1,6 @@
 import {AIError,fitsReportBytes,reportBudget} from './ai-integration/contract.js';
 import type {ReportBlockRole} from './report-block-presets.js';
+import { readSectionNumber, romanHeading, readRomanSection } from './report-section-number.js';
 import { Lexer } from './vendor/marked.js';
 
 export type MarkdownMode = 'source' | 'report';
@@ -101,6 +102,22 @@ export function analyzeMarkdown(request: MarkdownRequest,sdkReport=false): Markd
       const where=normalized.indexOf(t.raw??'',cursor),offset=where<0?cursor:where;cursor=offset+(t.raw?.length??0);
       if(t.type==='space')continue;
       if(t.type==='heading'||t.type==='paragraph'||t.type==='text'){
+        if (mode === 'report' && t.type === 'paragraph' && !quote && t.text.includes('\n')) {
+          const manual = String(t.text).split('\n');
+          // Consecutive hand-written report markers are paragraph boundaries.
+          // Leave multiline inline constructs and ordinary prose to GFM.
+          const markedLine = (line: string) => /^ {0,3}[□ㅁ○ㅇ][ \t]+\S/u.test(line) || readRomanSection(line);
+          if (manual.every(markedLine) &&
+              !t.tokens?.some((token: any) => token.type !== 'text' && token.raw?.includes('\n'))) {
+            let lineOffset = offset;
+            for (const line of manual) {
+              blocks.push({kind:'paragraph',role:'body',runs:inline(Lexer.lexInline(line),lineOffset)});
+              lineOffset += line.length + 1;
+            }
+            if (blocks.length > blockLimit) tooLarge('문단/블록');
+            continue;
+          }
+        }
         const runs=inline(t.tokens??[{type:'text',text:t.text,raw:t.raw}],offset);
         blocks.push({kind:'paragraph',role:quote&&mode==='report'?'quote':t.type==='heading'?'heading':quote?'quote':'body',runs,level:t.depth??quote,...(quoteGroup!==undefined?{quoteGroup}:{})});
       } else if(t.type==='blockquote'){
@@ -190,61 +207,105 @@ export function analyzeMarkdown(request: MarkdownRequest,sdkReport=false): Markd
   visit(tokens);
   if(mode==='report'){
     let informalParent=false;
-    let numberedSection:string|undefined;
+    let symbolReport = false;
+    let sectionSequence = 0;
+    let numberedSection: number | undefined;
     const textOf=(runs:MarkdownRun[])=>runs.map(r=>r.text).join('');
     const beginsWithDigit=(runs:MarkdownRun[])=>/^\s*\d/u.test(textOf(runs));
-    const stripPrefix=(runs:MarkdownRun[],pattern:RegExp)=>{
-      const match=pattern.exec(textOf(runs));if(!match)return undefined;
-      let length=match[0].length;
+    const consumePrefix = (runs: MarkdownRun[], prefix: string) => {
+      let length = prefix.length;
       while(length&&runs.length){const n=Math.min(length,runs[0].text.length);runs[0]={...runs[0],text:runs[0].text.slice(n)};length-=n;if(!runs[0].text)runs.shift();}
-      return match[0].trim();
+      return prefix.trim();
+    };
+    const stripPrefix = (runs: MarkdownRun[], pattern: RegExp) => {
+      const prefix = pattern.exec(textOf(runs))?.[0];
+      return prefix ? consumePrefix(runs, prefix) : undefined;
     };
     for(const b of blocks){
       if(b.kind!=='paragraph'){informalParent=false;continue;}
       if(b.role==='quote')continue;
       if(b.role==='heading'){
-        informalParent=false;b.reportRole=b.level===1?'title':'subtitle';
-        // A supplied marker replaces the preset marker; it is never doubled.
-        let marker:string|undefined;
-        // Collapse redundant heading bullets; preserve the meaningful final
-        // authored number/Roman marker without adding another square.
-        // Subtitle prefixes override the default square. Keep Unicode Roman
-        // numerals verbatim; a level-one title has no prefix override.
-        const headingMarker=b.reportRole==='subtitle'
-          ? /^(?:[□■ㅁㅇ○◦●*※-]|\d+[.)]|[IVXLCDM]+[.)]|[\u2160-\u217f]+[.)])\s+/u
+        informalParent = false;
+        const level = b.level ?? 1;
+        b.reportRole = level === 1 ? "title" : level === 2 ? "section"
+          : level === 3 && numberedSection !== undefined ? "subsection" : "subtitle";
+        if (level <= 2) symbolReport = false;
+        // A decorative bullet may surround an explicit number. Keep the
+        // last number and emit a single formatting prefix.
+        let marker: string | undefined;
+        const decorative = /^[□■ㅁㅇ○◦●*※-]$/u;
+        const headingMarker = level > 1
+          ? /^(?:[□■ㅁㅇ○◦●*※-]|[IVXLCDM]+[.)]|[\u2160-\u217f]+[.)])(?:\s+|$)/u
           : /^(?:[□■ㅁㅇ○◦●*※-]|\d+[.)]|[IVXLCDM]+[.)])\s+/u;
         for(let n=0;n<markdownLimits.depth;n++){
           // Read compound ordinals before the single-number rule, including
           // headings that consist entirely of the marker.
-          const numeric=b.reportRole==='subtitle'
+          const numeric=level>1
             ? stripPrefix(b.runs,/^\d+(?:\.\d+)+(?:[.)])?(?:\s+|$)/u)
               ??stripPrefix(b.runs,/^\d+[.)](?:\s+|$)/u)
             : undefined;
           const next=numeric??stripPrefix(b.runs,headingMarker);
-          if(!next)break;marker=next;
+          if (!next) break;
+          if (!marker || !decorative.test(next)) marker = next;
         }
-        const section=marker&&/^(\d+)\.$/u.exec(marker);
-        const child=marker&&/^(\d+)\.(\d+)[.)]?$/u.exec(marker);
-        if((b.level??1)<=2)numberedSection=b.level===2&&section?section[1]:undefined;
-        if(b.level===3&&child&&child[1]===numberedSection){
-          b.reportRole='subsection';
-          b.prefix=' '+child[2]+') ';
-        }else if(b.reportRole==='subtitle'){
-          if(marker&&!/^[□■ㅁㅇ○◦●*※-]$/u.test(marker))b.prefix=marker+' ';
-          else if(beginsWithDigit(b.runs))b.prefix='';
-          else if(marker)b.prefix='□ ';
+        const suppliedNumber = marker && !decorative.test(marker) ? marker : undefined;
+        if (level === 1) {
+          numberedSection = undefined;
+        } else if (level === 2) {
+          const specified = suppliedNumber === undefined ? undefined : readSectionNumber(suppliedNumber);
+          if (suppliedNumber !== undefined && specified === undefined) {
+            // Keep nonstandard explicit labels intact without using them as a counter.
+            b.prefix = suppliedNumber + " ";
+            numberedSection = undefined;
+          } else {
+            sectionSequence = specified ?? sectionSequence + 1;
+            numberedSection = sectionSequence;
+            b.prefix = romanHeading(numberedSection) + ". ";
+          }
+        } else {
+          const child = suppliedNumber && /^(\d+)\.(\d+)[.)]?$/u.exec(suppliedNumber);
+          if (level === 3 && child && Number(child[1]) === numberedSection) {
+            b.prefix = child[2] + ". ";
+          } else if (suppliedNumber) {
+            b.prefix = suppliedNumber + " ";
+          } else if (beginsWithDigit(b.runs)) {
+            b.prefix = "";
+          } else if (marker) {
+            b.prefix = "□ ";
+          }
         }
       }else if(b.role==='list'){
         const marker=b.prefix?.trim()??'-';
+        const nestedDash = marker === '-' && symbolReport && numberedSection === undefined;
         const level=Math.min(4,(b.level??1)+(informalParent&&(b.level??1)===1?1:0));
-        b.reportRole=marker==='*'?'reference1':marker==='※'?'reference2':level===1?'body1':level===2?'body2':level===3?'reference1':'reference2';
+        b.reportRole = nestedDash ? 'symbolDetail'
+          : marker==='*'?'reference1':marker==='※'?'reference2':level===1?'body1':level===2?'body2':level===3?'reference1':'reference2';
         if(/^\d+[.)]/u.test(marker))b.prefix=b.prefix?.trimStart();
-        else if((b.reportRole==='body1'||b.reportRole==='body2')&&beginsWithDigit(b.runs))b.prefix='';
+        else if((b.reportRole==='body1'||b.reportRole==='body2'||b.reportRole==='symbolDetail')&&beginsWithDigit(b.runs))b.prefix='';
         else delete b.prefix;
       }else if(b.role==='body'){
+        const chapter = readRomanSection(textOf(b.runs));
+        if (chapter) {
+          consumePrefix(b.runs, chapter.prefix);
+          sectionSequence = numberedSection = chapter.number;
+          b.reportRole = 'section';
+          b.prefix = romanHeading(sectionSequence) + '. ';
+          symbolReport = informalParent = false;
+          continue;
+        }
         const marker=stripPrefix(b.runs,/^\s*(?:[○◦●※□]\s*|[ㅇㅁ](?:\s+|(?=\d))|\*\s+)/u);
-        if(marker){b.reportRole=/^[ㅇ○◦●]$/.test(marker)?'body1':marker==='*'?'reference1':marker==='※'?'reference2':'subtitle';informalParent=b.reportRole==='body1'; if((b.reportRole==='subtitle'||b.reportRole==='body1')&&beginsWithDigit(b.runs))b.prefix='';}
-        else{b.reportRole='text';informalParent=false;}
+        if (marker) {
+          const square = marker === '□' || marker === 'ㅁ';
+          const circle = /^[ㅇ○◦●]$/u.test(marker);
+          if (numberedSection === undefined && (square || circle)) symbolReport = true;
+          b.reportRole = circle ? (numberedSection === undefined ? 'symbolBody' : 'body1') : marker === '*' ? 'reference1' : marker === '※' ? 'reference2'
+            : numberedSection === undefined ? 'subtitle' : 'subsection';
+          informalParent = circle;
+          if ((square || circle) && beginsWithDigit(b.runs)) b.prefix = '';
+        } else {
+          b.reportRole = 'text';
+          informalParent = false;
+        }
       }
     }
   }

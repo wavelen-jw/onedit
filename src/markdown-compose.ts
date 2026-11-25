@@ -3,7 +3,7 @@ import {initializeBlankDocument} from './blank-document-defaults.js';
 import {analyzeMarkdown,type MarkdownRequest,type MarkdownRun} from './markdown-import.js';
 import {executeReportBlockSteps,formatEmptyCommandParagraph} from './slash-commands.js';
 import {RhwpAdapter} from './adapter.js';
-import {Interaction} from './interaction.js';
+import type {Interaction} from './interaction.js';
 import {headerFooterCatalog} from './header-footer.js';
 import {siblingDocument} from './core-runtime.js';
 import type {HwpDocument} from '../development/core/rhwp.js';
@@ -39,7 +39,7 @@ function plainPageRun(r:Run){
 function inspectMarkdownLayout(a:RhwpAdapter,existing:boolean):string{
   const issues:string[]=[],proof:unknown[]=[];
   for(let page=0;page<a.pageCount;page++){
-    const info=a.call('getPageInfo',page),runs=a.runs(page),top=info.headerArea.y+info.headerArea.height,bottom=info.footerArea.y;
+    const info=a.readLayout('getPageInfo',page),runs=a.runs(page),top=info.headerArea.y+info.headerArea.height,bottom=info.footerArea.y;
     const tree=a.call('getPageRenderTree',page);
     const outsideBody=(r:Run)=>r.x<info.bodyLeft||r.x+r.w>info.bodyRight||r.y<top||r.y+r.h>bottom;
     const decorations=new Set<Run>();
@@ -91,14 +91,6 @@ function inspectMarkdownLayout(a:RhwpAdapter,existing:boolean):string{
   return existing?JSON.stringify([headerFooterCatalog(a),proof]):"";
 }
 
-/** @internal Run ordinary Edit commands against a new isolated blank document.
- * No synthesized keyboard/input events, HTML importer, bespoke table dimensions
- * or source-document mutation. The existing compound History owns all rollback.
- */
-export function applyMarkdownCommands(editor:Interaction,request:MarkdownRequest){
-  return applyDocumentPlan(editor,analyzeMarkdown(request),request.fitShortLastLine);
-}
-
 /** Clipboard text keeps the receiving font unless the Markdown selects code. */
 export function markdownInlineFormat(run:MarkdownRun):Props {
   return {
@@ -109,10 +101,10 @@ export function markdownInlineFormat(run:MarkdownRun):Props {
   };
 }
 
-function markdownDraft(source: HwpDocument) {
-  const doc = siblingDocument(source);
+function markdownDraft(source: Interaction) {
+  const doc = siblingDocument(source.adapter.doc);
   try {
-    const adapter = new RhwpAdapter(doc), editor = new Interaction(adapter);
+    const adapter = new RhwpAdapter(doc), editor = source.createDraftEditor(adapter);
     initializeBlankDocument(adapter);
     return {doc, adapter, editor, dispose() {
       try { editor.history.clear(); }
@@ -130,10 +122,10 @@ function exportMarkdownDraft(a: RhwpAdapter, plan: NativeDocumentPlan) {
   return {bytes, pageCount: a.pageCount};
 }
 
-export function captureMarkdownBody(target:RhwpAdapter,section:number,plan:NativeDocumentPlan){
-  const {doc,adapter:a,editor,dispose}=markdownDraft(target.doc);
+export function captureMarkdownBody(target:Interaction,section:number,plan:NativeDocumentPlan){
+  const {doc,adapter:a,editor,dispose}=markdownDraft(target);
   try{
-    a.call('setPageDef',0,JSON.stringify(target.call('getPageDef',section)));
+    a.call('setPageDef',0,JSON.stringify(target.adapter.call('getPageDef',section)));
     const {locations}=applyDocumentPlan(editor,plan);
     const end=editor.selection.focus;
     if(end.kind!=='body'||end.sec!==0)throw Error('마크다운 끝 위치를 확인할 수 없습니다.');
@@ -141,7 +133,7 @@ export function captureMarkdownBody(target:RhwpAdapter,section:number,plan:Nativ
   }finally{dispose();}
 }
 
-function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?:boolean){
+export function applyDocumentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?:boolean){
   const before=copy(editor.selection),typing=copy(editor.typing);
   const work=documentPlan(editor,plan,fitShortLines);
   try{
@@ -246,7 +238,7 @@ function* documentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?
   const blockBelowBody=(paragraph:number,from=0)=>{
     let below=false;
     for(let page=from;page<a.pageCount;page++){
-      const info=a.call('getPageInfo',page);
+      const info=a.readLayout('getPageInfo',page);
       if(a.runs(page).some(r=>r.secIdx===0&&(r.parentParaIdx??r.paraIdx)===paragraph&&r.text&&r.y+r.h>info.footerArea.y))below=true;
       const visit=(node:any)=>{if(node.pi===paragraph&&['Table','Shape'].includes(node.type)&&node.bbox&&node.bbox.y+node.bbox.h>info.footerArea.y)below=true;for(const child of node.children??[])visit(child);};
       visit(a.call('getPageRenderTree',page));
@@ -401,7 +393,7 @@ function* documentPlan(editor:Interaction,plan:NativeDocumentPlan,fitShortLines?
 // The SDK prepares an isolated document and yields between finite batches.
 // Existing edit commands retain their local rollback; the entire draft is
 // discarded on deadline, stale binding, validation failure, or disconnect.
-export async function composeSdkDocument(source:HwpDocument,plan:NativeDocumentPlan,fitShortLines:boolean|undefined,checkpoint:()=>void){
+export async function composeSdkDocument(source:Interaction,plan:NativeDocumentPlan,fitShortLines:boolean|undefined,checkpoint:()=>void){
   const {adapter:a,editor,dispose}=markdownDraft(source);
   try{
     const work=documentPlan(editor,plan,fitShortLines,true);
@@ -423,12 +415,12 @@ export async function composeSdkDocument(source:HwpDocument,plan:NativeDocumentP
   }finally{dispose();}
 }
 
-export function composeMarkdownHwpx(source:HwpDocument,request:MarkdownRequest){
+export function composeMarkdownHwpx(source:Interaction,request:MarkdownRequest){
   return composeDocumentPlan(source,analyzeMarkdown(request),request.fitShortLastLine);
 }
 
 /** Internal trusted plan; never accept a caller-supplied MarkdownPlan on the wire. */
-export function composeDocumentPlan(source:HwpDocument,plan:NativeDocumentPlan,fitShortLastLine?:boolean){
+export function composeDocumentPlan(source:Interaction,plan:NativeDocumentPlan,fitShortLastLine?:boolean){
   const {adapter:a,editor,dispose}=markdownDraft(source);
   try{
     const result=applyDocumentPlan(editor,plan,fitShortLastLine);

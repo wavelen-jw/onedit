@@ -13,7 +13,7 @@ const integer=(n:number)=>Number.isSafeInteger(n)&&n>=200&&n<=2147483647;
 // Rounded bboxes identify owners only; all dimensions below come from lossless
 // current SVG clips and exact stored HU. No bbox inversion or global epsilon.
 function frame(a:RhwpAdapter,p:Owner){
-  const grid=a.call('getTableDimensions',p.sec,p.para,p.control),all=a.cells(p);
+  const grid=a.readLayout('getTableDimensions',p.sec,p.para,p.control),all=a.cells(p);
   if(!Number.isSafeInteger(grid.rowCount)||!Number.isSafeInteger(grid.colCount)||grid.rowCount<1||grid.colCount<1||
     all.length!==grid.cellCount||new Set(all.map(c=>c.cellIdx)).size!==all.length)refuse('불완전하거나 분할된 병합 표의 프레임은 조절하지 않습니다.');
   const geometry=exactCellFrames(a,p,all.map(c=>c.cellIdx));
@@ -73,7 +73,7 @@ export function prepareMergedGridResize(a:RhwpAdapter,s:Selection,command:Extrac
   if(!table.treatAsChar||table.hasCaption||table.cellSpacing!==0||table.textWrap!=='TopAndBottom'||table.allowOverlap)refuse('현재 병합 표 배치의 단일 본문 흐름을 확인할 수 없습니다.');
   for(const c of before.all)a.assertEditable({...p,cell:c.cellIdx,cellPara:0,offset:0});
   const page=a.call('getPageDef',p.sec),columns=a.call('getColumnDef',p.sec),parent=a.paraProps({kind:'body',sec:p.sec,para:p.para,offset:0});
-  const parentIdentity=JSON.stringify({page,columns,parent}),pageInfo=a.call('getPageInfo',before.page);
+  const parentIdentity=JSON.stringify({page,columns,parent}),pageInfo=a.readLayout('getPageInfo',before.page);
   if(horizontal){
     if(columns.columnCount!==1||page.landscape||page.marginGutter!==0||table.horzRelTo!=='Para'||table.horzAlign!=='Left'||
       !Number.isSafeInteger(table.horzOffset)||table.horzOffset<0||typeof parent.indent!=='number'||!Number.isFinite(parent.indent)||parent.indent>0||
@@ -136,7 +136,7 @@ export function prepareMergedGridResize(a:RhwpAdapter,s:Selection,command:Extrac
       }else{
         if(after.total.tableWidth!==before.total.tableWidth+delta*tracks.size)fail();
         for(const c of before.all){const old=before.props.get(c.cellIdx)!,now=after.props.get(c.cellIdx)!;if(now.height!==old.height||now.width!==old.width+delta*count(c)||after.geometry.cells.get(c.cellIdx)!.hu<now.height)fail();}
-        const info=a.call('getPageInfo',after.page);
+        const info=a.readLayout('getPageInfo',after.page);
         if(after.left-table.outerLeft/after.geometry.units<0||after.right+table.outerRight/after.geometry.units>info.width)fail();
       }
       return false;

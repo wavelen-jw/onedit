@@ -223,7 +223,7 @@ export function constructFreshMergedGrid(
     "UNVALIDATED_OWNER",
   );
   const { rowCount, colCount, cells } = block;
-  const dims = a.call("getTableDimensions", p.sec, p.para, p.control);
+  const dims = a.readLayout("getTableDimensions", p.sec, p.para, p.control);
   requireGrid(
     dims.rowCount === rowCount && dims.colCount === colCount,
     "GRID_NATIVE_PRESERVATION",

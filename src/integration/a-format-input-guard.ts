@@ -1,3 +1,6 @@
+import { sameEditTarget as sameFormatTarget } from "../edit-target.js";
+export { sameFormatTarget };
+
 // Modal-local input state; never changes the editor's IME or document history.
 export function formatInputGuard(form: HTMLElement, view?: {root: HTMLElement; owns: (target: EventTarget | null) => boolean}) {
   const life = new AbortController();
@@ -70,17 +73,6 @@ export function formatInputGuard(form: HTMLElement, view?: {root: HTMLElement; o
     dispose() { life.abort(); generation++; },
   };
 }
-export function sameFormatTarget(
-  a: { documentId: string; revision: number; selection: unknown },
-  b: typeof a,
-) {
-  return (
-    a.documentId === b.documentId &&
-    a.revision === b.revision &&
-    JSON.stringify(a.selection) === JSON.stringify(b.selection)
-  );
-}
-
 export function isCurrentPointerTarget(
   node: Node, busy: boolean, target: Parameters<typeof sameFormatTarget>[0],
   capture: () => typeof target,

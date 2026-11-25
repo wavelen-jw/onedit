@@ -16,7 +16,7 @@ export function projectControlLabels(svg:SVGSVGElement, a:RhwpAdapter, page:numb
   const labels=runs.filter(r=>!Object.hasOwn(r,"charStart") && r.textColor?.toLowerCase()==="#ff0000" &&
     marker.test(r.text) && r.fontSize!>0 && [r.x,r.y,r.w,r.h,r.fontSize].every(Number.isFinite));
   if(!labels.length)return;
-  const info=a.call("getPageInfo",page),obstacles:Box[]=runs.filter(r=>Object.hasOwn(r,"charStart"));
+  const info=a.readLayout("getPageInfo",page),obstacles:Box[]=runs.filter(r=>Object.hasOwn(r,"charStart"));
   for(const c of a.call("getPageControlLayout",page).controls??[])if([c.x,c.y,c.w,c.h].every(Number.isFinite))obstacles.push(c);
   const bands=[
     {x:info.bodyLeft,w:info.bodyRight-info.bodyLeft,top:4,bottom:info.headerArea.y-4},

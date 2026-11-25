@@ -489,15 +489,19 @@ export function connectViewIntegration(
   // Keyboard appearance changes the visual viewport without changing Core or
   // selection. Reveal only the focused live caret; never refocus on resize.
   const revealMobileCaret = () => {
-    if (document.activeElement !== input || composing || modal()) return;
-    inputPosition(true);
-    const v = window.visualViewport, r = input.getBoundingClientRect();
-    if (!v) return;
-    const tools = document.getElementById('mobile-edit-tools');
-    const bottom = tools && !tools.hidden
-      ? Math.min(v.offsetTop + v.height, tools.getBoundingClientRect().top)
-      : v.offsetTop + v.height;
-    const top = Math.max(v.offsetTop, viewport.getBoundingClientRect().top);
+    if (document.activeElement !== input || composing || modal() ||
+        connection.files.editor.selection.kind !== "caret") return;
+    const v = window.visualViewport;
+    if (!v || Math.abs(v.scale - 1) >= .05 || !inputPosition()) return;
+    const r = input.getBoundingClientRect();
+    const visible = viewport.getBoundingClientRect();
+    const tools = document.getElementById("mobile-edit-tools");
+    const choices = document.getElementById("mobile-edit-choices");
+    const toolbar = tools && !tools.hidden ? (choices && !choices.hidden ? choices : tools) : undefined;
+    const bottom = Math.min(v.offsetTop + v.height, visible.bottom,
+      toolbar?.getBoundingClientRect().top ?? Infinity);
+    const top = Math.max(v.offsetTop, visible.top + viewport.clientTop);
+    if (bottom - top <= 32) return;
     if (r.bottom > bottom - 16) viewport.scrollTop += r.bottom - (bottom - 16);
     else if (r.top < top + 16) viewport.scrollTop -= top + 16 - r.top;
   };

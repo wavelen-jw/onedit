@@ -6,11 +6,11 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {browserRuntimeInventory} from './browser-runtime-inventory.mjs';
 import {bundleDevelopment} from './bundle-development.mjs';
+import {readRuntimeSelection} from './core-runtime-selection.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));process.chdir(root);
 const sha=b=>createHash('sha256').update(b).digest('hex');
-const manifest=JSON.parse(await fs.readFile('development-runtime.json','utf8'));
+const manifest=await readRuntimeSelection(root);
 for(const [name,pin]of Object.entries(manifest.files)){
- if(!['rhwp.js','rhwp.d.ts','rhwp_bg.wasm','rhwp_bg.wasm.d.ts'].includes(name)||!/^[a-f0-9]{64}$/.test(pin))throw Error('Invalid fixed development runtime manifest');
  const target=path.join(root,'development/core',name);let bytes;
  try{if((await fs.lstat(target)).isSymbolicLink())throw Error('Runtime symlink refused');bytes=await fs.readFile(target);}
  catch(e){if(e.code!=='ENOENT')throw e;bytes=await fs.readFile(path.join(manifest.source,name));if(sha(bytes)!==pin)throw Error('Fixed source runtime hash mismatch: '+name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,bytes,{flag:'wx'});}
@@ -31,14 +31,19 @@ if (sdkSource) {
  execFileSync(process.execPath,['sdk/verify-wire-schema.mjs'],{stdio:'inherit'});
  execFileSync(process.execPath,['sdk/verify-release-dist.mjs'],{stdio:'inherit'});
 }
-const selected=manifest.rev10FormatSnapshot;
-const runtimeNames=['rhwp.js','rhwp.d.ts','rhwp_bg.wasm','rhwp_bg.wasm.d.ts'];
-if(selected?.sha256!==manifest.files['rhwp_bg.wasm'] ||
-   !runtimeNames.every(n=>selected.matched4?.[n]===manifest.files[n]))
- throw Error('Private format snapshot Core mismatch');
 const files=[];
-async function walk(dir){for(const e of await fs.readdir(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isSymbolicLink())throw Error('Source symlink refused: '+p);if(e.isDirectory())await walk(p);else files.push(p);}}
-await walk('src');files.push('index.html','style.css','workspace-ui.css','development-runtime.json','scripts/build-development.mjs','scripts/bundle-development.mjs','scripts/prepare-build-tools.mjs','scripts/static-asset-policy.mjs','scripts/browser-runtime-inventory.mjs','build-tools/package.json','build-tools/package-lock.json');
+async function walk(dir) {
+ for (const entry of await fs.readdir(dir,{withFileTypes:true})) {
+  const file = path.join(dir,entry.name);
+  if (file === 'public/core') continue;
+  if (entry.isSymbolicLink()) throw Error('Source symlink refused: '+file);
+  if (entry.isDirectory()) await walk(file);
+  else files.push(file);
+ }
+}
+await walk('src');
+await walk('public');
+files.push('tsconfig.json','package-lock.json','index.html','style.css','workspace-ui.css','development-runtime.json','scripts/build-development.mjs','scripts/core-runtime-selection.mjs','scripts/bundle-development.mjs','scripts/prepare-build-tools.mjs','scripts/static-asset-policy.mjs','scripts/browser-runtime-inventory.mjs','build-tools/package.json','build-tools/package-lock.json');
 const inputs={};for(const p of files.sort())inputs[p]=sha(await fs.readFile(p));
 const source=sha(Buffer.from(JSON.stringify(inputs))),out=path.join(root,'output/unified-development',source.slice(0,16));
 try{const prior=JSON.parse(await fs.readFile(path.join(out,'development-build.json'),'utf8'));if(prior.source!==source)throw Error('Existing candidate differs');for(const[p,pin]of Object.entries(prior.outputs))if(sha(await fs.readFile(path.join(out,p)))!==pin)throw Error('Existing candidate changed: '+p);console.log(JSON.stringify({status:'PASS',runtime:out,source,reused:true,WASM:manifest.files['rhwp_bg.wasm']}));process.exit(0);}catch(e){if(e.code!=='ENOENT')throw e;}

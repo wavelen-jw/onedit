@@ -84,7 +84,7 @@ export function pasteClipboardMarkdown(editor: Interaction, selection: Selection
   const hasTable = plan.blocks.some(block => block.kind === "table");
   if (hasTable && a.call("getColumnDef", from.sec).columnCount > 1)
     throw new PasteFormatUnavailable("마크다운 표는 한 단 본문에 붙이세요.");
-  const { fragment, locations } = captureMarkdownBody(a, from.sec, plan);
+  const { fragment, locations } = captureMarkdownBody(editor, from.sec, plan);
   try {
     return editor.history.transact("paste", selection, () => {
       if (!samePosition(from, to)) a.remove(from, to);
@@ -106,7 +106,7 @@ export function pasteClipboardMarkdown(editor: Interaction, selection: Selection
         const tables = a.inline(body);
         const rows = entry.rows;
         if (!rows || tables.length !== 1) throw Error("붙여넣은 마크다운 표를 확인할 수 없습니다.");
-        const control = tables[0].controlIndex, dimensions = a.call("getTableDimensions", body.sec, body.para, control);
+        const control = tables[0].controlIndex, dimensions = a.readLayout("getTableDimensions", body.sec, body.para, control);
         if (dimensions.rowCount !== rows.length || dimensions.colCount !== rows[0].length)
           throw Error("붙여넣은 표의 행과 열이 원문과 다릅니다.");
         for (const [row, cells] of rows.entries()) for (const [col, text] of cells.entries()) {

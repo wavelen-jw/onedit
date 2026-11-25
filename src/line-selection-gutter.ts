@@ -23,7 +23,7 @@ export function mountLineSelectionGutter(doc:Document,editor:Interaction,actions
     rows.delete(page);page.querySelectorAll('.line-selection-gutter').forEach(e=>e.remove());
     try{editor.withViewQueries(()=>{
       const lines=bodyVisualLines(editor,Number(page.dataset.page));
-      const columns=editor.adapter.call('getPageInfo',Number(page.dataset.page)).columns??[];
+      const columns=editor.adapter.readLayout('getPageInfo',Number(page.dataset.page)).columns??[];
       if(key()!==identity||svg!==page.querySelector(':scope>svg')||page.hasAttribute('data-render-pending'))throw Error('현재 줄 선택 대상을 다시 확인해야 합니다.');
       rows.set(page,{svg,lines});
       for(const[i,line]of lines.entries()){
@@ -64,7 +64,7 @@ export function mountLineSelectionGutter(doc:Document,editor:Interaction,actions
     e.preventDefault();e.stopImmediatePropagation();
     const page=(doc.elementFromPoint(e.clientX,e.clientY) as Element|null)?.closest<HTMLElement>('.page');if(!page)return;prepare(page);
     const entry=rows.get(page);if(!entry||entry.svg!==page.querySelector(':scope>svg'))return;
-    const point=pagePoint(page,e.clientX,e.clientY),columns=editor.adapter.call('getPageInfo',Number(page.dataset.page)).columns??[];
+    const point=pagePoint(page,e.clientX,e.clientY),columns=editor.adapter.readLayout('getPageInfo',Number(page.dataset.page)).columns??[];
     const column=columns.find((c:{x:number;width:number})=>point.x>=c.x-30&&point.x<c.x+c.width);
     const candidates=entry.lines.filter(l=>!column||l.left>=column.x&&l.left<column.x+column.width);
     const line=candidates.reduce<BodyVisualLine|undefined>((best,l)=>!best||Math.abs((l.top+l.bottom)/2-point.y)<Math.abs((best.top+best.bottom)/2-point.y)?l:best,undefined);

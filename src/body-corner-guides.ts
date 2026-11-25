@@ -7,20 +7,27 @@ export type BodyPageInfo = {
   footerArea: { y: number };
 };
 
+export function bodyPageBounds(info: BodyPageInfo) {
+  const left = info.bodyLeft, right = info.bodyRight;
+  const top = info.headerArea.y + info.headerArea.height, bottom = info.footerArea.y;
+  if ([left, right, top, bottom].every(Number.isFinite) && left >= 0 && top >= 0 &&
+      right > left && bottom > top && right <= info.width && bottom <= info.height)
+    return { left, right, top, bottom };
+}
+
 /** Screen-only margin marks use the same page info already read for publication. */
 export function paintBodyCorners(page: HTMLElement, info: BodyPageInfo) {
   const overlay = page.querySelector<HTMLElement>(":scope > .overlay");
   if (!overlay) return;
   const existing = overlay.querySelector<SVGSVGElement>(":scope > .body-corner-guides");
-  const left = info.bodyLeft, right = info.bodyRight;
-  const top = info.headerArea.y + info.headerArea.height, bottom = info.footerArea.y;
-  if (![left, right, top, bottom].every(Number.isFinite) || left < 0 || top < 0 ||
-      right <= left || bottom <= top || right > info.width || bottom > info.height) {
+  const body = bodyPageBounds(info);
+  if (!body) {
     existing?.remove();
     return;
   }
   const viewBox = `0 0 ${info.width} ${info.height}`;
-  const bounds = JSON.stringify({left, right, top, bottom});
+  const bounds = JSON.stringify(body);
+  const { left, right, top, bottom } = body;
   if (existing?.dataset.bounds === bounds && existing.getAttribute("viewBox") === viewBox) return;
   const ns = "http://www.w3.org/2000/svg";
   const svg = page.ownerDocument.createElementNS(ns, "svg");

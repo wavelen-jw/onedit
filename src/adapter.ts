@@ -1,3 +1,4 @@
+import { coreCommandPolicy } from "./core-command-policy.js";
 import { rootEditorCoreSha256 } from "./root-editor-core-binding.js";
 import { coreRuntimeDispatchEpoch, coreRuntimeScreenInputEpoch } from "./core-runtime.js";
 import { isB338OwnerTrialDigest } from "./b338-focused-owner-trial.js";
@@ -11,8 +12,8 @@ import { rootCellAddress, selectionContextScope } from './selection-context-lite
 import { localBodyRequest } from "./local-body-edit.js";
 import * as positions from "./adapter-position.js";
 import { projectSemantic } from "./adapter-semantic.js";
-import { exportCheckedHwpx } from "./adapter-save.js";
-import { result, invokeCore } from "./adapter-core.js";
+import { exportCheckedCoreHwpx } from "./adapter-save.js";
+import { result, invokeCore, type CoreLayoutResults } from "./adapter-core.js";
 import { widthPreviewReads, type WidthEvent, type WidthMethod } from "./width-preview-reads.js";
 import {UnsupportedTableOperation} from './table-capability.js';
 import {fragmentClipboardObjects} from './object-clipboard.js';
@@ -53,34 +54,7 @@ export type BodyLine = { lineIndex: number; lineCount: number; charStart: number
 export type NavigationRect = { pageIndex: number; x: number; y: number; height: number };
 // A table path cannot encode a non-table ancestor (e.g. a shape's text list).
 // This is an addressability limit, not a Core rendering failure.
-export class UnsupportedTableOwner extends Error {}
-const viewQueryMethods = new Set<string>([
-  "getCursorModel", "getDocumentInfo", "getPageTextLayout", "getPageControlLayout",
-  "getTableCellBboxes",
-  "getCharPropertiesAt", "getCellCharPropertiesAt", "getCellCharPropertiesAtByPath",
-  "getParaPropertiesAt", "getCellParaPropertiesAt", "getCellParaPropertiesByPath",
-  "getCellOwnProperties", "getBodyInlineTables", "getCursorRect", "getCursorRectInCell",
-  // Read-only visual-line queries share this projection's layout. In particular,
-  // reading line info must not evict the same line edges between styled runs.
-  "getLineInfo", "getCursorRectOnLine",
-  "getCharShapeRuns", "getCharShapeRunsInCellByPath",
-  "getCursorRectInCellByPath", "captureCellParagraphPath", "resolveCellParagraphPath",
-  "validateCellParagraphPath", "getNumberingList", "getBulletList",
-  "getControls", "getControlTextPositions", "getPictureProperties",
-  // Reviewed JSON-valued read methods. Existing localLayoutReads still completes
-  // pending flow before caching. Each result is reparsed for its consumer.
-  "getPageInfo", "getCaretStops", "getCharIndexAtStreamPos", "getColumnDef",
-  "getParaShapeSet", "getObjects", "getPageHide",
-]);
-// Existing Adapter/SDK readers that promise current whole-layout information.
-// A local BODY result does not authenticate a focused-page patch for them.
-const localLayoutReads = new Set<string>([
-  "getDocumentInfo", "getPageInfo", "getPageSizeRuns", "getPageTextLayout", "getPageControlLayout",
-  "getCursorModel", "getTableCellBboxes", "getTableCellBboxesByPath",
-  "getCursorRect", "getCursorRectInCell", "getCursorRectInCellByPath",
-  "getLineInfo", "getCursorRectOnLine",
-]);
-const updateReadMethods = new Set(['getPageInfo','getCaretStops','getCharIndexAtStreamPos','getColumnDef','getParaShapeSet','getObjects','getPageHide','getTextFileUnicode']);
+export { UnsupportedTableOwner } from "./adapter-core.js";
 export class RhwpAdapter {
   // Internal read fence, not an exposed Core layout epoch/certificate.
   private updateReadEpoch = 0;
@@ -535,26 +509,31 @@ export class RhwpAdapter {
     this.adoptOpenedDocument(siblingDocument(this.doc, bytes));
   }
 
-  /** Transfer a detached document after the caller's open admission. */
-  adoptOpenedDocument(candidate: HwpDocument) {
-    let locked: boolean;
+  /** Inspect a detached candidate; ownership stays with the caller. */
+  openedDocumentState(candidate: HwpDocument) {
+    if (this.transientEdit || candidate === this.doc)
+      throw Error("현재 문서를 교체할 수 없습니다.");
+    result(candidate.getDocumentInfo());
+    const locked = result<any[]>(candidate.getControls()).some(c => c.props?.Lock);
+    return {
+      doc: candidate,
+      documentLocked: locked,
+      scope: locked ? "readonly" as const : "edit" as const,
+      viewerOnlyReason: undefined,
+      documentId: crypto.randomUUID(),
+    };
+  }
+
+  private adoptOpenedDocument(candidate: HwpDocument) {
+    let next: ReturnType<RhwpAdapter["openedDocumentState"]>;
     try {
-      if (this.transientEdit || candidate === this.doc)
-        throw Error("현재 문서를 교체할 수 없습니다.");
-      result(candidate.getDocumentInfo());
-      locked = result<any[]>(candidate.getControls()).some(c => c.props?.Lock);
+      next = this.openedDocumentState(candidate);
     } catch (error) {
       if (candidate !== this.doc) candidate.free();
       throw error;
     }
     this.doc.free();
-    this.doc = candidate;
-    this.documentLocked = locked;
-    this.scope = locked ? "readonly" : "edit";
-    this.viewerOnlyReason = undefined;
-    this.documentId = crypto.randomUUID();
-    this.revision = 0;
-    this.savedRevision = 0;
+    Object.assign(this, next, { revision: 0, savedRevision: 0 });
   }
   private readCursorMemo(doc:HwpDocument, immutable:boolean) {
     const packet=readCursorModelMemo(doc,()=>this.doc===doc&&!this.pendingLocalBody&&!this.transientEdit&&
@@ -580,11 +559,15 @@ export class RhwpAdapter {
       return this.call("getCursorModel");
     return this.readCursorMemo(this.doc,true);
   }
+  readLayout<Method extends keyof CoreLayoutResults>(
+    method: Method, ...args: Parameters<HwpDocument[Method]>
+  ): CoreLayoutResults[Method] {
+    return this.call<CoreLayoutResults[Method]>(method, ...args);
+  }
   call<T = any>(method: keyof HwpDocument, ...args: any[]): T {
-    // Keep the old geometry-query invalidation unchanged. These additional
-    // source-reviewed read calls preserve ONLY structural/count/text values.
-    if (!viewQueryMethods.has(String(method)) && !updateReadMethods.has(String(method))) this.invalidateUpdateReads();
-    if (method === "restoreSnapshot") {
+    const policy = coreCommandPolicy(method);
+    if (!policy.keepUpdateReads) this.invalidateUpdateReads();
+    if (policy.pendingLayout === "restore") {
       // Restore discards the current derived generation. Never require a
       // failed/pending preview to paginate before its rollback can execute.
       const pending = this.pendingLocalBody;
@@ -593,11 +576,7 @@ export class RhwpAdapter {
       try { return result<T>(invokeCore(this.doc, method, args)); }
       catch (error) { this.pendingLocalBody = pending; throw error; }
     }
-    // Reads use current authoritative Core output. Unsupported writes and global
-    // completion boundaries cannot carry an advisory local-flow state forward.
-    if (this.pendingLocalBody && method !== "replaceBodyTextLocal" &&
-        (localLayoutReads.has(String(method)) ||
-         !/^(get|capture|resolve|validate|logical|textOffset)/.test(String(method))))
+    if (this.pendingLocalBody && policy.pendingLayout === "complete")
       this.completeLocalBodyFlow();
     if(method==="getCursorModel"&&args.length===0&&coreRuntimeOwnsCursorMemo(this.doc))
       return this.readCursorMemo(this.doc,false);
@@ -615,8 +594,8 @@ export class RhwpAdapter {
       }
     }
     const queries = this.currentViewQueries();
-    const cacheable = typeof method === 'string' && viewQueryMethods.has(method) &&
-      (!updateReadMethods.has(method) || this.heightCandidateIdentified && coreRuntimeHasUpdateReadProvenance(this.doc));
+    const cacheable = policy.viewCache === "view" ||
+      (policy.viewCache === "verified" && this.heightCandidateIdentified && coreRuntimeHasUpdateReadProvenance(this.doc));
     if (queries && !cacheable) { queries.clear();this.viewQueryUnits=0; }
     const key = queries && cacheable ? JSON.stringify([method, args]) : undefined;
     let raw = key === undefined ? undefined : queries!.get(key);
@@ -1376,7 +1355,7 @@ export class RhwpAdapter {
     const top = boxes.find(b => b.row === 0)!.pageIndex;
     if (boxes.some(b => b.pageIndex !== top + b.row)) return boxes;
     try {
-      const dims = this.call("getTableDimensionsByPath", p.sec, p.para, this.path(p));
+      const dims = this.readLayout("getTableDimensionsByPath", p.sec, p.para, this.path(p));
       if (dims.rowCount !== 2 || dims.colCount !== 2 || dims.cellCount !== 4) return boxes;
       const result: CellBox[] = [];
       for (const b of boxes) {
@@ -1643,15 +1622,17 @@ export class RhwpAdapter {
       throw Error("보호된 셀은 편집할 수 없습니다.");
   }
   exportChecked() {
-    // Retain the existing refusal before any completion work on forbidden Save.
-    if (!this.transientEdit && !this.viewerOnlyReason) this.completeLocalBodyFlow();
-    return exportCheckedHwpx.call(this);
+    return exportCheckedCoreHwpx.call(this);
+  }
+  /** @internal The caller owns this detached handle and must free it. */
+  openVerificationSibling(bytes: Uint8Array) {
+    return new RhwpAdapter(siblingDocument(this.doc, bytes));
   }
   // Rare resize certificate only. Reopen checked bytes through this document's
   // private runtime; never replace the live document, selection or History.
   withCheckedReopen<T>(read: (reopened: RhwpAdapter) => T): T {
     const { bytes } = this.exportChecked();
-    const reopened = new RhwpAdapter(siblingDocument(this.doc, bytes));
+    const reopened = this.openVerificationSibling(bytes);
     try { return read(reopened); } finally { reopened.doc.free(); }
   }
 }

@@ -1,5 +1,5 @@
 import {objectPointsToHu} from "./object-size-inputs.js";
-import {bodyParagraphOwners} from './adapter-position.js';
+import {bodyParagraphOwners} from './body-paragraph-owners.js';
 import { coreRuntimeHasCapability } from './core-runtime.js';
 import type { RhwpAdapter } from './adapter.js';
 import { copy, type Selection } from './model.js';

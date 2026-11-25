@@ -24,30 +24,17 @@ export function rewriteSectionXml(bytes: Uint8Array, edit: (xml:Document)=>void 
   return rewriteHwpxXmlMember(bytes, "Contents/section0.xml", edit);
 }
 
-export function inspectSectionXml(bytes: Uint8Array, read: (xml: Document) => void, requiredLiteral?: string) {
-  return processXmlMember(bytes, "Contents/section0.xml", xml => {
-    read(xml);
-    return false;
-  }, requiredLiteral);
-}
-
-function editXml(text: string, edit: (xml: Document) => void | false, requiredLiteral?: string) {
+function editXml(text: string, edit: (xml: Document) => void | false) {
   if (/<!DOCTYPE|<!ENTITY/i.test(text)) invalid();
-  if (requiredLiteral !== undefined && !text.includes(requiredLiteral)) return;
   const xml = new DOMParser().parseFromString(text, "application/xml");
   if (xml.querySelector("parsererror")) invalid();
   if (edit(xml) !== false) return new TextEncoder().encode(new XMLSerializer().serializeToString(xml));
 }
 
-export function rewriteHwpxXmlMember(bytes: Uint8Array, member: XmlMember, edit: (xml: Document) => void | false) {
-  return processXmlMember(bytes, member, edit);
-}
-
-async function processXmlMember(
+export async function rewriteHwpxXmlMember(
   bytes: Uint8Array,
   member: XmlMember,
   edit: (xml:Document)=>void | false,
-  requiredLiteral?: string,
 ): Promise<Uint8Array> {
   if (bytes.length>archiveLimit || bytes.length<22) invalid();
   const input=view(bytes), eocd=bytes.length-22;
@@ -93,7 +80,7 @@ async function processXmlMember(
         } finally { await reader.cancel(); }
       }
       if (data.length!==size || crc(data)!==u32(c+16)) invalid();
-      const replacement = editXml(decoder.decode(data), edit, requiredLiteral);
+      const replacement = editXml(decoder.decode(data), edit);
       if (!replacement) {
         chunks.push(bytes.subarray(local,end));
         outputAt+=end-local;

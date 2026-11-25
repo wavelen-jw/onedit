@@ -407,9 +407,9 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
   };
   directPrintButton.onclick=showPrint;
   const syncPrint = () => {
+    nativePrint.sync();
     if(activeWorkset(doc)){directPrintButton.disabled=false;directPrintButton.title="브라우저 인쇄 창 (Ctrl+P) · 프린터·쪽 범위·매수·PDF 저장";return;}
     if(!files.ui.standalone){directPrintButton.disabled=true;directPrintButton.title="독립 편집기에서 인쇄할 수 있습니다.";return;}
-    nativePrint.sync();
     directPrintButton.disabled = unavailable() || nativePrint.busy;
     directPrintButton.title = "브라우저 인쇄 창 (Ctrl+P) · 프린터·쪽 범위·매수·PDF 저장";
 
@@ -1414,9 +1414,13 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
       breakColumn:target=>safe(()=>editor.execute({type:"column-break"},target)),
       breakColumnDefinition:target=>safe(()=>editor.execute({type:"column-definition-break"},target))});
     remainingShortcuts=mountRemainingShortcutUI(doc,editor,{blocked:unavailable,inFlight:busy,focus,changed,error:files.ui.error});
-    quickFormat = mountQuickFormat(doc, editor, unavailable, (command, target) => { editor.execute(lowerMenuCommand(editor, command), target); changed(); }, focus, formatBlockedReason, readUnavailable,
+    const applyFormatCommand = (command: CatalogCommand, target: ReturnType<Interaction["capture"]>) => {
+      editor.execute(lowerMenuCommand(editor, command), target);
+      changed();
+    };
+    quickFormat = mountQuickFormat(doc, editor, unavailable, applyFormatCommand, focus, formatBlockedReason, readUnavailable,
       f5SliceEnabled && qaQuickFormatDemandFlag(doc.defaultView?.location.href ?? ""));
-    propertiesPanel = mountPropertiesPanel(doc, editor, unavailable, (props,target) => { editor.execute(lowerMenuCommand(editor,{type:"paragraph",props}),target); changed(); },focus,formatBlockedReason,()=>showFormat("paragraph",true),shapes.readSelected,(command,target)=>{editor.execute(command,target);changed();});
+    propertiesPanel = mountPropertiesPanel(doc, editor, unavailable, (props,target) => applyFormatCommand({type:"paragraph",props},target),focus,formatBlockedReason,()=>showFormat("paragraph",true),shapes.readSelected,(command,target)=>{editor.execute(command,target);changed();});
     tableContext = mountTableContext(doc, editor, unavailable, p => { editor.point(p); files.ui.change(false); }, focus, reason => files.ui.error(reason), {
       state: () => activeWorkset(doc)?syncEdit.liveState():editMenuState(editor, unavailable()), invoke: syncEdit.invoke,
     },{invoke:syncTable.invoke,formatInvoke:syncFormat.invoke});
@@ -1431,14 +1435,19 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
     emptyHint=mountEmptyParagraphHint(doc,editor,unavailable);
     if (activeWorkset(doc)) mountMobileEditTools(doc, editor, {
       busy: unavailable,
+      fileActionAvailable: action => files.ui.standalone &&
+        (action === "confirm-download" ? !files.busy && !!files.pending : !files.transitionBlockReason &&
+          (files.canDownloadOriginal || editor.adapter.scope === "edit" && !editor.adapter.documentLocked)),
       error: error => files.ui.error(error),
       run: (action, target) => {
         switch (action) {
-          case "undo": case "copy": case "cut": case "paste":
+          case "undo": case "redo": case "copy": case "cut": case "paste":
             syncEdit.invoke(action, target); return;
           case "previous-cell": case "next-cell":
             syncTable.invoke(action === "previous-cell" ? "previous" : "next", target); return;
           case "cell-properties": cellCommand.open("properties", target); return;
+          case "download-copy": void files.downloadCopy(); return;
+          case "confirm-download": doc.getElementById("download-confirm")?.click(); return;
           case "character": showFormat("char"); return;
           case "paragraph": showFormat("paragraph"); return;
           case "bold": safe(() => editor.execute(characterStyleCommand("bold"), target)); return;
@@ -1449,7 +1458,7 @@ export function connectMenuIntegration(files: FileLifecycle, doc: Document) {
         }
       },
     });
-    selectionTools=mountSelectionTools(doc,editor,{busy:unavailable,focus,shapeTarget:()=>shapes.readSelected()?.target,touchClipboard:{state:syncEdit.liveState,invoke:syncEdit.invoke},execute:(command,target)=>{editor.execute(lowerMenuCommand(editor,command),target);changed();}});
+    selectionTools=mountSelectionTools(doc,editor,{busy:unavailable,focus,shapeTarget:()=>shapes.readSelected()?.target,touchClipboard:{state:syncEdit.liveState,invoke:syncEdit.invoke},execute:applyFormatCommand});
     lineGutter=mountLineSelectionGutter(doc,editor,{busy:unavailable,changed:()=>files.ui.change(false),focus,error:e=>files.ui.error(e)});
     removeExcludedMenuEntries(doc);
     if(!activeWorkset(doc))collectSupportedMenuCommands(doc);

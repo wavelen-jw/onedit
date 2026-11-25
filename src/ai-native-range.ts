@@ -959,7 +959,7 @@ function verifyLayout(a: RhwpAdapter, p: Position, text: string) {
     p.kind === "cell" ? a.cells(p).filter((b) => b.cellIdx === p.cell) : [];
   const hasCell = p.kind === "cell";
   for (let page = 0; page < a.pageCount; page++) {
-    const info = a.call("getPageInfo", page);
+    const info = a.readLayout("getPageInfo", page);
     for (const run of a.runs(page)) {
       if (!run.text || run.secIdx !== p.sec) continue;
       const matches =

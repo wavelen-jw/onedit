@@ -120,6 +120,9 @@
       ><span id="clipboard-status" role="status" aria-live="polite"></span
       ><span id="table-operation-status" role="status" aria-live="polite" aria-atomic="true"></span
       ><span id="selection" role="status" aria-live="polite" aria-atomic="true"></span>
+      <button type="button" id="working-copy-open" aria-haspopup="dialog" hidden></button>
+      <span id="working-copy-notice" role="status" aria-live="polite"></span>
+      <button type="button" id="working-copy-retry" hidden>복구본 저장 다시 시도</button>
       <span id="font-notice" hidden>
         <span id="font-notice-text" role="status" aria-live="polite"></span>
         <button type="button" id="font-notice-settings" data-local-font-settings hidden>글꼴 설정</button>
@@ -136,6 +139,13 @@
       </button>
     </div>
     <div id="error" role="alert" hidden></div>
+    <dialog id="working-copy-dialog" aria-labelledby="working-copy-title">
+      <h2 id="working-copy-title">저장 전 작업 복구</h2>
+      <p>이 브라우저에 최대 7일 동안 임시 보관한 작업입니다.</p>
+      <ul id="working-copy-list"></ul>
+      <p id="working-copy-feedback" role="status"></p>
+      <menu><button id="working-copy-close" type="button" autofocus>닫기</button></menu>
+    </dialog>
     <dialog id="format" aria-labelledby="format-title">
       <form id="format-form">
         <h2 id="format-title"></h2>

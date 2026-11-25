@@ -1,20 +1,15 @@
 {
-  "schema": 1,
-  "scope": "Onedit source snapshot; exact verified Core provisioned separately",
+  "schema": 2,
   "source": "development/core",
   "files": {
-    "rhwp.js": "6f80340e0cc1b2ae0a0c31fc12f7cec30a6eff6bd14ef5a30f6e55836230607e",
     "rhwp.d.ts": "c827c0d54f227baa151047c708967eae75d171a3c69d8d2aa2441b4abf9113ad",
-    "rhwp_bg.wasm.d.ts": "991d076d8a28811bd99950926d9e22a8d9305061e26f99cf0576de19709f5b90",
-    "rhwp_bg.wasm": "dc39bcd81afff0ab64bc6ffbb01176c947a772a2b6e17d69678cb9b6f7b0ddc3"
+    "rhwp.js": "6f80340e0cc1b2ae0a0c31fc12f7cec30a6eff6bd14ef5a30f6e55836230607e",
+    "rhwp_bg.wasm": "203415b16f2e534e22a56b7f7c2e87c902b641b06337d92363c4cbe55d4c76fe",
+    "rhwp_bg.wasm.d.ts": "991d076d8a28811bd99950926d9e22a8d9305061e26f99cf0576de19709f5b90"
   },
-  "rev10FormatSnapshot": {
-    "sha256": "dc39bcd81afff0ab64bc6ffbb01176c947a772a2b6e17d69678cb9b6f7b0ddc3",
-    "matched4": {
-      "rhwp.js": "6f80340e0cc1b2ae0a0c31fc12f7cec30a6eff6bd14ef5a30f6e55836230607e",
-      "rhwp.d.ts": "c827c0d54f227baa151047c708967eae75d171a3c69d8d2aa2441b4abf9113ad",
-      "rhwp_bg.wasm.d.ts": "991d076d8a28811bd99950926d9e22a8d9305061e26f99cf0576de19709f5b90",
-      "rhwp_bg.wasm": "dc39bcd81afff0ab64bc6ffbb01176c947a772a2b6e17d69678cb9b6f7b0ddc3"
-    }
-  }
+  "admissions": [
+    "checked-external-open",
+    "editor-format-snapshot",
+    "editor-owner-bindings"
+  ]
 }

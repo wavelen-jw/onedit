@@ -1,17 +1,18 @@
 import type { FormatKind, FormatState } from "./formatting.js";
 import {freezeDiagnosticFor} from './diagnostics/runtime.js';
-import {composeMarkdownHwpx,applyMarkdownCommands} from './markdown-compose.js';
-import type {MarkdownRequest} from './markdown-import.js';
+import { composeDocumentPlan, applyDocumentPlan } from "./markdown-compose.js";
+import type { MarkdownPlan } from "./markdown-import.js";
 import { initializeBlankDocument } from './blank-document-defaults.js';
 import { assertSafeHwpxEntryNames } from "./hwpx-open-boundary.js";
 import { isCheckedExternalSibling, siblingDocument } from "./core-runtime.js";
 import { verifySavedHwpxMetadata, verifySavedHwpxBytes } from "./saved-hwpx-verification.js";
 import { RhwpAdapter, UnsupportedTableOwner } from "./adapter.js";
 import { finishResponsiveWork } from "./responsive-work.js";
-import { exportCheckedDocumentHwpx, inspectHwpxPreservation, rememberHwpxPreservation } from "./adapter-save.js";
+import { exportDocumentHwpx } from "./adapter-save.js";
 import { projectSemanticParts } from "./adapter-semantic.js";
 import { Interaction } from "./interaction.js";
 import { start } from "./model.js";
+import { replaceEditorDocument } from "./editor-document-replacement.js";
 import { connectFileMenu } from "./file-menu-adapter.js";
 
 type Download = {
@@ -31,6 +32,7 @@ type Download = {
     | "superseded";
 };
 type SavedFile = Pick<File, "name" | "size" | "arrayBuffer">;
+export type UnsavedChoice = "save" | "keep" | "continue" | "cancel";
 const trackedChangesRestriction = "변경 추적 이력이 있는 문서입니다. HWPX 사본 다운로드로 원본을 받을 수 있습니다";
 const trackedSaveRestriction = "변경 추적 이력이 있는 문서는 편집·저장할 수 없습니다. HWPX 사본 다운로드로 원본을 받아 주세요.";
 export type NativeSaveTarget = {
@@ -46,7 +48,9 @@ type UI = {
   standalone: boolean;
   localWorkspace?: boolean;
   confirm: (message: string) => boolean;
-  chooseUnsaved?: (message: string) => Promise<"save" | "continue" | "cancel">;
+  chooseUnsaved?: (message: string) => Promise<UnsavedChoice>;
+  keepWorkingCopy?: () => Promise<boolean>;
+  prepareDiscard?: () => () => void;
   prompt: (message: string, name: string) => string | null;
   pickSaveTarget?: (suggestedName: string) => Promise<NativeSaveTarget | null>;
   download: (bytes: Uint8Array, name: string, requestId: string) => void;
@@ -83,7 +87,7 @@ export class FileLifecycle {
   private nativeTarget: { documentId: string; target: NativeSaveTarget } | null = null;
   private request: Download | null = null;
   private exported: Uint8Array | null = null;
-  private trackedOriginal: { documentId: string; bytes: Uint8Array } | null = null;
+  private restrictedOriginal: { documentId: string; bytes: Uint8Array } | null = null;
   private continuation: {
     requestId: string;
     documentId: string;
@@ -134,7 +138,7 @@ export class FileLifecycle {
       console.error(error, reportError);
     }
   }
-  private async run(action: () => boolean | Promise<boolean>) {
+  private async run(action: () => boolean | Promise<boolean>, onError?: (error: unknown) => void) {
     if (this.adapter.transientEdit) {
       this.reportError(Error("한글 조합을 확정하거나 취소한 뒤 파일 작업을 진행하세요."));
       return false;
@@ -145,7 +149,8 @@ export class FileLifecycle {
       this.ui.change(false);
       return await action();
     } catch (error) {
-      this.reportError(error);
+      if (onError) onError(error);
+      else this.reportError(error);
       return false;
     } finally {
       this.busy = false;
@@ -162,6 +167,7 @@ export class FileLifecycle {
     action: () => boolean | Promise<boolean>,
     beforeDecision?: () => Promise<void>,
     beforeDeferredSave?: () => void,
+    onError?: (error: unknown) => void,
   ) {
     return this.run(async () => {
       if (!this.ui.standalone || this.continuation) return false;
@@ -182,7 +188,7 @@ export class FileLifecycle {
           );
         if (choice === "cancel") return false;
         if (choice === "save") {
-          if (!await this.prepareSave(false)) return false;
+          if (!await this.prepareSave(false, !this.ui.pickSaveTarget)) return false;
           if (!this.pending) {
             // Native read-back may finish the save immediately (e.g. repair of
             // an opened filename). Continue only the same, now-clean document.
@@ -201,13 +207,27 @@ export class FileLifecycle {
           this.ui.change(false);
           return false; // A download request is not a committed replacement.
         }
+        if (choice === "keep") {
+          if (!await this.ui.keepWorkingCopy?.()) return false;
+          return documentId === this.adapter.documentId && revision === this.adapter.revision
+            ? action() : false;
+        }
         if (choice !== "continue") return false;
+        const discard = this.ui.prepareDiscard?.();
+        const replaced = await action();
+        if (replaced) discard?.();
+        return replaced;
       }
       return action();
-    });
+    }, onError);
   }
   private classifyReplacement(next: RhwpAdapter) {
-    const info = next.call<{ hwpxHasTrackedChanges?: boolean }>("getDocumentInfo");
+    const info = next.call<{ hwpxHasTrackedChanges?: boolean; hwpxUnreadableSection?: number }>("getDocumentInfo");
+    if (info.hwpxUnreadableSection) {
+      next.viewerOnlyReason = `${info.hwpxUnreadableSection}번 구역을 읽지 못했습니다. 읽을 수 있는 내용만 표시합니다`;
+      next.scope = "readonly";
+      return;
+    }
     if (info.hwpxHasTrackedChanges === true) {
       next.viewerOnlyReason = trackedChangesRestriction;
       next.scope = "readonly";
@@ -230,7 +250,7 @@ export class FileLifecycle {
       next.semantic();
     }
     admit?.(next);
-    next.rect(start());
+    if (!next.viewerOnlyReason) next.rect(start());
   }
   private async validateLocalReplacement(next: RhwpAdapter) {
     this.classifyReplacement(next);
@@ -240,7 +260,7 @@ export class FileLifecycle {
       this.enterViewerOnly(next, error);
       await finishResponsiveWork(projectSemanticParts.call(next, "validate-open"));
     }
-    next.rect(start());
+    if (!next.viewerOnlyReason) next.rect(start());
   }
   private replacementCandidate(bytes: Uint8Array | undefined, admit?: (next: RhwpAdapter)=>void, prepared?: RhwpAdapter["doc"], localOpen = false) {
     const doc = prepared ?? siblingDocument(this.adapter.doc, bytes);
@@ -252,7 +272,7 @@ export class FileLifecycle {
       // Ordinary local opens check page dimensions and render the visible pages
       // at adoption, while the original document can still be restored.
       if (!localOpen) for (let page = 0; page < next.pageCount; page++) {
-        next.call("getPageInfo", page);
+        next.readLayout("getPageInfo", page);
         doc.renderPageSvg(page);
       }
       return next;
@@ -265,33 +285,49 @@ export class FileLifecycle {
     this.adoptCandidate(this.replacementCandidate(bytes, admit, prepared), name, unsaved, prepareCommands);
   }
   private adoptCandidate(next: RhwpAdapter, name: string, unsaved = false, prepareCommands?:()=>void, localOpen = false, originalBytes?: Uint8Array) {
-    let adopted = false;
+    const files = {
+      filename: this.filename,
+      request: this.request,
+      exported: this.exported,
+      restrictedOriginal: this.restrictedOriginal,
+      notice: this.notice,
+      continuation: this.continuation,
+      nativeTarget: this.nativeTarget,
+    };
+    this.localOpenPaint = localOpen;
     try {
-      const state = this.captureReplacementState();
-      const { old, files, history } = state;
-      const retireDetached=history.retireDetachedDocuments();
-      try {
-        this.localOpenPaint=localOpen;
-        this.adoptReplacement(next, name, history, unsaved, prepareCommands, originalBytes);
-      } catch (error) {
-        this.localOpenPaint=false;
-        this.restoreReplacementState(state);
-        throw error;
-      }
-      adopted = true;
-      if (files.request?.status === "awaiting-file")
-        files.request.status = "superseded";
-      // The replacement is committed. Freeing Core also releases its native
-      // snapshots; cleanup errors must not be reported as replacement failure.
-      try {
-        old.doc.free();
-        retireDetached();
-      } catch (error) {
-        this.reportError(error);
-      }
+      replaceEditorDocument(this.editor, next, {
+        unsaved,
+        initialize: () => {
+          this.filename = name;
+          this.nativeTarget = null;
+          this.request = null;
+          this.exported = null;
+          this.restrictedOriginal = originalBytes?.[0] === 0x50 && originalBytes[1] === 0x4b &&
+            this.ui.standalone && next.viewerOnlyReason
+            ? { documentId: next.documentId, bytes: originalBytes }
+            : null;
+          this.continuation = null;
+          this.notice = next.viewerOnlyReason
+            ? `읽기 전용 표시 · ${next.viewerOnlyReason} · 편집/저장 미지원, 원본 파일 보존`
+            : "";
+          prepareCommands?.();
+          this.ui.change(true);
+        },
+        restore: () => {
+          this.localOpenPaint = false;
+          Object.assign(this, files);
+          try { this.ui.change(true); }
+          catch (error) { this.reportError(error); }
+        },
+        committed: () => {
+          if (files.request?.status === "awaiting-file")
+            files.request.status = "superseded";
+        },
+        cleanupError: error => this.reportError(error),
+      });
     } finally {
-      this.localOpenPaint=false;
-      if (!adopted) next.doc.free();
+      this.localOpenPaint = false;
     }
   }
   /** Internal AI integration: request policy/digest/current state were checked
@@ -320,7 +356,7 @@ export class FileLifecycle {
       if (next.pageCount > maxPages) throw Error("연결 문서의 페이지 한도를 넘었습니다.");
       if (scope === "readonly") {
         next.scope = "readonly";
-        next.viewerOnlyReason = "연결된 서비스에서 읽기 전용으로 열었습니다";
+        next.viewerOnlyReason ??= "연결된 서비스에서 읽기 전용으로 열었습니다";
       } else {
         if (next.scope !== "edit" || next.documentLocked)
           throw Error("이 문서는 읽기 전용으로만 열 수 있습니다.");
@@ -328,63 +364,11 @@ export class FileLifecycle {
       }
     }, prepared);
   }
-  private captureReplacementState() {
-      const old = { ...this.adapter };
-      const restoreSelection = this.editor.captureDocumentReplacementRollback();
-      const files = {
-        filename: this.filename,
-        request: this.request,
-        exported: this.exported,
-        trackedOriginal: this.trackedOriginal,
-        notice: this.notice,
-        continuation: this.continuation,
-        nativeTarget: this.nativeTarget,
-      };
-      const history = this.editor.history;
-      const restoreHistory = history.captureDocumentReplacementRollback();
-    return { old, restoreSelection, files, history, restoreHistory };
-  }
-  private adoptReplacement(next: RhwpAdapter, name: string, history: Interaction["history"], unsaved = false, prepareCommands?:()=>void, originalBytes?: Uint8Array) {
-        // Detach old snapshots without discarding them. UI sees only candidate
-        // history; the old Core remains its snapshots' owner until commit.
-        history.detachForDocumentReplacement(true);
-        Object.assign(this.adapter, {
-          doc: next.doc,
-          documentId: next.documentId,
-          documentLocked: next.documentLocked,
-          scope: next.scope,
-          viewerOnlyReason: next.viewerOnlyReason,
-          revision: 0,
-          savedRevision: unsaved ? -1 : 0,
-        });
-        this.editor.reset();
-        this.filename = name;
-        this.nativeTarget = null;
-        this.request = null;
-        this.exported = null;
-        this.trackedOriginal = originalBytes && this.ui.standalone &&
-          next.viewerOnlyReason === trackedChangesRestriction
-          ? { documentId: next.documentId, bytes: originalBytes }
-          : null;
-        this.continuation = null;
-        this.notice = next.viewerOnlyReason ? `읽기 전용 표시 · ${next.viewerOnlyReason} · 편집/저장 미지원, 원본 파일 보존` : "";
-        // Build through the real editor while the old document and snapshot
-        // arrays are still retained for replacement rollback. No blank paint.
-        prepareCommands?.();
-        this.ui.change(true);
 
-  }
-  private restoreReplacementState(state: ReturnType<FileLifecycle["captureReplacementState"]>) {
-    const { old, restoreSelection, files, restoreHistory } = state;
-        Object.assign(this.adapter, old);
-        restoreSelection();
-        Object.assign(this, files);
-        restoreHistory();
-        try {
-          this.ui.change(true);
-        } catch (paintError) {
-          this.reportError(paintError);
-        }
+  private get originalSaveRestriction() {
+    return this.adapter.viewerOnlyReason === trackedChangesRestriction
+      ? trackedSaveRestriction
+      : "원본을 보존하기 위해 읽기 전용 문서는 저장할 수 없습니다. HWPX 사본을 내려받으세요.";
   }
 
   private emptyDocument(message: string) {
@@ -403,7 +387,18 @@ export class FileLifecycle {
       "저장하지 않은 변경을 버리고 현재 문서를 닫으시겠습니까?",
     );
   }
-  open(file: Pick<File, "name" | "size" | "arrayBuffer">) {
+  open(file: SavedFile) {
+    return this.openLocal(file);
+  }
+  openRecovery(name: string, bytes: Uint8Array, adopted: () => void) {
+    let filename = "복구한 문서.hwpx";
+    try {
+      const base = hwpxName(name).slice(0, -5);
+      filename = hwpxName(base.endsWith(" (복구)") ? base : base + " (복구)");
+    } catch { /* The recovery file can still be opened under the default name. */ }
+    return this.openLocal(new File([new Uint8Array(bytes)], filename), adopted);
+  }
+  private openLocal(file: SavedFile, recovered?: () => void) {
     let bytes: Uint8Array;
     let candidate: RhwpAdapter | undefined;
     const release = () => {
@@ -411,16 +406,9 @@ export class FileLifecycle {
       candidate = undefined;
       next?.doc.free();
     };
-    return this.transition(
-      "현재 변경을 닫고 선택한 문서를 여시겠습니까?",
-      () => {
-        const next = candidate ?? this.replacementCandidate(bytes, undefined, undefined, true);
-        candidate = undefined; // adoptCandidate now owns the handle, including rollback.
-        this.adoptCandidate(next, file.name, false, undefined, true, bytes);
-        return true;
-      },
-      async () => {
-        const { documentId, revision } = this.adapter;
+    const prepare = async () => {
+      const { documentId, revision } = this.adapter;
+      if (!bytes) {
         if (file.size > 30 * 1024 * 1024)
           throw Error("PoC 파일 크기 제한은 30 MB입니다.");
         bytes = new Uint8Array(await file.arrayBuffer());
@@ -429,24 +417,36 @@ export class FileLifecycle {
         if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
           throw Error("파일을 읽는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
         assertSafeHwpxEntryNames(bytes);
-        const metadata = this.ui.standalone ? await inspectHwpxPreservation(bytes) : undefined;
-        if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
-          throw Error("파일을 검사하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
-        const doc = siblingDocument(this.adapter.doc, bytes);
+      }
+      const doc = siblingDocument(this.adapter.doc, bytes);
+      try { candidate = new RhwpAdapter(doc); }
+      catch (error) { doc.free(); throw error; }
+      await this.ui.loadOpenFonts?.(candidate);
+      if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
+        throw Error("글꼴을 준비하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
+      this.ui.prepareDisplay?.(candidate, true);
+      // Reject malformed structure before asking about the old document.
+      await this.validateLocalReplacement(candidate);
+      if (recovered && candidate.scope !== "edit")
+        throw Error("이 복구본을 편집 가능한 문서로 열 수 없습니다.");
+      if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
+        throw Error("문서를 검사하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
+    };
+    return this.transition(
+      "현재 변경을 닫고 선택한 문서를 여시겠습니까?",
+      async () => {
         try {
-          if (metadata) rememberHwpxPreservation(doc, metadata);
-          candidate = new RhwpAdapter(doc);
+          if (!candidate) await prepare();
+          const next = candidate!;
+          candidate = undefined; // adoptCandidate now owns the handle, including rollback.
+          this.adoptCandidate(next, file.name, !!recovered, undefined, true, bytes);
+          recovered?.();
+          return true;
+        } finally {
+          release();
         }
-        catch (error) { doc.free(); throw error; }
-        await this.ui.loadOpenFonts?.(candidate);
-        if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
-          throw Error("글꼴을 준비하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
-        this.ui.prepareDisplay?.(candidate, true);
-        // Reject malformed structure before asking about the old document.
-        await this.validateLocalReplacement(candidate);
-        if (documentId !== this.adapter.documentId || revision !== this.adapter.revision)
-          throw Error("문서를 검사하는 동안 현재 문서가 변경되었습니다. 다시 열기를 선택하세요.");
       },
+      prepare,
       // A deferred download confirmation may stay pending indefinitely.
       // Keep only the imported bytes after handing off to that continuation.
       release,
@@ -471,20 +471,33 @@ export class FileLifecycle {
   /** @internal Markdown command import retains one real Undo entry on the
    * newly opened blank. Existing unsaved-file choice/replacement rollback owns
    * original files, History, selection and pending Save tokens throughout. */
-  openMarkdownCommands(request:MarkdownRequest,expected:{documentId:string;expectedRevision:number}){
-    const draft=structuredClone(request),identity={...expected};
-    const validate=()=>{
-      if(!this.ui.standalone||this.adapter.scope!=='edit')throw Error('편집 가능한 독립 창에서 가져오세요.');
-      if(this.adapter.documentId!==identity.documentId||this.adapter.revision!==identity.expectedRevision)throw Error('마크다운을 준비하는 동안 문서가 변경되었습니다. 다시 가져오세요.');
+  openMarkdownCommands(
+    plan: MarkdownPlan,
+    expected: {documentId: string; expectedRevision: number},
+    adopted: () => void,
+    onError: (error: unknown) => void,
+  ) {
+    const draft = structuredClone(plan);
+    const identity = {...expected};
+    const validate = () => {
+      if (!this.ui.standalone || this.adapter.scope !== "edit") throw Error("편집 가능한 독립 창에서 가져오세요.");
+      if (this.adapter.documentId !== identity.documentId || this.adapter.revision !== identity.expectedRevision)
+        throw Error("마크다운을 준비하는 동안 문서가 변경되었습니다. 다시 가져오세요.");
     };
-    return this.transition('현재 문서의 변경을 저장하고 Markdown 문서를 여시겠습니까?',()=>{
-      validate();this.replace(undefined,'새 문서.hwpx',true,()=>{applyMarkdownCommands(this.editor,draft);});return true;
-    },async()=>{
+    return this.transition("현재 문서의 변경을 저장하고 Markdown 문서를 여시겠습니까?", () => {
       validate();
-      // Reject malformed/unsafe documents before Save/Discard is offered.
-      // Isolated preflight is disposed; no snapshot/resource crosses modules.
-      const checked=composeMarkdownHwpx(this.adapter.doc,draft);assertSafeHwpxEntryNames(checked.bytes);validate();
-    });
+      this.replace(undefined, "새 문서.hwpx", true, () => {
+        applyDocumentPlan(this.editor, draft, true);
+      });
+      adopted();
+      return true;
+    }, async () => {
+      validate();
+      // Both preflight and the live Undo entry use the same approved plan.
+      const checked = composeDocumentPlan(this.editor, draft, true);
+      assertSafeHwpxEntryNames(checked.bytes);
+      validate();
+    }, undefined, onError);
   }
   get transitionBlockReason() {
     if (this.busy) return "BUSY";
@@ -492,22 +505,22 @@ export class FileLifecycle {
   }
 
   get saveBlockReason() {
-    return this.canDownloadTrackedOriginal ? "READONLY" : this.transitionBlockReason;
+    return this.canDownloadOriginal ? "READONLY" : this.transitionBlockReason;
   }
 
   save(as = false) {
     const reason = this.saveBlockReason;
     if (reason) {
-      if (reason === "READONLY" && !this.busy) this.reportError(Error(trackedSaveRestriction));
+      if (reason === "READONLY" && !this.busy) this.reportError(Error(this.originalSaveRestriction));
       return Promise.resolve(false);
     }
     return this.run(() => this.prepareSave(as));
   }
-  get canDownloadTrackedOriginal() {
-    return this.ui.standalone && this.trackedOriginal?.documentId === this.adapter.documentId;
+  get canDownloadOriginal() {
+    return this.ui.standalone && this.restrictedOriginal?.documentId === this.adapter.documentId;
   }
   get canDownloadCopy() {
-    if (this.canDownloadTrackedOriginal) return true;
+    if (this.canDownloadOriginal) return true;
     const r = this.request;
     return this.ui.standalone && r?.documentId === this.adapter.documentId && r.status === "failed" &&
       r.failure !== undefined && r.failure !== "export";
@@ -515,18 +528,18 @@ export class FileLifecycle {
   downloadCopy() {
     if (!this.ui.standalone || this.continuation) return Promise.resolve(false);
     return this.run(() => {
-      if (this.trackedOriginal?.documentId === this.adapter.documentId) {
+      if (this.restrictedOriginal?.documentId === this.adapter.documentId) {
         const name = hwpxName(this.filename);
-        this.ui.download(this.trackedOriginal.bytes, name, `${this.adapter.documentId}:original:${++this.sequence}`);
-        this.notice = "변경 추적 이력이 그대로 포함된 원본 사본을 내려받았습니다.";
+        this.ui.download(this.restrictedOriginal.bytes, name, `${this.adapter.documentId}:original:${++this.sequence}`);
+        this.notice = "원본과 같은 파일을 사본으로 내려받았습니다.";
         return true;
       }
       return this.prepareSave(false, true);
     });
   }
   private async prepareSave(as: boolean, copy = false) {
-    if (this.canDownloadTrackedOriginal)
-      throw Error(trackedSaveRestriction);
+    if (this.canDownloadOriginal)
+      throw Error(this.originalSaveRestriction);
     if (as && !this.ui.standalone) return false;
     // Every accepted attempt supersedes the old token, including prompt cancel
     // and export/dispatch failure. Never fall back to a previous download.
@@ -582,9 +595,7 @@ export class FileLifecycle {
       if (!current())
         throw Error("저장 창이 열린 동안 문서 또는 저장 요청이 변경되었습니다. 다시 저장하세요.");
       phase = "export";
-      const { bytes, documentId, revision } = this.ui.standalone
-        ? await exportCheckedDocumentHwpx(this.adapter, current)
-        : this.adapter.exportChecked();
+      const { bytes, documentId, revision } = await exportDocumentHwpx(this.adapter, current);
       Object.assign(request, { filename: name, documentId, revision });
       // Keep a private copy of the checked export, independent of the transport.
       this.exported = this.ui.standalone ? new Uint8Array(bytes) : null;
